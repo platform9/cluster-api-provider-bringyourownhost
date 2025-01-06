@@ -1,0 +1,22 @@
+//agent/main.go
+func getNamespace() string {
+
+	filePath := "/namespace" // Replace with your file path
+
+	// Check if the file exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return "default"
+	} 
+	
+	// File exists, read its contents
+	content, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		return "default"
+	}
+	
+	ns :=string(content)
+	ns = ns[:len(ns)-1] 
+	return ns
+}
+
+	flag.StringVar(&namespace, "namespace",getNamespace(), "Namespace in the management cluster where you would like to register this host")
