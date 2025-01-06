@@ -1,4 +1,4 @@
-# Ensure Make is run with bash shell as some syntax below is bash-specific
+#Ensure Make is run with bash shell as some syntax below is bash-specific
 SHELL:=/usr/bin/env bash
 
 # Define registries
@@ -22,7 +22,7 @@ E2E_CONF_FILE  ?= ${REPO_ROOT}/test/e2e/config/provider.yaml
 ARTIFACTS ?= ${REPO_ROOT}/_artifacts
 SKIP_RESOURCE_CLEANUP ?= false
 USE_EXISTING_CLUSTER ?= false
-EXISTING_CLUSTER_KUBECONFIG_PATH ?=
+EXISTING_CLUSTER_BYOHOSTCONFIG_PATH ?=
 GINKGO_NOCOLOR ?= false
 
 TOOLS_DIR := $(REPO_ROOT)/hack/tools
@@ -146,7 +146,7 @@ test-e2e: take-user-input docker-build prepare-byoh-docker-host-image $(GINKGO) 
 	    -e2e.artifacts-folder="$(ARTIFACTS)" \
 	    -e2e.config="$(E2E_CONF_FILE)" \
 	    -e2e.skip-resource-cleanup=$(SKIP_RESOURCE_CLEANUP) -e2e.use-existing-cluster=$(USE_EXISTING_CLUSTER) \
-		-e2e.existing-cluster-kubeconfig-path=$(EXISTING_CLUSTER_KUBECONFIG_PATH)
+		-e2e.existing-cluster-kubeconfig-path=$(EXISTING_CLUSTER_BYOHOSTCONFIG_PATH)
 
 cluster-templates: kustomize cluster-templates-v1beta1
 
@@ -258,6 +258,92 @@ build-metadata-yaml:
 build-host-agent-binary: host-agent-binaries
 	cp bin/byoh-hostagent-linux-amd64 $(RELEASE_DIR)/byoh-hostagent-linux-amd64
 
+
+##########################################################################
+check-env:
+	$(shell ./check_env.sh)
+
+
+BUILD_DIR=$(shell pwd)/build
+$(BUILD_DIR):
+	mkdir -p $@
+
+PF9_BYOHOST_SRCDIR := $(BUILD_DIR)/pf9-byohost
+$(PF9_BYOHOST_SRCDIR):
+	echo "make PF9_BYOHOST_SRCDIR $(PF9_BYOHOST_SRCDIR)"
+	rm -fr $@
+	mkdir -p $@
+
+AGENT_SRC_DIR := $(REPO_ROOT)
+RPM_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/rpmsrc
+DEB_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/debsrc
+COMMON_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/common
+PF9_BYOHOST_DEB_FILE := $(PF9_BYOHOST_SRCDIR)/debsrc/pf9-byohost-agent.deb
+RPMBUILD_DIR := $(PF9_BYOHOST_SRCDIR)/rpmsrc
+PF9_BYOHOST_RPM_FILE := $(PF9_BYOHOST_SRCDIR)/rpmsrc/pf9-byohost-agent.rpm
+DEB_DEP_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/dependencies
+
+$(RPM_SRC_ROOT): | $(COMMON_SRC_ROOT)
+	echo "make RPM_SRC_ROOT: $(RPM_SRC_ROOT)"
+	cp -a $(COMMON_SRC_ROOT) $(RPM_SRC_ROOT)
+
+$(PF9_BYOHOST_RPM_FILE): |$(RPM_SRC_ROOT)
+	echo "make PF9_BYOHOST_RPM_FILE $(PF9_BYOHOST_RPM_FILE) "
+	rpmbuild -bb \
+	    --define "_topdir $(RPMBUILD_DIR)"  \
+	    --define "_src_dir $(RPM_SRC_ROOT)"  \
+	    --define "_githash $(AGENT_SRC_DIR)/scripts/pf9-byohost.spec "
+	./$(AGENT_SRC_DIR)/scripts/sign_packages.sh $(PF9_BYOHOST_RPM_FILE)
+	md5sum $(PF9_BYOHOST_RPM_FILE) | cut -d' ' -f 1  > $(PF9_BYOHOST_RPM_FILE).md5
+
+build-host-agent-rpm:  $(PF9_BYOHOST_RPM_FILE)
+	echo "make agent-rpm pf9_byohost_rpm_file = $(PF9_BYOHOST_RPM_FILE)"
+
+#########################################################################
+$(COMMON_SRC_ROOT): build-host-agent-binary
+	echo "Building COMMON_SRC_ROOT"
+	mkdir -p $(COMMON_SRC_ROOT)
+	echo "BUILDING COMMON_SRC_ROOT/binary COPING binary pf9-byoh-hostagent-linux-amd64"
+	mkdir -p $(COMMON_SRC_ROOT)/binary
+	cp $(RELEASE_DIR)/byoh-hostagent-linux-amd64 $(COMMON_SRC_ROOT)/binary/pf9-byoh-hostagent-linux-amd64
+	echo "BUILDING dir for pf9-byohost-service , COPING service pf9-byoh-agent.service "
+	mkdir -p $(COMMON_SRC_ROOT)/lib/systemd/system/
+	cp $(AGENT_SRC_DIR)/service/pf9-byohostagent.service $(COMMON_SRC_ROOT)/lib/systemd/system/pf9-byohost-agent.service
+
+$(DEB_SRC_ROOT): | $(COMMON_SRC_ROOT)
+	cp -a  $(COMMON_SRC_ROOT) $(DEB_SRC_ROOT)
+
+$(PF9_BYOHOST_DEB_FILE): $(DEB_SRC_ROOT)
+	fpm -t deb -s dir -n pf9-byohost-agent \
+	 --description "Platform9 Bring Your Own Host deb package" \
+	 --license "Commercial" --architecture all --url "http://www.platform9.net" --vendor Platform9 \
+	 -d socat -d ethtool -d ebtables -d conntrack \
+	 --after-install $(AGENT_SRC_DIR)/scripts/pf9-byohost-agent-after-install.sh \
+	 --before-remove $(AGENT_SRC_DIR)/scripts/pf9-byohost-agent-before-remove.sh \
+	 --after-remove $(AGENT_SRC_DIR)/scripts/pf9-byohost-agent-after-remove.sh \
+	 -p $(PF9_BYOHOST_DEB_FILE) \
+	 -C $(DEB_SRC_ROOT)/ .
+	./sign_packages_deb.sh $(PF9_BYOHOST_DEB_FILE)
+	md5sum $(PF9_BYOHOST_DEB_FILE) | cut -d' ' -f 1 > $(PF9_BYOHOST_DEB_FILE).md5
+
+build-host-agent-deb: $(PF9_BYOHOST_DEB_FILE)
+
+
+$(DEB_DEP_SRC_ROOT):	build-host-agent-deb
+			echo "\n Building DEB for dependency package "
+			mkdir -p $(DEB_DEP_SRC_ROOT)
+			cp $(PF9_BYOHOST_DEB_FILE) $(DEB_DEP_SRC_ROOT)/.
+			echo "Successfully copied byoh-sgent deb pkg\n"
+			cp $(AGENT_SRC_DIR)/scripts/Dockerfile $(DEB_DEP_SRC_ROOT)/Dockerfile
+			echo "Successfully copied Dockerfile"
+			cp $(AGENT_SRC_DIR)/scripts/install.sh $(DEB_DEP_SRC_ROOT)/install.sh
+			echo "Successfully copied install.sh"
+
+
+bundle-dockerfile-debpkg-install : | $(DEB_DEP_SRC_ROOT)
+	echo $(DEB_DEP_SRC_ROOT)
+
+########################################################################
 
 # go-get-tool will 'go get' any package $2 and install it to $1.
 PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))

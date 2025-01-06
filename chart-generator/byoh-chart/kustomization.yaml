@@ -1,5 +1,6 @@
 # Adds namespace to all resources.
 namespace: '{{ .Release.Namespace }}'
+
 # Value of this field is prepended to the
 # names of all resources, e.g. a deployment named
 # "wordpress" becomes "alices-wordpress".
@@ -12,16 +13,17 @@ commonLabels:
   cluster.x-k8s.io/provider: "infrastructure-byoh"
 
 bases:
-- ../crd
-- ../rbac
-- ../manager
-- ../webhook
-- ../certmanager
+- ../../config/crd
+- ../../config/rbac
+- ../../config/manager
+- ../../config/webhook
+- ../../config/certmanager
 # [PROMETHEUS] To enable prometheus monitor, uncomment all sections with 'PROMETHEUS'.
 #- ../prometheus
 
+
 patchesStrategicMerge:
-# Protect the /metrics endpoint by putting it behind auth.
+#Protect the /metrics endpoint by putting it behind auth.
 # If you want your controller-manager to expose the /metrics
 # endpoint w/o any authn/z, please comment the following line.
 - manager_auth_proxy_patch.yaml

@@ -86,7 +86,7 @@ func setupflags() {
 	// clear any discard loggers set by dependecies
 	klog.ClearLogger()
 
-	flag.StringVar(&namespace, "namespace", "default", "Namespace in the management cluster where you would like to register this host")
+	flag.StringVar(&namespace, "namespace" ,"default","Namespace in the management cluster where you would like to register this host")
 	flag.Int64Var(&certExpiryDuration, "certExpiryDuration", registration.ExpirationSeconds, "Duration (in seconds) for the expiration of the host certificates")
 	flag.Var(&labels, "label", "labels to attach to the ByoHost CR in the form labelname=labelVal for e.g. '--label site=apac --label cores=2'")
 	flag.StringVar(&metricsbindaddress, "metricsbindaddress", ":8080", "metricsbindaddress is the TCP address that the controller should bind to for serving prometheus metrics.It can be set to \"0\" to disable the metrics serving")
