@@ -12,7 +12,7 @@ cp /lib/systemd/system/pf9-byohost-agent.service  /etc/systemd/system/pf9-byohos
 mkdir -p /etc/pf9-byohost-agent.service.d/
 touch /etc/pf9-byohost-agent.service.d/pf9-byohost-agent.conf
 echo "NAMESPACE=default" > /etc/pf9-byohost-agent.service.d/pf9-byohost-agent.conf
-echo "BOOTSTRAP_KUBECONFIG=/etc/pf9-byohost/bootstrap-kubeconfig.yaml" >> /etc/pf9-byohost-agent.service.d/pf9-byohost-agent.conf 
+echo "BOOTSTRAP_KUBECONFIG=/etc/pf9-byohost-agent.service.d/bootstrap-kubeconfig.yaml" >> /etc/pf9-byohost-agent.service.d/pf9-byohost-agent.conf 
 
 
 systemctl daemon-reload
