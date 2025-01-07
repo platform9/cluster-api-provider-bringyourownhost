@@ -55,5 +55,13 @@ else
     echo "Log files already removed or not found" | tee -a "$LOG_FILE"
 fi
 
+if [-f /etc/pf9-byohost* ]; then
+	echo "Removing Pf9 conf files" | tee -a "$LOG_FILE"
+	rm -f /etc/pf9*
+	echo "conf files Removed Successfully" | tee -a "$LOG_FILE"
+else 
+	echo "Conf files already removed or not found " | tee -a "$LOG_FILE"
+fi
+
 echo "Uninstallation of pf9-byoh-hostagent completed successfully" | tee -a "$LOG_FILE"
 
