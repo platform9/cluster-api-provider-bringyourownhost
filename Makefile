@@ -1,5 +1,5 @@
 
-# Ensure Make is run with bash shell as some syntax below is bash-specific
+#Ensure Make is run with bash shell as some syntax below is bash-specific
 SHELL:=/usr/bin/env bash
 
 # Define registries
@@ -292,8 +292,8 @@ $(PF9_BYOHOST_RPM_FILE): |$(RPM_SRC_ROOT)
 	rpmbuild -bb \
 	    --define "_topdir $(RPMBUILD_DIR)"  \
 	    --define "_src_dir $(RPM_SRC_ROOT)"  \
-	    --define "_githash $(AGENT_SRC_DIR)/pf9-byohost.spec "
-	./sign_packages.sh $(PF9_BYOHOST_RPM_FILE)
+	    --define "_githash $(AGENT_SRC_DIR)/scripts/pf9-byohost.spec "
+	./$(AGENT_SRC_DIR)/scripts/sign_packages.sh $(PF9_BYOHOST_RPM_FILE)
 	md5sum $(PF9_BYOHOST_RPM_FILE) | cut -d' ' -f 1  > $(PF9_BYOHOST_RPM_FILE).md5
 
 build-host-agent-rpm:  $(PF9_BYOHOST_RPM_FILE)
@@ -308,7 +308,7 @@ $(COMMON_SRC_ROOT): build-host-agent-binary
 	cp $(RELEASE_DIR)/byoh-hostagent-linux-amd64 $(COMMON_SRC_ROOT)/binary/pf9-byoh-hostagent-linux-amd64
 	echo "BUILDING dir for pf9-byohost-service , COPING service pf9-byoh-agent.service "
 	mkdir -p $(COMMON_SRC_ROOT)/lib/systemd/system/
-	cp $(AGENT_SRC_DIR)/pf9-byohostagent.service $(COMMON_SRC_ROOT)/lib/systemd/system/pf9-byohost-agent.service
+	cp $(AGENT_SRC_DIR)/service/pf9-byohostagent.service $(COMMON_SRC_ROOT)/lib/systemd/system/pf9-byohost-agent.service
 
 $(DEB_SRC_ROOT): | $(COMMON_SRC_ROOT)
 	cp -a  $(COMMON_SRC_ROOT) $(DEB_SRC_ROOT)
@@ -318,12 +318,12 @@ $(PF9_BYOHOST_DEB_FILE): $(DEB_SRC_ROOT)
 	 --description "Platform9 Bring Your Own Host deb package" \
 	 --license "Commercial" --architecture all --url "http://www.platform9.net" --vendor Platform9 \
 	 -d socat -d ethtool -d ebtables -d conntrack \
-	 --after-install $(AGENT_SRC_DIR)/pf9-byohost-agent-after-install.sh \
-	 --before-remove $(AGENT_SRC_DIR)/pf9-byohost-agent-before-remove.sh \
-	 --after-remove $(AGENT_SRC_DIR)/pf9-byohost-agent-after-remove.sh \
+	 --after-install $(AGENT_SRC_DIR)/scripts/pf9-byohost-agent-after-install.sh \
+	 --before-remove $(AGENT_SRC_DIR)/scripts/pf9-byohost-agent-before-remove.sh \
+	 --after-remove $(AGENT_SRC_DIR)/scripts/pf9-byohost-agent-after-remove.sh \
 	 -p $(PF9_BYOHOST_DEB_FILE) \
 	 -C $(DEB_SRC_ROOT)/ .
-	./sign_packages_deb.sh $(PF9_BYOHOST_DEB_FILE)
+	./$(AGENT_SRC_DIR)/scripts/sign_packages_deb.sh $(PF9_BYOHOST_DEB_FILE)
 	md5sum $(PF9_BYOHOST_DEB_FILE) | cut -d' ' -f 1 > $(PF9_BYOHOST_DEB_FILE).md5
 
 build-host-agent-deb: $(PF9_BYOHOST_DEB_FILE)
