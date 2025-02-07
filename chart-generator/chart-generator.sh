@@ -11,8 +11,10 @@ RED='\033[1;31m'
 YELLOW='\033[1;33m'
 BLUE='\033[1;34m'
 NC='\033[0m'
-REPO=""
-BIN_PATH="/build/bin/"
+script=$(realpath "$0")
+scriptpath=$(dirname "$script")
+REPO="$scriptpath/.."
+BIN_PATH="$REPO/build/bin"
 WORKLOAD_CHART="byoh-chart"
 log::info() { echo -e "${BLUE}[INFO] $*${NC}" >&2; }
 log::warn() { echo -e "${YELLOW}[WARN] $*${NC}" >&2; }
@@ -20,7 +22,7 @@ log::fatal() { echo -e "${RED}[FATAL] $*${NC}" >&2 && exit 1; }
 log::error() { echo -e "${RED}[ERROR] $*${NC}" >&2; }
 
 usage() {
-  echo "$0 <-r release-version> <-e byoh-controller-image>"
+  echo "$0 <-r release-version> <-e byoh-image>"
   echo "Environment variables:"
   echo "INSTALL_BINARIES=1 : If this environment variable is set then this script will **attempt** to install relevant binaries"
   echo "DEBUG=1            : To enable debug"
@@ -33,7 +35,21 @@ install_yq() {
   fi
   log::warn "Attempting to install 'yq' binary"
   mkdir -p $BIN_PATH
-  wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O $BIN_PATH/yq && chmod +x $BIN_PATH/yq
+  url=""
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    case $(uname -m) in
+      x86_64)
+        url="https://github.com/mikefarah/yq/releases/latest/download/yq_darwin_amd64"
+      ;;
+      arm64)
+        url="https://github.com/mikefarah/yq/releases/latest/download/yq_darwin_arm64"
+      ;;
+    esac
+  else
+    url="https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64"
+  fi
+  wget $url -O $BIN_PATH/yq && chmod +x $BIN_PATH/yq
+
 }
 
 install_kustomize() {
@@ -54,8 +70,8 @@ install_helm() {
   log::warn "Attempting to install 'helm' v3.12.3 binary"
   mkdir -p $BIN_PATH
   #Checking OS type and cpu arch for downloading correct binary
-  url="/Users/snehalshelke/Library/Preferences/helm/repositories.yaml"
-  bin_dir="/Users/snehalshelke/Library/Caches/helm/repository"
+  url=""
+  bin_dir=""
   if [[ "$OSTYPE" == "darwin"* ]]; then
     case $(uname -m) in
       x86_64)
@@ -85,7 +101,7 @@ prereqs() {
   scriptpath=$(dirname "$script")
   REPO="$scriptpath/.."
   BIN_PATH="$REPO/build/bin"
-  which $BIN_PATH/helm >/dev/null || (echo >&2 "error: missing required command 'helm'" && install_helm)
+  which helm >/dev/null || (echo >&2 "error: missing required command 'helm'" && install_helm)
   which kustomize >/dev/null || (echo >&2 "error: missing required command 'kustomize'" && install_kustomize)
   which git >/dev/null || (echo >&2 "error: missing required command 'git'" && exit 1)
   which yq >/dev/null || (echo >&2 "error: missing required command 'yq'" && install_yq)
@@ -104,8 +120,7 @@ drop_namespace_from_yaml() {
   done
   rm -rf file_*.yml
 }
-
-stage_hcp_template() {
+stage_byoh_template() {
   version=$1
   if [ ! -z "$(ls -A $BIN_PATH)" ]; then
     export PATH="$BIN_PATH/:$PATH"
@@ -116,53 +131,34 @@ stage_hcp_template() {
   
   rm -rf $workload_chart_dir/templates/*.yaml $workload_chart_dir/templates/NOTES.txt $workload_chart_dir/templates/tests
 
-  #Copy crds to crds dir for helm
-  mkdir -p $REPO/$WORKLOAD_CHART/crds
-  kustomize build --enable-helm $REPO/config/crd > $workload_chart_dir/crds/hcp.yaml
-
-  #RBAC stuff
-  kustomize build --enable-helm $REPO/config/rbac > $workload_chart_dir/templates/rbac.yaml
-
-  #Controller deployment with replacing image to helm template
-  kustomize build --enable-helm $REPO/config/manager > $workload_chart_dir/templates/controller.yaml
-  yq -i '.spec.template.spec.containers[0].image="{{ .Values.hcpImage }}"' $workload_chart_dir/templates/controller.yaml
-
-  # Change ns to release ns for all templates files
-  yq -i '.metadata.namespace="{{ .Release.Namespace }}"' $workload_chart_dir/templates/controller.yaml
-  yq -i '.metadata.namespace="{{ .Release.Namespace }}"' $workload_chart_dir/templates/rbac.yaml
-
-  yq -i '
-  (select(.kind == "ClusterRoleBinding" or .kind == "RoleBinding") |
-   .subjects[] |= (select(.kind == "ServiceAccount" and .name != "capi-manager").namespace = "{{ .Release.Namespace }}"))
-  // .
-' $workload_chart_dir/templates/rbac.yaml
+  kustomize build --enable-helm $REPO/chart-generator/byoh-chart > $workload_chart_dir/templates/workload.yaml
 
   # Copy extra templates
-  cp $REPO/chart-generator/extraTemplates/* $workload_chart_dir/templates/.
+  # cp $REPO/chart-generator/templates/* $workload_chart_dir/templates/.
 
   yq -i '.name="'$WORKLOAD_CHART'"' $workload_chart_dir/Chart.yaml
-  yq -i '.description="A helm chart for deploying HCP Provider"' $workload_chart_dir/Chart.yaml
+  yq -i '.description="A helm chart for deploying Barista Manager"' $workload_chart_dir/Chart.yaml
   yq -i '.version="'$version'"' $workload_chart_dir/Chart.yaml
   yq -i '.appVersion="'$version'"' $workload_chart_dir/Chart.yaml
 
   pushd $workload_chart_dir/templates
-  drop_namespace_from_yaml controller.yaml
+  drop_namespace_from_yaml workload.yaml
   popd
 }
 
 main() {
-  major_minor_version=${HCP_VERSION:-0.1}
+  major_minor_version=${BARISTA_VERSION:-0.1}
   build_number=${BUILD_NUMBER:-0}
-  release_version="$major_minor_version.$build_number"
-  hcp_image="hcp-controller-manager:local"
+#  release_version="$major_minor_version.$build_number"
+  byoh_image="byoh-controller-manager:dev"
 
-  while getopts ":h:e:" opt; do
+  while getopts ":h:e:o:" opt; do
   case $opt in
     h)
       usage
       ;;
     e)
-      hcp_image="$OPTARG"
+      byoh_image="$OPTARG"
       ;;
     *)
       usage
@@ -171,14 +167,14 @@ main() {
   done
   
   prereqs
-  log::info "Generating charts with version: $release_version"
-  stage_hcp_template $release_version
+  log::info "Generating charts with version: release_version"
+  stage_byoh_template "0.0"
   log::info "Generating chart values.yaml"
 
-  sed -e "s|__CONTROLLER_IMAGE__|${hcp_image}|g"  $REPO/chart-generator/sample-values.yaml > $REPO/$WORKLOAD_CHART/values.yaml
+  sed -e "s|__CONTROLLER_IMAGE__|${byoh_image}|g"  $REPO/chart-generator/sample-values.yaml > $REPO/$WORKLOAD_CHART/values.yaml
 
   log::info "Publishing helm version"
-  echo -n "${release_version}" > "${REPO}/helm-chart-version"
+  echo -n "0" > "${REPO}/helm-chart-version"
   cat "${REPO}/helm-chart-version"
 
 }
