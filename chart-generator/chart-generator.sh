@@ -147,9 +147,9 @@ stage_byoh_template() {
 }
 
 main() {
-  major_minor_version=${BARISTA_VERSION:-0.1}
+  major_minor_version=${BYOH_VERSION:-0.1}
   build_number=${BUILD_NUMBER:-0}
-#  release_version="$major_minor_version.$build_number"
+  release_version="$major_minor_version.$build_number"
   byoh_image="byoh-controller-manager:dev"
 
   while getopts ":h:e:o:" opt; do
@@ -168,13 +168,13 @@ main() {
   
   prereqs
   log::info "Generating charts with version: release_version"
-  stage_byoh_template "0.0"
+  stage_byoh_template $release_version
   log::info "Generating chart values.yaml"
 
   sed -e "s|__CONTROLLER_IMAGE__|${byoh_image}|g"  $REPO/chart-generator/sample-values.yaml > $REPO/$WORKLOAD_CHART/values.yaml
 
   log::info "Publishing helm version"
-  echo -n "0" > "${REPO}/helm-chart-version"
+  echo -n "${release_version}" > "${REPO}/helm-chart-version"
   cat "${REPO}/helm-chart-version"
 
 }
