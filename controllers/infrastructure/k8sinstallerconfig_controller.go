@@ -169,9 +169,10 @@ func (r *K8sInstallerConfigReconciler) storeInstallationData(ctx context.Context
 	logger := scope.Logger
 	logger.Info("creating installation secret")
 
+	secretName := "byoinstall-" + scope.Config.Name
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      scope.Config.Name,
+			Name:      secretName,
 			Namespace: scope.Config.Namespace,
 			Labels: map[string]string{
 				clusterv1.ClusterNameLabel: scope.Cluster.Name,

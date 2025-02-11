@@ -33,5 +33,9 @@ cp $CONFIG_PATH/conf.tar .
 
 echo Creating bundle tar
 tar -cvf /bundle/bundle.tar *
-
+echo "TEST====="
+ls $PWD
+mkdir -p $INGREDIENTS_PATH/imgpkg_dir
+cp *.* $INGREDIENTS_PATH/imgpkg_dir/
+echo "TEST====="
 echo Done

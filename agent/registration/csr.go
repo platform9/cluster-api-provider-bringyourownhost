@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -178,7 +179,16 @@ func writeKubeconfigFromBootstrapping(bootstrapClientConfig *restclient.Config, 
 	if caFile == "" {
 		caData = bootstrapClientConfig.CAData
 	}
+	// Extract the context name and user from bootstrapClientConfig
+	if len(bootstrapClientConfig.Contexts) > 0 {
+		// Get the first context from the list (you can loop if you need multiple)
+		context := bootstrapClientConfig.Contexts[0]
 
+		// Extract the user from the context
+		user := context.User
+	} else {
+		return nil, errors.New("no contexts found in bootstrapClientConfig")
+	}
 	// Build resulting kubeconfig.
 	kubeconfigData := clientcmdapi.Config{
 		// Define a cluster stanza based on the bootstrap kubeconfig.
@@ -189,14 +199,14 @@ func writeKubeconfigFromBootstrapping(bootstrapClientConfig *restclient.Config, 
 			CertificateAuthorityData: caData,
 		}},
 		// Define auth based on the obtained client cert.
-		AuthInfos: map[string]*clientcmdapi.AuthInfo{"default-auth": {
+		AuthInfos: map[string]*clientcmdapi.AuthInfo{user: {
 			ClientCertificateData: certData,
 			ClientKeyData:         keyData,
 		}},
 		// Define a context that connects the auth info and cluster, and set it as the default
 		Contexts: map[string]*clientcmdapi.Context{"default-context": {
 			Cluster:   "default-cluster",
-			AuthInfo:  "default-auth",
+			AuthInfo:  user,
 			Namespace: "default",
 		}},
 		CurrentContext: "default-context",
