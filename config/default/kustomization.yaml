@@ -1,6 +1,5 @@
 # Adds namespace to all resources.
-namespace: byoh-system
-
+namespace: byoh-system 
 # Value of this field is prepended to the
 # names of all resources, e.g. a deployment named
 # "wordpress" becomes "alices-wordpress".
