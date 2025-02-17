@@ -26,10 +26,7 @@ USE_EXISTING_CLUSTER ?= false
 EXISTING_CLUSTER_BYOHOSTCONFIG_PATH ?=
 GINKGO_NOCOLOR ?= false
 
-SOCAT_VERSION=1.7.3.3
-ETHTOOL_VERSION=6.11
-EBTABLES_VERSION=2.0.11
-CONNTRACK_VERSION=1.4.0
+
 
 TOOLS_DIR := $(REPO_ROOT)/hack/tools
 BIN_DIR := bin
@@ -64,7 +61,6 @@ PF9_BYOHOST_DEB_FILE := $(PF9_BYOHOST_SRCDIR)/debsrc/pf9-byohost-agent.deb
 RPMBUILD_DIR := $(PF9_BYOHOST_SRCDIR)/rpmsrc
 PF9_BYOHOST_RPM_FILE := $(PF9_BYOHOST_SRCDIR)/rpmsrc/pf9-byohost-agent.rpm
 DEB_DEP_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/dependencies
-PF9_BYOHOST_DEB_WITH_DEP := $(PF9_BYOHOST_SRCDIR)/dependencies/pf9-byohost-agent-installtion.deb
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -330,7 +326,7 @@ $(PF9_BYOHOST_DEB_FILE): $(DEB_SRC_ROOT)
 	 --after-remove $(AGENT_SRC_DIR)/scripts/pf9-byohost-agent-after-remove.sh \
 	 -p $(PF9_BYOHOST_DEB_FILE) \
 	 -C $(DEB_SRC_ROOT)/ .
-	./$(AGENT_SRC_DIR)/scripts/sign_packages_deb.sh $(PF9_BYOHOST_DEB_FILE)
+	./sign_packages_deb.sh $(PF9_BYOHOST_DEB_FILE)
 	md5sum $(PF9_BYOHOST_DEB_FILE) | cut -d' ' -f 1 > $(PF9_BYOHOST_DEB_FILE).md5
 
 build-host-agent-deb: $(PF9_BYOHOST_DEB_FILE)
@@ -341,32 +337,26 @@ $(DEB_DEP_SRC_ROOT):	build-host-agent-deb
 			mkdir -p $(DEB_DEP_SRC_ROOT)
 			mkdir -p $(DEB_DEP_SRC_ROOT)/preriqui
 			echo "downlaoding deb packages -  socat,ethtool,ebtables,conntrack"  
-			sudo apt-get download socat=$SOCAT_VERSION
-			sudo apt-get download ethtool=$ETHTOOL_VERSION
-			sudo apt-get download ebtables=$EBTABLES_VERSION
-			sudo apt-get download conntrack=$CONNTRACK_VERSION
+			sudo apt-get download socat
+			sudo apt-get download ethtool
+			sudo apt-get download ebtables
+			sudo apt-get download conntrack
 			mv *socat*  $(DEB_DEP_SRC_ROOT)/preriqui/socat.deb
 			mv *ethtool* $(DEB_DEP_SRC_ROOT)/preriqui/ethtool.deb
 			mv *ebtables* $(DEB_DEP_SRC_ROOT)/preriqui/ebtables.deb
 			mv *conntrack* $(DEB_DEP_SRC_ROOT)/preriqui/conntrack.deb
-			echo "\n Building DEB for dependency package "
+			echo "Successfully Built DEB for dependency package  and copied \n "
 			cp -r $(PF9_BYOHOST_DEB_FILE) $(DEB_DEP_SRC_ROOT)/pf9-byohost-agent.deb
-	
-$(PF9_BYOHOST_DEB_WITH_DEP): $(DEB_DEP_SRC_ROOT)
-	fpm -t deb -s dir -n pf9-byohost-agent-installation \
-         --description "Platform9 Bring Your Own Host deb package installations with dependencies " \
-         --license "Commercial" --architecture all --url "http://www.platform9.net" --vendor Platform9 \
-         --after-install $(AGENT_SRC_DIR)/scripts/pf9-byoh-installation-after-install.sh \
-         --before-remove $(AGENT_SRC_DIR)/scripts/pf9-byoh-installation-before-remove.sh \
-         --after-remove $(AGENT_SRC_DIR)/scripts/pf9-byoh-installation-after-remove.sh \
-         -p $(PF9_BYOHOST_DEB_WITH_DEP) \
-         -C $(DEB_DEP_SRC_ROOT)/ .
-	./$(AGENT_SRC_DIR)/scripts/sign_packages_deb.sh $(PF9_BYOHOST_DEB_WITH_DEP)
-	md5sum $(PF9_BYOHOST_DEB_WITH_DEP) | cut -d' ' -f 1 > $(PF9_BYOHOST_DEB_WITH_DEP).md5
+			echo "Successfully copied byoh-sgent deb pkg\n"
+			cp $(AGENT_SRC_DIR)/scripts/install.sh $(DEB_DEP_SRC_ROOT)/install.sh
+			echo "Successfully copied install.sh\n"
+			cp $(AGENT_SRC_DIR)/scripts/Dockerfile $(DEB_DEP_SRC_ROOT)/Dockerfile
+			echo "Successfully copied Dockerfile"
+
+build-byoh-tar : | $(DEB_DEP_SRC_ROOT)
+	echo $(DEB_DEP_SRC_ROOT)
 
 
-build-host-agent-deb-with-dependencies :  $(PF9_BYOHOST_DEB_WITH_DEP)			
-	 
 ########################################################################
 # go-get-tool will 'go get' any package $2 and install it to $1.
 PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
