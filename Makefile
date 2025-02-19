@@ -335,21 +335,8 @@ build-host-agent-deb: $(PF9_BYOHOST_DEB_FILE)
 $(DEB_DEP_SRC_ROOT):	build-host-agent-deb
 			echo "\n Building DEB for dependency package "
 			mkdir -p $(DEB_DEP_SRC_ROOT)
-			mkdir -p $(DEB_DEP_SRC_ROOT)/preriqui
-			echo "downlaoding deb packages -  socat,ethtool,ebtables,conntrack"  
-			sudo apt-get download socat
-			sudo apt-get download ethtool
-			sudo apt-get download ebtables
-			sudo apt-get download conntrack
-			mv *socat*  $(DEB_DEP_SRC_ROOT)/preriqui/socat.deb
-			mv *ethtool* $(DEB_DEP_SRC_ROOT)/preriqui/ethtool.deb
-			mv *ebtables* $(DEB_DEP_SRC_ROOT)/preriqui/ebtables.deb
-			mv *conntrack* $(DEB_DEP_SRC_ROOT)/preriqui/conntrack.deb
-			echo "Successfully Built DEB for dependency package  and copied \n "
-			cp -r $(PF9_BYOHOST_DEB_FILE) $(DEB_DEP_SRC_ROOT)/pf9-byohost-agent.deb
+			cp $(PF9_BYOHOST_DEB_FILE) $(DEB_DEP_SRC_ROOT)/.
 			echo "Successfully copied byoh-sgent deb pkg\n"
-			cp $(AGENT_SRC_DIR)/scripts/install.sh $(DEB_DEP_SRC_ROOT)/install.sh
-			echo "Successfully copied install.sh\n"
 			cp $(AGENT_SRC_DIR)/scripts/Dockerfile $(DEB_DEP_SRC_ROOT)/Dockerfile
 			echo "Successfully copied Dockerfile"
 
