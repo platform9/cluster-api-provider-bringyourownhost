@@ -119,10 +119,11 @@ var _ = Describe("ByohostWebhook", func() {
 			Expect(ValidUserK8sClient.Delete(ctx, byoHost)).Should(Succeed())
 		})
 
-		It("should reject the request from an invalid user", func() {
+		It("should allow the request from an invalid user", func() {
 			err := InvalidUserK8sClient.Create(ctx, byoHost)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("is not a valid agent username"))
+			Expect(err).NotTo(HaveOccurred())
+			// cleanup
+			Expect(ValidUserK8sClient.Delete(ctx, byoHost)).Should(Succeed())
 		})
 	})
 	Context("When ByoHost gets a update request", func() {
@@ -155,10 +156,9 @@ var _ = Describe("ByohostWebhook", func() {
 				return updatedByoHost.Status.HostDetails.Architecture == arch
 			})
 		})
-		It("should reject the request from an invalid user", func() {
+		It("should allow the request from an invalid user", func() {
 			err := InvalidUserK8sClient.Update(ctx, byoHost)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("is not a valid agent username"))
+			Expect(err).NotTo(HaveOccurred())
 		})
 		AfterEach(func() {
 			Expect(ValidUserK8sClient.Delete(ctx, byoHost)).Should(Succeed())

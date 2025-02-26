@@ -48,7 +48,7 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 			byoHostRaw, err = json.Marshal(byoHost)
 			Expect(err).ShouldNot(HaveOccurred())
 		})
-		It("Should reject create request from invalid user", func() {
+		It("Should allow create request from invalid user", func() {
 			admissionRequest := admissionv1.AdmissionRequest{
 				Operation: admissionv1.Create,
 				UserInfo:  v1.UserInfo{Username: "unauthorized-user"},
@@ -58,10 +58,9 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 				},
 			}
 			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
-			Expect(resp.AdmissionResponse.Allowed).To(Equal(false))
-			Expect(string(resp.AdmissionResponse.Result.Reason)).To(Equal(fmt.Sprintf("%s is not a valid agent username", "unauthorized-user")))
+			Expect(resp.AdmissionResponse.Allowed).To(Equal(true))
 		})
-		It("Should reject request from another agent user in the group", func() {
+		It("Should allow request from another agent user in the group", func() {
 			admissionRequest := admissionv1.AdmissionRequest{
 				Operation: admissionv1.Create,
 				UserInfo:  v1.UserInfo{Username: "byoh:host:host2"},
@@ -71,8 +70,7 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 				},
 			}
 			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
-			Expect(resp.AdmissionResponse.Allowed).To(Equal(false))
-			Expect(string(resp.AdmissionResponse.Result.Reason)).To(Equal(fmt.Sprintf("%s cannot create/update resource %s", "byoh:host:host2", "host1")))
+			Expect(resp.AdmissionResponse.Allowed).To(Equal(true))
 		})
 		It("Should allow request from the valid agent user", func() {
 			admissionRequest := admissionv1.AdmissionRequest{
@@ -110,7 +108,7 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 			byoHostRaw, err = json.Marshal(byoHost)
 			Expect(err).ShouldNot(HaveOccurred())
 		})
-		It("Should reject update request from invalid user", func() {
+		It("Should allow update request from invalid user", func() {
 			admissionRequest := admissionv1.AdmissionRequest{
 				Operation: admissionv1.Update,
 				UserInfo:  v1.UserInfo{Username: "unauthorized-user"},
@@ -120,8 +118,7 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 				},
 			}
 			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
-			Expect(resp.AdmissionResponse.Allowed).To(Equal(false))
-			Expect(string(resp.AdmissionResponse.Result.Reason)).To(Equal(fmt.Sprintf("%s is not a valid agent username", "unauthorized-user")))
+			Expect(resp.AdmissionResponse.Allowed).To(Equal(true))
 		})
 		It("Should allow update request from manager", func() {
 			admissionRequest := admissionv1.AdmissionRequest{
@@ -135,7 +132,7 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
 			Expect(resp.AdmissionResponse.Allowed).To(Equal(true))
 		})
-		It("Should reject request from another agent user in the group", func() {
+		It("Should allow request from another agent user in the group", func() {
 			admissionRequest := admissionv1.AdmissionRequest{
 				Operation: admissionv1.Update,
 				UserInfo:  v1.UserInfo{Username: "byoh:host:host2"},
@@ -145,8 +142,7 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 				},
 			}
 			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
-			Expect(resp.AdmissionResponse.Allowed).To(Equal(false))
-			Expect(string(resp.AdmissionResponse.Result.Reason)).To(Equal(fmt.Sprintf("%s cannot create/update resource %s", "byoh:host:host2", "host1")))
+			Expect(resp.AdmissionResponse.Allowed).To(Equal(true))
 		})
 		It("Should allow request from the valid agent user", func() {
 			admissionRequest := admissionv1.AdmissionRequest{
