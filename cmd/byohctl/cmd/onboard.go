@@ -48,13 +48,14 @@ func init() {
 	onboardCmd.Flags().StringVarP(&password, "password", "p", "", "Password for authentication")
 	onboardCmd.Flags().StringVarP(&fqdn, "fqdn", "f", "", "Platform9 FQDN")
 	onboardCmd.Flags().StringVarP(&domain, "domain", "d", "default", "Domain name")
-	onboardCmd.Flags().StringVarP(&tenant, "tenant", "t", "s", "Tenant name")
+	onboardCmd.Flags().StringVarP(&tenant, "tenant", "t", "", "Tenant name")
 	onboardCmd.Flags().StringVarP(&clientToken, "client-token", "c", "", "Client token for authentication")
 
 	onboardCmd.MarkFlagRequired("username")
 	onboardCmd.MarkFlagRequired("password")
 	onboardCmd.MarkFlagRequired("fqdn")
 	onboardCmd.MarkFlagRequired("client-token")
+	onboardCmd.MarkFlagRequired("tenant")
 
 	rootCmd.AddCommand(onboardCmd)
 }
