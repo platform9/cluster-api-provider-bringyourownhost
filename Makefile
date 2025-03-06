@@ -338,7 +338,7 @@ $(DEB_DEP_SRC_ROOT):	build-host-agent-deb
 			echo "Successfully copied Dockerfile"
 			cp $(AGENT_SRC_DIR)/scripts/install.sh $(DEB_DEP_SRC_ROOT)/install.sh
 			echo "Successfully copied install.sh"
-			cp $(AGENT_SRC_DIR)/script/download.sh $(DEB_DEP_SRC_ROOT)/download.sh
+			cp $(AGENT_SRC_DIR)/scripts/download.sh $(DEB_DEP_SRC_ROOT)/download.sh
 
 
 bundle-dockerfile-debpkg-install : | $(DEB_DEP_SRC_ROOT)
