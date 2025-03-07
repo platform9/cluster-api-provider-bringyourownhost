@@ -23,7 +23,7 @@ type ByoHostValidator struct {
 }
 
 // To allow byoh manager service account to patch ByoHost CR
-const managerServiceAccount = "system:serviceaccount:byoh-system:byoh-controller-manager"
+const managerServiceAccount = "system:serviceaccount:kaapi:byoh-controller-manager"
 
 //nolint: gocritic
 // Handle handles all the requests for ByoHost resource
