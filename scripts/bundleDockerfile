@@ -1,5 +1,6 @@
 FROM ubuntu:20.04
 WORKDIR .
+USER root
 COPY pf9-byohost-agent.deb /
 COPY download.sh download.sh
 RUN chmod +x download.sh
