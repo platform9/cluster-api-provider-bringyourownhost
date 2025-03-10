@@ -22,21 +22,50 @@ import (
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils"
 )
 
+const (
+	DefaultContainerdSock = "/run/containerd/containerd.sock"
+	DefaultAgentImage     = "quay.io/platform9/pf9-byoh:byoh-agent"
+	ByohConfigDir         = "/root/.byoh"
+	ByohConfigFile        = "config"
+)
+
 type K8sClient struct {
-	client      *http.Client
-	fqdn        string
-	domain      string
-	tenant      string
-	bearerToken string
+	client         *http.Client
+	fqdn           string
+	domain         string
+	tenant         string
+	bearerToken    string
+	containerdSock string
+	agentImage     string
 }
 
-func NewK8sClient(fqdn, domain, tenant, token string) *K8sClient {
-	return &K8sClient{
-		client:      &http.Client{Timeout: 30 * time.Second},
-		fqdn:        fqdn,
-		domain:      domain,
-		tenant:      tenant,
-		bearerToken: token,
+func NewK8sClient(fqdn, domain, tenant, token string, options ...Option) *K8sClient {
+	client := &K8sClient{
+		client:         &http.Client{Timeout: 30 * time.Second},
+		fqdn:           fqdn,
+		domain:         domain,
+		tenant:         tenant,
+		bearerToken:    token,
+		containerdSock: DefaultContainerdSock,
+		agentImage:     DefaultAgentImage,
+	}
+	for _, option := range options {
+		option(client)
+	}
+	return client
+}
+
+type Option func(*K8sClient)
+
+func WithContainerdSock(path string) Option {
+	return func(c *K8sClient) {
+		c.containerdSock = path
+	}
+}
+
+func WithAgentImage(image string) Option {
+	return func(c *K8sClient) {
+		c.agentImage = image
 	}
 }
 
@@ -49,37 +78,35 @@ func (c *K8sClient) GetSecret(secretName string) (*types.Secret, error) {
 	utils.LogInfo("Fetching secret '%s' from namespace '%s'", secretName, c.getNamespace())
 
 	namespace := c.getNamespace()
-	fqdnPrefix := strings.Split(c.fqdn, ".")[0]
-	clusterName := fmt.Sprintf("%s-%s-%s", fqdnPrefix, c.domain, c.tenant)
 
 	secretEndpoint := fmt.Sprintf("https://%s/oidc-proxy/%s/api/v1/namespaces/%s/secrets/%s",
-		c.fqdn, clusterName, namespace, secretName)
+		c.fqdn, namespace, namespace, secretName)
 
 	req, err := http.NewRequest("GET", secretEndpoint, nil)
 	if err != nil {
-		return nil, fmt.Errorf("error creating request: %v", err)
+		return nil, utils.LogErrorf("error creating request: %v", err)
 	}
 
 	req.Header.Add("Authorization", "Bearer "+c.bearerToken)
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("error making request: %v", err)
+		return nil, utils.LogErrorf("error making request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("error reading response: %v", err)
+		return nil, utils.LogErrorf("error reading response: %v", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("error getting secret: %s", string(body))
+		return nil, utils.LogErrorf("error getting secret: %s", string(body))
 	}
 
 	var secret types.Secret
 	if err := json.Unmarshal(body, &secret); err != nil {
-		return nil, fmt.Errorf("error parsing secret: %v", err)
+		return nil, utils.LogErrorf("error parsing secret: %v", err)
 	}
 
 	utils.LogSuccess("Successfully retrieved secret")
@@ -93,32 +120,32 @@ func (c *K8sClient) SaveKubeConfig(secretName string) error {
 	utils.LogInfo("Getting secret containing kubeconfig")
 	secret, err := c.GetSecret(secretName)
 	if err != nil {
-		return fmt.Errorf("failed to get secret: %v", err)
+		return utils.LogErrorf("failed to get secret: %v", err)
 	}
 
 	encodedConfig, ok := secret.Data["config"]
 	if !ok {
-		return fmt.Errorf("no config found in secret")
+		return utils.LogErrorf("no config found in secret")
 	}
 
 	utils.LogInfo("Decoding kubeconfig content")
 	decodedConfig, err := base64.StdEncoding.DecodeString(encodedConfig)
 	if err != nil {
-		return fmt.Errorf("error decoding config: %v", err)
+		return utils.LogErrorf("error decoding config: %v", err)
 	}
 
 	tmpPath := "/tmp/pf9"
 	utils.LogInfo("Creating directory: %s", tmpPath)
 	err = os.MkdirAll(tmpPath, 0755)
 	if err != nil {
-		return fmt.Errorf("error creating directory: %v", err)
+		return utils.LogErrorf("error creating directory: %v", err)
 	}
 
 	filePath := filepath.Join(tmpPath, "bootstrap-kubeconfig.yaml")
-	utils.LogInfo("Writing kubeconfig to: %s", filePath)
+	utils.LogDebug("Writing kubeconfig to: %s", filePath)
 	err = os.WriteFile(filePath, decodedConfig, 0644)
 	if err != nil {
-		return fmt.Errorf("error writing kubeconfig: %v", err)
+		return utils.LogErrorf("error writing kubeconfig: %v", err)
 	}
 
 	utils.LogSuccess("Successfully saved kubeconfig to %s", filePath)
@@ -135,37 +162,34 @@ func (c *K8sClient) RunByohAgent() error {
 	utils.LogInfo("Verifying DNS resolution for %s", c.fqdn)
 	addrs, err := net.LookupHost(c.fqdn)
 	if err != nil {
-		utils.LogWarn("DNS resolution check failed: %v", err)
-		utils.LogInfo("Adding entry to /etc/hosts might be required")
+		return utils.LogErrorf("DNS resolution failed for %s: %v", c.fqdn, err)
 	} else {
 		utils.LogSuccess("DNS resolution successful: %v", addrs)
 	}
 
 	utils.LogInfo("Initializing containerd client")
-	client, err := containerd.New("/run/containerd/containerd.sock")
+	client, err := containerd.New(c.containerdSock)
 	if err != nil {
 		if strings.Contains(err.Error(), "permission denied") {
-			return fmt.Errorf("insufficient permissions to access containerd. Please run with sudo")
+			return utils.LogErrorf("insufficient permissions to access containerd. Please run with sudo")
 		}
-		return fmt.Errorf("failed to initialize containerd client: %v", err)
+		return utils.LogErrorf("failed to initialize containerd client: %v", err)
 	}
 	defer client.Close()
 
 	ctx := namespaces.WithNamespace(context.Background(), "default")
 
 	// Ensure required directory exists
-	byohDir := "/root/.byoh"
-	if err := os.MkdirAll(byohDir, 0755); err != nil {
-		utils.LogWarn("Failed to create directory %s: %v", byohDir, err)
+	if err := os.MkdirAll(ByohConfigDir, 0755); err != nil {
+		utils.LogWarn("Failed to create directory %s: %v", ByohConfigDir, err)
 	}
 
-	image := "quay.io/platform9/pf9-byoh:byoh-agent"
-	utils.LogInfo("Pulling image: %s", image)
+	utils.LogDebug("Pulling image: %s", c.agentImage)
+	pullImage, err := client.Pull(ctx, c.agentImage, containerd.WithPullUnpack)
 
-	pullImage, err := client.Pull(ctx, image, containerd.WithPullUnpack)
 	if err != nil {
 		utils.LogError("Image pull failed: %v", err)
-		return fmt.Errorf("failed to pull image: %v", err)
+		return utils.LogErrorf("failed to pull image: %v", err)
 	}
 	utils.LogSuccess("Image pulled successfully")
 
@@ -181,7 +205,7 @@ func (c *K8sClient) RunByohAgent() error {
 				{
 					Type:        "bind",
 					Source:      "/tmp/pf9/bootstrap-kubeconfig.yaml",
-					Destination: "/root/.byoh/config",
+					Destination: filepath.Join(ByohConfigDir, ByohConfigFile),
 					Options:     []string{"rbind", "rw"},
 				},
 				{
@@ -205,7 +229,7 @@ func (c *K8sClient) RunByohAgent() error {
 	)
 	if err != nil {
 		utils.LogError("Container creation failed: %v", err)
-		return fmt.Errorf("failed to create container: %v", err)
+		return utils.LogErrorf("failed to create container: %v", err)
 	}
 	utils.LogSuccess("Container created successfully")
 
@@ -213,12 +237,12 @@ func (c *K8sClient) RunByohAgent() error {
 	task, err := container.NewTask(ctx, cio.NewCreator(cio.WithStdio))
 	if err != nil {
 		utils.LogError("Task creation failed: %v", err)
-		return fmt.Errorf("failed to create task: %v", err)
+		return utils.LogErrorf("failed to create task: %v", err)
 	}
 
 	if err := task.Start(ctx); err != nil {
 		utils.LogError("Task start failed: %v", err)
-		return fmt.Errorf("failed to start task: %v", err)
+		return utils.LogErrorf("failed to start task: %v", err)
 	}
 
 	// Wait for 10 seconds to allow the agent to start
@@ -226,14 +250,23 @@ func (c *K8sClient) RunByohAgent() error {
 	time.Sleep(10 * time.Second)
 
 	// Check if the container is still running
-	status, err := task.Status(ctx)
+	utils.LogDebug("Verifying container status")
+	var status containerd.Status
+	for attempts := 0; attempts < 5; attempts++ {
+		status, err = task.Status(ctx)
+		if err == nil {
+			break
+		}
+		utils.LogWarn("Failed to get task status (attempt %d/3): %v", attempts+1, err)
+		time.Sleep(5 * time.Second)
+	}
 	if err != nil {
 		utils.LogError("Failed to get task status: %v", err)
 	} else {
-		utils.LogInfo("Container status: %s", status.Status)
+		utils.LogDebug("Container status: %s", status.Status)
 		if status.Status != containerd.Running {
 			utils.LogError("Agent container is not running. Status: %s", status.Status)
-			return fmt.Errorf("agent container exited prematurely with status: %s", status.Status)
+			return utils.LogErrorf("agent container exited prematurely with status: %s", status.Status)
 		}
 		utils.LogSuccess("Agent container is running")
 	}

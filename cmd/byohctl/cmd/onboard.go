@@ -2,21 +2,26 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"time"
 
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/client"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var (
-	username    string
-	password    string
-	fqdn        string
-	domain      string
-	tenant      string
-	clientToken string
+	username            string
+	password            string
+	passwordInteractive bool
+	fqdn                string
+	domain              string
+	tenant              string
+	clientToken         string
+	containerdSock      string
+	agentImage          string
 )
 
 var rootCmd = &cobra.Command{
@@ -46,10 +51,15 @@ This command will:
 func init() {
 	onboardCmd.Flags().StringVarP(&username, "username", "u", "", "Username for authentication")
 	onboardCmd.Flags().StringVarP(&password, "password", "p", "", "Password for authentication")
+	onboardCmd.Flags().BoolVarP(&passwordInteractive, "interactive", "i", false, "Prompt for password interactively")
 	onboardCmd.Flags().StringVarP(&fqdn, "fqdn", "f", "", "Platform9 FQDN")
 	onboardCmd.Flags().StringVarP(&domain, "domain", "d", "default", "Domain name")
 	onboardCmd.Flags().StringVarP(&tenant, "tenant", "t", "", "Tenant name")
 	onboardCmd.Flags().StringVarP(&clientToken, "client-token", "c", "", "Client token for authentication")
+	onboardCmd.Flags().StringVar(&containerdSock, "containerd-sock", client.DefaultContainerdSock, "Path to containerd socket")
+	onboardCmd.Flags().StringVar(&agentImage, "agent-image", client.DefaultAgentImage, "Agent container image to use")
+
+	onboardCmd.MarkFlagsMutuallyExclusive("password", "interactive")
 
 	onboardCmd.MarkFlagRequired("username")
 	onboardCmd.MarkFlagRequired("password")
@@ -61,6 +71,16 @@ func init() {
 }
 
 func runOnboard(cmd *cobra.Command, args []string) {
+	if passwordInteractive {
+		fmt.Print("Enter Password: ")
+		pwBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+		if err != nil {
+			utils.LogError("Failed to read password: %v", err)
+			os.Exit(1)
+		}
+		fmt.Println() // Add newline after password input
+		password = string(pwBytes)
+	}
 	start := time.Now()
 	defer utils.TrackTime(start, "Total onboarding process")
 
@@ -75,8 +95,18 @@ func runOnboard(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// 2. Create Kubernetes client
-	k8sClient := client.NewK8sClient(fqdn, domain, tenant, token)
+	// 2. Create Kubernetes client with options
+	var clientOptions []client.Option
+	// Only add options if non-default values are provided
+	if containerdSock != client.DefaultContainerdSock {
+		clientOptions = append(clientOptions, client.WithContainerdSock(containerdSock))
+	}
+
+	if agentImage != client.DefaultAgentImage {
+		clientOptions = append(clientOptions, client.WithAgentImage(agentImage))
+	}
+
+	k8sClient := client.NewK8sClient(fqdn, domain, tenant, token, clientOptions...)
 
 	// 3. Save kubeconfig
 	utils.LogInfo("Saving kubeconfig file")
