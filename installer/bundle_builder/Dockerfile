@@ -28,7 +28,8 @@ ENV ARCH=amd64
 ENV BUILD_ONLY=1
 
 RUN apt-get update && apt-get install -y gpg \
-    curl 
+    curl \
+    libdigest-sha-perl  
 
 WORKDIR /bundle-builder
 COPY *.sh ./
