@@ -14,6 +14,7 @@ echo Building bundle...
 echo Ingredients $INGREDIENTS_PATH
 ls -l $INGREDIENTS_PATH
 
+cd /bundle
 echo Strip version to well-known names
 # Mandatory
 cp $INGREDIENTS_PATH/*containerd* containerd.tar
