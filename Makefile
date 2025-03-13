@@ -332,19 +332,16 @@ build-host-agent-deb: $(PF9_BYOHOST_DEB_FILE)
 $(DEB_DEP_SRC_ROOT):	build-host-agent-deb
 			echo "\n Building DEB for dependency package "
 			mkdir -p $(DEB_DEP_SRC_ROOT)
-			mkdir -p $(DEB_DEP_SRC_ROOT)/bundle
+			echo "copy pf9-byohost-agent deb package"
 			cp $(PF9_BYOHOST_DEB_FILE) $(DEB_DEP_SRC_ROOT)/.
-			cp $(PF9_BYOHOST_DEB_FILE) $(DEB_DEP_SRC_ROOT)/bundle/.
 			echo "Successfully copied byoh-sgent deb pkg\n"
-			cp $(AGENT_SRC_DIR)/scripts/imageDockerfile $(DEB_DEP_SRC_ROOT)/Dockerfile
+			cp $(AGENT_SRC_DIR)/scripts/Dockerfile $(DEB_DEP_SRC_ROOT)/Dockerfile
 			echo "Successfully copied Dockerfile"
 			cp $(AGENT_SRC_DIR)/scripts/install.sh $(DEB_DEP_SRC_ROOT)/install.sh
 			echo "Successfully copied install.sh"
-			cp $(AGENT_SRC_DIR)/scripts/download.sh $(DEB_DEP_SRC_ROOT)/bundle/download.sh
-			cp $(AGENT_SRC_DIR)/scripts/bundleDockerfile $(DEB_DEP_SRC_ROOT)/bundle/Dockerfile
 
 
-bundle-dockerfile-debpkg-install : | $(DEB_DEP_SRC_ROOT)
+build-byoh-image : | $(DEB_DEP_SRC_ROOT)
 	echo $(DEB_DEP_SRC_ROOT)
 
 ########################################################################
