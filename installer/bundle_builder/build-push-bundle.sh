@@ -4,8 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 set -e
-download.sh
-cd /tmp/bundle
+
 build-bundle.sh $1 $2
 if [ $BUILD_ONLY -eq 0 ]
 then

@@ -14,7 +14,6 @@ echo Building bundle...
 echo Ingredients $INGREDIENTS_PATH
 ls -l $INGREDIENTS_PATH
 
-cd /tmp/bundle
 echo Strip version to well-known names
 # Mandatory
 cp $INGREDIENTS_PATH/*containerd* containerd.tar
@@ -34,7 +33,5 @@ cp $CONFIG_PATH/conf.tar .
 
 echo Creating bundle tar
 tar -cvf /bundle/bundle.tar *
-
-imgpkg push -f . -i snhpf9/byoh-bundle-ubuntu_20.04.1_x86-64_k8s:$KUBERNETES_MAJOR_VERSION
 
 echo Done

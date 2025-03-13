@@ -5,35 +5,21 @@
 
 set -e
 
-echo installing imgpkg 
-mkdir local-bin/
-curl -L https://carvel.dev/install.sh | K14SIO_INSTALL_BIN_DIR=local-bin bash
-export PATH=$PWD/local-bin/:$PATH
-imgpkg version
-
 echo  Update the apt package index and install packages needed to use the Kubernetes apt repository
- apt-get update
- apt-get install -y apt-transport-https ca-certificates curl
+sudo apt-get update
+sudo apt-get install -y apt-transport-https ca-certificates curl
 
 echo Download containerd
-curl -LOJR https://github.com/containerd/containerd/releases/download/v${CONTAINERD_VERSION}/cri-containerd-cni-${CONTAINERD_VERSION}-linux-amd64.tar.gz 
+curl -LOJR https://github.com/containerd/containerd/releases/download/v${CONTAINERD_VERSION}/cri-containerd-cni-${CONTAINERD_VERSION}-linux-amd64.tar.gz
 
 echo Download the Google Cloud public signing key
- curl -fsSLo /usr/share/keyrings/kubernetes-archive-keyring.gpg https://dl.k8s.io/apt/doc/apt-key.gpg
+sudo curl -fsSLo /usr/share/keyrings/kubernetes-archive-keyring.gpg https://dl.k8s.io/apt/doc/apt-key.gpg
 
 echo Add the Kubernetes apt repository
-
-echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/${KUBERNETES_MAJOR_VERSION}/deb/ /" |  tee /etc/apt/sources.list.d/kubernetes.list
-
-mkdir -p /etc/apt/keyrings
-curl -fsSL https://pkgs.k8s.io/core:/stable:/${KUBERNETES_MAJOR_VERSION}/deb/Release.key |  gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
 
 echo Update apt package index, install kubelet, kubeadm and kubectl
- apt-get update
- chown -Rv _apt:root /tmp/bundle/
- chown -R _apt:root /ingredients
- mv cri-containerd-cni-${CONTAINERD_VERSION}-linux-amd64.tar.gz /ingredients/ 
- cd /ingredients 
- apt-get download {kubelet,kubeadm,kubectl}:$ARCH=$KUBERNETES_VERSION
- apt-get download kubernetes-cni
- apt-get download cri-tools:$ARCH=$KUBERNETES_VERSION
+sudo apt-get update
+sudo apt-get download {kubelet,kubeadm,kubectl}:$ARCH=$KUBERNETES_VERSION
+sudo apt-get download kubernetes-cni:$ARCH=1.1.1-00
+sudo apt-get download cri-tools:$ARCH=1.25.0-00
