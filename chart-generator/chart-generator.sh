@@ -137,7 +137,7 @@ stage_byoh_template() {
   # cp $REPO/chart-generator/templates/* $workload_chart_dir/templates/.
 
   yq -i '.name="'$WORKLOAD_CHART'"' $workload_chart_dir/Chart.yaml
-  yq -i '.description="A helm chart for deploying Barista Manager"' $workload_chart_dir/Chart.yaml
+  yq -i '.description="A helm chart for deploying Byoh Manager"' $workload_chart_dir/Chart.yaml
   yq -i '.version="'$version'"' $workload_chart_dir/Chart.yaml
   yq -i '.appVersion="'$version'"' $workload_chart_dir/Chart.yaml
 
