@@ -5,8 +5,6 @@
 
 set -e
 
-echo Pushing bundle "$*"
-
 imgpkg push -f . -i snhpf9/byoh-bundle-ubuntu_20.04.1_x86-64_k8s:$KUBERNETES_MAJOR_VERSION
 
-echo Done
+echo "bundle push done"
