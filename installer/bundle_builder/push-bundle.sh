@@ -9,6 +9,6 @@ curl -L https://carvel.dev/install.sh | bash
 export PATH=$PATH:/usr/local/bin
 imgpkg version
 
-imgpkg push -f . -i docker.io/platform9/byoh-bundle-ubuntu_20.04.1_x86-64_k8s:latest
+imgpkg push -f . -i quay.io/platform9/byoh-bundle-ubuntu_20.04.1_x86-64_k8s:latest
 
 echo "bundle push done"
