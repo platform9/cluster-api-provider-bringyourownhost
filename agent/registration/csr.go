@@ -121,7 +121,7 @@ func (bcsr *ByohCSR) RequestBYOHClientCert(hostname string) (string, types.UID, 
 	reqName, reqUID, err := csr.RequestCertificate(bcsr.bootstrapClient,
 		csrData,
 		fmt.Sprintf(ByohCSRNameFormat, hostname),
-		"clusterissuers.cert-manager.io/byoh-issuer",
+		certv1.KubeAPIServerClientSignerName,
 		&certTimeToExpire,
 		[]certv1.KeyUsage{certv1.UsageClientAuth},
 		privateKey)
