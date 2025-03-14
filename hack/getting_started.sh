@@ -154,7 +154,7 @@ function installByohProvider() {
     for((i=1;i<=${maxRunTimes};i++));  
     do  
         #byohStatus=$(kubectl get pods --all-namespaces | grep byoh-controller-manager | awk '{print $4}')
-        replicas=$(kubectl get deployment byoh-controller-manager -n kaapi -o json | jq .status.readyReplicas)
+        replicas=$(kubectl get deployment byoh-controller-manager -n byoh-system -o json | jq .status.readyReplicas)
         if [ "${replicas}" == "1" ] ; then
             echo "Byoh provider is ready"
             return
