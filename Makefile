@@ -24,7 +24,7 @@ SKIP_RESOURCE_CLEANUP ?= false
 USE_EXISTING_CLUSTER ?= false
 EXISTING_CLUSTER_BYOHOSTCONFIG_PATH ?=
 GINKGO_NOCOLOR ?= false
-
+GITHASH=$(shell git rev-parse --short HEAD)
 TOOLS_DIR := $(REPO_ROOT)/hack/tools
 BIN_DIR := bin
 TOOLS_BIN_DIR := $(TOOLS_DIR)/$(BIN_DIR)
@@ -260,9 +260,6 @@ build-host-agent-binary: host-agent-binaries
 
 
 ##########################################################################
-check-env:
-	$(shell ./check_env.sh)
-
 
 BUILD_DIR=$(shell pwd)/build
 $(BUILD_DIR):
@@ -292,7 +289,7 @@ $(PF9_BYOHOST_RPM_FILE): |$(RPM_SRC_ROOT)
 	rpmbuild -bb \
 	    --define "_topdir $(RPMBUILD_DIR)"  \
 	    --define "_src_dir $(RPM_SRC_ROOT)"  \
-	    --define "_githash $(AGENT_SRC_DIR)/scripts/pf9-byohost.spec "
+	    --define "_githash $(GITHASH)" $(AGENT_SRC_DIR)/scripts/pf9-byohost.spec 
 	./$(AGENT_SRC_DIR)/scripts/sign_packages.sh $(PF9_BYOHOST_RPM_FILE)
 	md5sum $(PF9_BYOHOST_RPM_FILE) | cut -d' ' -f 1  > $(PF9_BYOHOST_RPM_FILE).md5
 
@@ -323,7 +320,7 @@ $(PF9_BYOHOST_DEB_FILE): $(DEB_SRC_ROOT)
 	 --after-remove $(AGENT_SRC_DIR)/scripts/pf9-byohost-agent-after-remove.sh \
 	 -p $(PF9_BYOHOST_DEB_FILE) \
 	 -C $(DEB_SRC_ROOT)/ .
-	./sign_packages_deb.sh $(PF9_BYOHOST_DEB_FILE)
+	$(AGENT_SRC_DIR)/sign_packages_deb.sh $(PF9_BYOHOST_DEB_FILE)
 	md5sum $(PF9_BYOHOST_DEB_FILE) | cut -d' ' -f 1 > $(PF9_BYOHOST_DEB_FILE).md5
 
 build-host-agent-deb: $(PF9_BYOHOST_DEB_FILE)
@@ -333,12 +330,9 @@ $(DEB_DEP_SRC_ROOT):	build-host-agent-deb
 			echo "\n Building DEB for dependency package "
 			mkdir -p $(DEB_DEP_SRC_ROOT)
 			echo "copy pf9-byohost-agent deb package"
-			cp $(PF9_BYOHOST_DEB_FILE) $(DEB_DEP_SRC_ROOT)/.
-			echo "Successfully copied byoh-sgent deb pkg\n"
-			cp $(AGENT_SRC_DIR)/scripts/Dockerfile $(DEB_DEP_SRC_ROOT)/Dockerfile
-			echo "Successfully copied Dockerfile"
-			cp $(AGENT_SRC_DIR)/scripts/install.sh $(DEB_DEP_SRC_ROOT)/install.sh
-			echo "Successfully copied install.sh"
+			cp $(PF9_BYOHOST_DEB_FILE) $(DEB_DEP_SRC_ROOT)/. && echo "Successfully copied byoh-sgent deb pkg\n"
+			cp $(AGENT_SRC_DIR)/scripts/Dockerfile $(DEB_DEP_SRC_ROOT)/Dockerfile && echo "Successfully copied Dockerfile"
+			cp $(AGENT_SRC_DIR)/scripts/install.sh $(DEB_DEP_SRC_ROOT)/install.sh && echo "Successfully copied install.sh"
 
 
 build-byoh-image : | $(DEB_DEP_SRC_ROOT)

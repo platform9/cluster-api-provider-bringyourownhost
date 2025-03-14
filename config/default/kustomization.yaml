@@ -1,5 +1,5 @@
 # Adds namespace to all resources.
-namespace: '{{ .Release.Namespace }}'
+namespace: byoh-system 
 # Value of this field is prepended to the
 # names of all resources, e.g. a deployment named
 # "wordpress" becomes "alices-wordpress".
