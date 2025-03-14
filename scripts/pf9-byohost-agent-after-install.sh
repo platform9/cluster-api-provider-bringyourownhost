@@ -29,6 +29,6 @@ export NAMESPACE=$(grep 'namespace: *' /root/.byoh/config | awk '{print $2}')
 echo "NAMESPACE=$NAMESPACE" > /etc/pf9-byohost-agent.service.d/pf9-byohost-agent.conf
 echo "BOOTSTRAP_KUBECONFIG=/etc/pf9-byohost-agent.service.d/bootstrap-kubeconfig.yaml" >> /etc/pf9-byohost-agent.service.d/pf9-byohost-agent.conf 
 
-# systemctl daemon-reload
-# systemctl enable pf9-byohost-agent.service
-# systemctl start pf9-byohost-agent.service
+systemctl daemon-reload
+systemctl enable pf9-byohost-agent.service
+systemctl start pf9-byohost-agent.service
