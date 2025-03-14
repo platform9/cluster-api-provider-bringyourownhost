@@ -278,7 +278,6 @@ COMMON_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/common
 PF9_BYOHOST_DEB_FILE := $(PF9_BYOHOST_SRCDIR)/debsrc/pf9-byohost-agent.deb
 RPMBUILD_DIR := $(PF9_BYOHOST_SRCDIR)/rpmsrc
 PF9_BYOHOST_RPM_FILE := $(PF9_BYOHOST_SRCDIR)/rpmsrc/pf9-byohost-agent.rpm
-DEB_DEP_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/dependencies
 
 $(RPM_SRC_ROOT): | $(COMMON_SRC_ROOT)
 	echo "make RPM_SRC_ROOT: $(RPM_SRC_ROOT)"
@@ -324,19 +323,6 @@ $(PF9_BYOHOST_DEB_FILE): $(DEB_SRC_ROOT)
 	md5sum $(PF9_BYOHOST_DEB_FILE) | cut -d' ' -f 1 > $(PF9_BYOHOST_DEB_FILE).md5
 
 build-host-agent-deb: $(PF9_BYOHOST_DEB_FILE)
-
-
-$(DEB_DEP_SRC_ROOT):	build-host-agent-deb
-			echo "\n Building DEB for dependency package "
-			mkdir -p $(DEB_DEP_SRC_ROOT)
-			echo "copy pf9-byohost-agent deb package"
-			cp $(PF9_BYOHOST_DEB_FILE) $(DEB_DEP_SRC_ROOT)/. && echo "Successfully copied byoh-sgent deb pkg\n"
-			cp $(AGENT_SRC_DIR)/scripts/Dockerfile $(DEB_DEP_SRC_ROOT)/Dockerfile && echo "Successfully copied Dockerfile"
-			cp $(AGENT_SRC_DIR)/scripts/install.sh $(DEB_DEP_SRC_ROOT)/install.sh && echo "Successfully copied install.sh"
-
-
-build-byoh-image : | $(DEB_DEP_SRC_ROOT)
-	echo $(DEB_DEP_SRC_ROOT)
 
 ########################################################################
 
