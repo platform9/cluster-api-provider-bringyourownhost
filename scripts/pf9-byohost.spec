@@ -25,7 +25,7 @@ SRC_DIR=%_src_dir
 rm -fr $RPM_BUILD_ROOT
 mkdir -p $RPM_BUILD_ROOT
 cp -r $SRC_DIR/* $RPM_BUILD_ROOT
-mkdir -p $RPM_BUILD_ROOT/var/log/pf9/byoh/byoh-agent.log
+mkdir -p $RPM_BUILD_ROOT/var/log/pf9/byoh
 chmod +x $RPM_BUILD_ROOT/binary/pf9-byoh-hostagent-linux-amd64
 cp $RPM_BUILD_ROOT/lib/systemd/system/pf9-byohost-agent.service $RPM_BUILD_ROOT/etc/systemd/system/pf9-byohost-agent.service
 
