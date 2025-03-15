@@ -15,6 +15,3 @@ if ! dpkg -i pf9-byohost-agent.deb; then
 	    echo "Failed to install pf9-byohost-agent package"
 	    exit 1
 	fi
-systemctl daemon-reload
-systemctl enable pf9-byohost-agent.service
-systemctl start pf9-byohost-agent.service
