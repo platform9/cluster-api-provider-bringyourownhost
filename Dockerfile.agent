@@ -1,0 +1,51 @@
+# Build the agent binary
+FROM golang:1.20.7 as builder
+
+WORKDIR /workspace
+# Copy the Go Modules manifests
+COPY go.mod go.mod
+COPY go.sum go.sum
+# Cache deps before building
+RUN go mod download
+
+# Copy the source code
+COPY agent/ agent/
+COPY apis/ apis/
+COPY common/ common/
+COPY installer/ installer/
+COPY feature/ feature/
+
+# Build the agent binary
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o byoh-agent ./agent/main.go
+
+# Use Ubuntu as base image to have necessary tools
+FROM ubuntu:22.04
+
+# Install dependencies needed for host operations
+RUN apt-get update && apt-get install -y \
+    curl \
+    tar \
+    wget \
+    apt-transport-https \
+    ca-certificates \
+    gnupg \
+    util-linux \
+    lsb-release \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /
+COPY --from=builder /workspace/byoh-agent /byoh-agent
+
+# Create entrypoint script
+RUN echo '#!/bin/bash\n\
+# Set container environment variable\n\
+export RUNNING_IN_CONTAINER=true\n\
+\n\
+# Default host prefix if not provided\n\
+export HOST_PREFIX=${HOST_PREFIX:-"/host"}\n\
+\n\
+# Run the agent with all arguments\n\
+exec /byoh-agent "$@"\n\
+' > /entrypoint.sh && chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]

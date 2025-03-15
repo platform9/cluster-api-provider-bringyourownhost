@@ -132,6 +132,16 @@ var (
 
 // TODO - fix logging
 func main() {
+	// Check if running in container and set up host paths
+	runningInContainer := os.Getenv("RUNNING_IN_CONTAINER") == "true"
+	hostPrefix := os.Getenv("HOST_PREFIX")
+	
+	if runningInContainer {
+		klog.Info("Running in container mode with host prefix: " + hostPrefix)
+		// Pass host prefix to the environment for installer scripts
+		os.Setenv("HOST_PREFIX", hostPrefix)
+	}
+
 	setupflags()
 	pflag.Parse()
 	if printVersion {
