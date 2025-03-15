@@ -21,6 +21,10 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o byoh-agent ./agent/main
 # Use Ubuntu as base image to have necessary tools
 FROM ubuntu:22.04
 
+# Add containerd-specific labels
+LABEL io.containerd.image.name="byoh-agent"
+LABEL io.containerd.image.description="BYOH Agent for installing Kubernetes components on host"
+
 # Install dependencies needed for host operations
 RUN apt-get update && apt-get install -y \
     curl \
