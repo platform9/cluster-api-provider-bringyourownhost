@@ -4,6 +4,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/client"
@@ -20,8 +21,7 @@ var (
 	domain              string
 	tenant              string
 	clientToken         string
-	containerdSock      string
-	agentImage          string
+	verbosity           string
 )
 
 var rootCmd = &cobra.Command{
@@ -49,18 +49,17 @@ This command will:
 }
 
 func init() {
-	onboardCmd.Flags().StringVarP(&username, "username", "u", "", "Username for authentication")
-	onboardCmd.Flags().StringVarP(&password, "password", "p", "", "Password for authentication")
-	onboardCmd.Flags().BoolVarP(&passwordInteractive, "interactive", "i", false, "Prompt for password interactively")
+	onboardCmd.Flags().StringVarP(&username, "username", "u", "", "Platform9 username")
+	onboardCmd.MarkFlagRequired("username")
+	onboardCmd.Flags().StringVarP(&password, "password", "p", "", "Platform9 password")
+	onboardCmd.Flags().BoolVar(&passwordInteractive, "password-interactive", false, "Enter password interactively")
 	onboardCmd.Flags().StringVarP(&fqdn, "fqdn", "f", "", "Platform9 FQDN")
-	onboardCmd.Flags().StringVarP(&domain, "domain", "d", "default", "Domain name")
-	onboardCmd.Flags().StringVarP(&tenant, "tenant", "t", "", "Tenant name")
-	onboardCmd.Flags().StringVarP(&clientToken, "client-token", "c", "", "Client token for authentication")
-	onboardCmd.Flags().StringVar(&containerdSock, "containerd-sock", client.DefaultContainerdSock, "Path to containerd socket")
-	onboardCmd.Flags().StringVar(&agentImage, "agent-image", client.DefaultAgentImage, "Agent container image to use")
-
-	onboardCmd.MarkFlagsMutuallyExclusive("password", "interactive")
-
+	onboardCmd.MarkFlagRequired("fqdn")
+	onboardCmd.Flags().StringVarP(&domain, "domain", "d", "default", "Platform9 domain")
+	onboardCmd.Flags().StringVarP(&tenant, "tenant", "t", "service", "Platform9 tenant")
+	onboardCmd.Flags().StringVar(&clientToken, "client-token", "", "Client token for authentication")
+	onboardCmd.Flags().StringVarP(&verbosity, "verbosity", "v", "minimal", "Log verbosity level (all, important, minimal, critical, none)")
+	onboardCmd.MarkFlagsMutuallyExclusive("password", "password-interactive")
 	onboardCmd.MarkFlagRequired("username")
 	onboardCmd.MarkFlagRequired("password")
 	onboardCmd.MarkFlagRequired("fqdn")
@@ -71,6 +70,25 @@ func init() {
 }
 
 func runOnboard(cmd *cobra.Command, args []string) {
+	// Initialize loggers
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Printf("Error getting user home directory: %v\n", err)
+		os.Exit(1)
+	}
+	logDir := filepath.Join(homeDir, ".byoh", "logs")
+	byohDir := filepath.Join(homeDir, ".byoh")
+	// Initialize loggers with debug enabled for file logs
+	if err = utils.InitLoggers(byohDir, true); err != nil {
+		fmt.Printf("Error initializing loggers: %v\n", err)
+		os.Exit(1)
+	}
+	defer utils.CloseLoggers()
+
+	// Set console output level based on verbosity flag
+	utils.SetConsoleOutputLevel(verbosity)
+
+	// Continue with interactive password if needed
 	if passwordInteractive {
 		fmt.Print("Enter Password: ")
 		pwBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
@@ -84,10 +102,12 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	start := time.Now()
 	defer utils.TrackTime(start, "Total onboarding process")
 
-	utils.LogInfo("Starting host onboarding process")
-	utils.LogInfo("Using FQDN: %s, Domain: %s, Tenant: %s", fqdn, domain, tenant)
+	utils.LogDebug("Starting host onboarding process")
+	utils.LogDebug("Using FQDN: %s, Domain: %s, Tenant: %s", fqdn, domain, tenant)
+	utils.LogDebug("Verbosity level set to: %s", verbosity)
 
 	// 1. Get authentication token
+	utils.LogDebug("Getting authentication token for user %s", username)
 	authClient := client.NewAuthClient(fqdn, clientToken)
 	token, err := authClient.GetToken(username, password)
 	if err != nil {
@@ -95,18 +115,8 @@ func runOnboard(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// 2. Create Kubernetes client with options
-	var clientOptions []client.Option
-	// Only add options if non-default values are provided
-	if containerdSock != client.DefaultContainerdSock {
-		clientOptions = append(clientOptions, client.WithContainerdSock(containerdSock))
-	}
-
-	if agentImage != client.DefaultAgentImage {
-		clientOptions = append(clientOptions, client.WithAgentImage(agentImage))
-	}
-
-	k8sClient := client.NewK8sClient(fqdn, domain, tenant, token, clientOptions...)
+	// 2. Create Kubernetes client 
+	k8sClient := client.NewK8sClient(fqdn, domain, tenant, token)
 
 	// 3. Save kubeconfig
 	utils.LogInfo("Saving kubeconfig file")
@@ -125,4 +135,11 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	}
 
 	utils.LogSuccess("Successfully onboarded the host")
+	
+	// Display log locations at the end of the command
+	logDir = filepath.Join(filepath.Join(homeDir, ".byoh"), "logs")
+	// Use LogSuccess to ensure these messages are shown even in minimal verbosity mode
+	utils.LogSuccess("BYOH Agent Service logs are available at:")
+	utils.LogSuccess("   - Agent service logs: %s/agent.log", logDir)
+	utils.LogSuccess("   - byohctl tool logs: %s/byoh-agent-debug.log", logDir)
 }

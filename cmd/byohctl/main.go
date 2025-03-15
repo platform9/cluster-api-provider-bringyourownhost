@@ -9,7 +9,7 @@ import (
 
 func main() {
     if err := cmd.Execute(); err != nil {
-        utils.LogError(err.Error())
+        utils.LogError("Command execution failed: %s", err.Error())
         os.Exit(1)
     }
 }
