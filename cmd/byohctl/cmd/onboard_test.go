@@ -18,8 +18,7 @@ func TestOnboardFlags(t *testing.T) {
 	origDomain := domain
 	origTenant := tenant
 	origClientToken := clientToken
-	origContainerdSock := containerdSock
-	origAgentImage := agentImage
+	origVerbosity := verbosity
 
 	defer func() {
 		// Restore original values
@@ -30,8 +29,7 @@ func TestOnboardFlags(t *testing.T) {
 		domain = origDomain
 		tenant = origTenant
 		clientToken = origClientToken
-		containerdSock = origContainerdSock
-		agentImage = origAgentImage
+		verbosity = origVerbosity
 	}()
 
 	// Reset global flags
@@ -42,41 +40,42 @@ func TestOnboardFlags(t *testing.T) {
 	domain = ""
 	tenant = ""
 	clientToken = ""
-	containerdSock = ""
-	agentImage = ""
+	verbosity = ""
 
 	// Create a new test command with the same flag setup
 	testCmd := createTestCommand()
 
 	// Test flag parsing
 	args := []string{
-		"--username", "testuser",
-		"--password", "testpass",
-		"--fqdn", "test.example.com",
+		"--username", "test@example.com",
+		"--password", "test-password",
+		"--fqdn", "test.platform9.com",
 		"--domain", "custom-domain",
 		"--tenant", "custom-tenant",
 		"--client-token", "custom-token",
-		"--containerd-sock", "custom-sock",
-		"--agent-image", "custom-image:tag",
+		"--verbosity", "debug",
 	}
 
 	testCmd.SetArgs(args)
-	err := testCmd.Execute()
-	if err != nil {
-		t.Fatalf("Command execution failed: %v", err)
+	if err := testCmd.Execute(); err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
 	}
 
-	// Verify parsed values
-	if username != "testuser" {
-		t.Errorf("Expected username 'testuser', got '%s'", username)
+	// Verify flags were parsed correctly
+	if username != "test@example.com" {
+		t.Errorf("Expected username 'test@example.com', got '%s'", username)
 	}
 
-	if password != "testpass" {
-		t.Errorf("Expected password 'testpass', got '%s'", password)
+	if password != "test-password" {
+		t.Errorf("Expected password 'test-password', got '%s'", password)
 	}
 
-	if fqdn != "test.example.com" {
-		t.Errorf("Expected fqdn 'test.example.com', got '%s'", fqdn)
+	if passwordInteractive != false {
+		t.Errorf("Expected passwordInteractive 'false', got '%v'", passwordInteractive)
+	}
+
+	if fqdn != "test.platform9.com" {
+		t.Errorf("Expected fqdn 'test.platform9.com', got '%s'", fqdn)
 	}
 
 	if domain != "custom-domain" {
@@ -90,13 +89,9 @@ func TestOnboardFlags(t *testing.T) {
 	if clientToken != "custom-token" {
 		t.Errorf("Expected client-token 'custom-token', got '%s'", clientToken)
 	}
-
-	if containerdSock != "custom-sock" {
-		t.Errorf("Expected containerd-sock 'custom-sock', got '%s'", containerdSock)
-	}
-
-	if agentImage != "custom-image:tag" {
-		t.Errorf("Expected agent-image 'custom-image:tag', got '%s'", agentImage)
+	
+	if verbosity != "debug" {
+		t.Errorf("Expected verbosity 'debug', got '%s'", verbosity)
 	}
 }
 
@@ -197,8 +192,7 @@ func createTestCommand() *cobra.Command {
 	testCmd.Flags().StringVarP(&domain, "domain", "d", "default", "Domain name")
 	testCmd.Flags().StringVarP(&tenant, "tenant", "t", "", "Tenant name")
 	testCmd.Flags().StringVarP(&clientToken, "client-token", "c", "", "Client token for authentication")
-	testCmd.Flags().StringVar(&containerdSock, "containerd-sock", "default-sock", "Path to containerd socket")
-	testCmd.Flags().StringVar(&agentImage, "agent-image", "default-image", "Agent container image to use")
+	testCmd.Flags().StringVarP(&verbosity, "verbosity", "v", "minimal", "Log verbosity level")
 
 	// Mark mutual exclusivity
 	testCmd.MarkFlagsMutuallyExclusive("password", "interactive")
