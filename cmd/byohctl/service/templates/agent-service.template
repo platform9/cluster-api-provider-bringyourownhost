@@ -1,0 +1,14 @@
+[Unit]
+Description=BYOH Agent Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=$1
+Restart=always
+RestartSec=10
+WorkingDirectory=$2
+
+[Install]
+WantedBy=multi-user.target
