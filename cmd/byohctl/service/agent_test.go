@@ -221,6 +221,30 @@ func TestStartAgent(t *testing.T) {
 	os.MkdirAll(logDir, 0755)
 	os.MkdirAll(nestedConfigDir, 0755)
 
+	// Create a dummy kubeconfig file in the expected location
+	kubeConfigPath := filepath.Join(nestedConfigDir, "config")
+	dummyKubeConfig := `
+apiVersion: v1
+clusters:
+- cluster:
+    server: https://example.com:6443
+  name: test-cluster
+contexts:
+- context:
+    cluster: test-cluster
+    user: test-user
+  name: test-context
+current-context: test-context
+kind: Config
+users:
+- name: test-user
+  user:
+    token: test-token
+`
+	if err := os.WriteFile(kubeConfigPath, []byte(dummyKubeConfig), 0644); err != nil {
+		t.Fatalf("Failed to create test kubeconfig: %v", err)
+	}
+
 	// Create a dummy agent binary
 	agentBinary := filepath.Join(tempDir, "byoh-hostagent-linux-amd64")
 	if err := os.WriteFile(agentBinary, []byte("#!/bin/bash\necho BYOH Agent v0.5.0"), 0755); err != nil {

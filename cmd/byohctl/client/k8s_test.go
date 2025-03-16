@@ -123,12 +123,19 @@ func TestGetSecret(t *testing.T) {
 
 // Test SaveKubeConfig method - simplified for unit testing
 func TestSaveKubeConfig(t *testing.T) {
-	// Create temp directory
+	// Create temp directory to simulate home directory
 	tempDir, err := os.MkdirTemp("", "test-kubeconfig")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tempDir)
+	
+	// Save original environment variables to restore later
+	origHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", origHome)
+	
+	// Set HOME to our temp directory for this test
+	os.Setenv("HOME", tempDir)
 	
 	// Set up test HTTP server
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -156,45 +163,32 @@ func TestSaveKubeConfig(t *testing.T) {
 	client := NewK8sClient(host, "test-domain", "test-tenant", "test-token")
 	client.client = httpClient
 	
-	// Temporarily handle /tmp/pf9 directory
-	origTmpPf9 := "/tmp/pf9"
-	backupPath := origTmpPf9 + ".backup"
-	
-	// Check if /tmp/pf9 exists and back it up if it does
-	if _, err := os.Stat(origTmpPf9); err == nil {
-		// Backup existing directory
-		if err := os.Rename(origTmpPf9, backupPath); err != nil {
-			t.Fatalf("Failed to backup /tmp/pf9: %v", err)
-		}
-		defer func() {
-			// Clean up our test directory and restore the original
-			os.RemoveAll(origTmpPf9)
-			os.Rename(backupPath, origTmpPf9)
-		}()
-	} else {
-		// If it doesn't exist, just make sure we clean up afterward
-		defer os.RemoveAll(origTmpPf9)
-	}
-	
-	// Create our own /tmp/pf9 directory
-	err = os.MkdirAll(origTmpPf9, 0755)
-	if err != nil {
-		t.Fatalf("Failed to create /tmp/pf9: %v", err)
-	}
-	
 	// Test SaveKubeConfig
 	err = client.SaveKubeConfig("kubeconfig")
 	if err != nil {
 		t.Errorf("SaveKubeConfig returned error: %v", err)
 	}
 	
-	// Verify the kubeconfig file exists
-	kubeConfigPath := "/tmp/pf9/bootstrap-kubeconfig.yaml"
+	// Verify the kubeconfig file exists at the final location
+	// This should be ~/.byoh/config
+	byohDir := filepath.Join(tempDir, ".byoh")
+	kubeConfigPath := filepath.Join(byohDir, "config")
+	
 	if _, err := os.Stat(kubeConfigPath); os.IsNotExist(err) {
 		t.Errorf("Kubeconfig file not created at expected path: %s", kubeConfigPath)
+	} else if err != nil {
+		t.Errorf("Error checking kubeconfig file: %v", err)
+	} else {
+		// Read the content to verify it's correct
+		content, err := os.ReadFile(kubeConfigPath)
+		if err != nil {
+			t.Errorf("Error reading kubeconfig file: %v", err)
+		} else if string(content) != "apiVersion: v1\nkind: Config\n" {
+			t.Errorf("Expected kubeconfig content 'apiVersion: v1\nkind: Config\n', got '%s'", string(content))
+		}
 	}
 	
-	t.Logf("SaveKubeConfig executed successfully")
+	t.Logf("SaveKubeConfig successfully created kubeconfig at %s", kubeConfigPath)
 }
 
 // Test DNS resolution

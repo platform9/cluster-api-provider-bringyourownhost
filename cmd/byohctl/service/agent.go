@@ -10,9 +10,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
-	"strconv"
 	"time"
 
 	"github.com/coreos/go-systemd/v22/dbus"
@@ -32,6 +32,7 @@ const (
 )
 
 // Embed template files directly into the binary
+//
 //go:embed templates/agent-wrapper.sh
 var agentWrapperTemplate string
 
@@ -49,9 +50,9 @@ var agentDmesgTemplate string
 
 // MinimumVersions defines the minimum dependency versions required for BYOH to function correctly
 var MinimumVersions = map[string]string{
-	"socat":     "1.7.3.3",  // Minimum required version
-	"conntrack": "1.4.5",    // Minimum required version
-	"ebtables":  "1.8.4",    // Minimum required version
+	"socat":     "1.7.3.3", // Minimum required version
+	"conntrack": "1.4.5",   // Minimum required version
+	"ebtables":  "1.8.4",   // Minimum required version
 }
 
 // AgentConfig holds configuration for the BYOH agent
@@ -94,7 +95,7 @@ func installUbuntuPrerequisites() error {
 	if err != nil || !strings.Contains(string(output), "Ubuntu") {
 		return fmt.Errorf("not an Ubuntu system or lsb_release failed: %v", err)
 	}
-	
+
 	// Install missing packages
 	requiredPkgs := []string{"conntrack", "ebtables", "socat"}
 	missingPkgs := []string{}
@@ -125,7 +126,7 @@ func installUbuntuPrerequisites() error {
 	}
 
 	utils.LogSuccess("Successfully installed prerequisites")
-	
+
 	// Verify versions after installation
 	return verifyDependencyVersions()
 }
@@ -136,8 +137,8 @@ func verifyDependencyVersions() error {
 
 	// Define dependency commands and parser functions
 	dependencies := map[string]struct {
-		command     []string
-		parseFunc   func(string) string
+		command   []string
+		parseFunc func(string) string
 	}{
 		"socat":     {[]string{"socat", "-V"}, parseSocatVersion},
 		"conntrack": {[]string{"conntrack", "--version"}, parseConntrackVersion},
@@ -157,11 +158,11 @@ func verifyDependencyVersions() error {
 		version := info.parseFunc(string(output))
 		minVersion := MinimumVersions[dep]
 		if !isVersionSufficient(dep, version) {
-			versionErrors = append(versionErrors, 
-				fmt.Sprintf("Installed %s version %s does not meet the minimum required version %s", 
+			versionErrors = append(versionErrors,
+				fmt.Sprintf("Installed %s version %s does not meet the minimum required version %s",
 					dep, version, minVersion))
 		} else {
-			utils.LogDebug("%s version %s meets minimum requirement", 
+			utils.LogDebug("%s version %s meets minimum requirement",
 				dep, version)
 		}
 	}
@@ -223,20 +224,20 @@ func isVersionSufficient(pkg, installedVersion string) bool {
 	if installedVersion == "unknown" {
 		return false
 	}
-	
+
 	minRequired, exists := MinimumVersions[pkg]
 	if !exists {
 		return true // No minimum specified
 	}
-	
+
 	// Compare version strings using semantic versioning
 	installed := parseVersionParts(installedVersion)
 	required := parseVersionParts(minRequired)
-	
+
 	// Compare major, minor, patch
 	for i := 0; i < 3; i++ {
 		if i >= len(installed) {
-			// If installed version has fewer parts (e.g., 1.7 vs 1.7.0), 
+			// If installed version has fewer parts (e.g., 1.7 vs 1.7.0),
 			// treat missing parts as 0
 			installed = append(installed, 0)
 		}
@@ -244,7 +245,7 @@ func isVersionSufficient(pkg, installedVersion string) bool {
 			// If required version has fewer parts, treat missing parts as 0
 			required = append(required, 0)
 		}
-		
+
 		if installed[i] > required[i] {
 			return true
 		}
@@ -252,7 +253,7 @@ func isVersionSufficient(pkg, installedVersion string) bool {
 			return false
 		}
 	}
-	
+
 	// If we get here, versions are equal up to the precision specified
 	return true
 }
@@ -335,81 +336,6 @@ func CreateAgentDirectories(config *AgentConfig) error {
 	}
 
 	return nil
-}
-
-// CopyKubeconfig copies the kubeconfig to the agent directory
-func CopyKubeconfig(byohDir, kubeConfigPath string) error {
-	utils.LogInfo("Copying kubeconfig to agent directory")
-
-	// Ensure the .byoh directory exists
-	configDir := filepath.Join(byohDir, ".byoh")
-	if err := os.MkdirAll(configDir, DefaultDirPerms); err != nil {
-		return fmt.Errorf("failed to create config directory %s: %v", configDir, err)
-	}
-
-	// Target path for the kubeconfig in the .byoh directory
-	targetPath := filepath.Join(configDir, "config")
-
-	// Read the source kubeconfig
-	utils.LogDebug("Reading kubeconfig from %s", kubeConfigPath)
-	content, err := os.ReadFile(kubeConfigPath)
-	if err != nil {
-		return fmt.Errorf("failed to read kubeconfig: %v", err)
-	}
-
-	// Write directly to the target path
-	utils.LogDebug("Writing kubeconfig to %s", targetPath)
-	if err := os.WriteFile(targetPath, content, DefaultFilePerms); err != nil {
-		return fmt.Errorf("failed to write kubeconfig: %v", err)
-	}
-
-	// Set KUBECONFIG environment variable to point to this location
-	if err := os.Setenv("KUBECONFIG", targetPath); err != nil {
-		utils.LogWarn("Failed to set KUBECONFIG environment variable: %v", err)
-	} else {
-		utils.LogDebug("Set KUBECONFIG environment variable to %s", targetPath)
-	}
-
-	utils.LogSuccess("Successfully copied kubeconfig to %s", targetPath)
-	return nil
-}
-
-// VerifyAgentBinary verifies the agent binary is valid and executable
-func VerifyAgentBinary(binaryPath string) (bool, string) {
-	// Check if file exists
-	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
-		return false, fmt.Sprintf("Agent binary does not exist at path: %s", binaryPath)
-	}
-
-	// Check executable permission
-	fileInfo, err := os.Stat(binaryPath)
-	if err != nil {
-		return false, fmt.Sprintf("Failed to get file info: %v", err)
-	}
-
-	// On Unix systems, check if file is executable
-	if runtime.GOOS != "windows" {
-		if fileInfo.Mode()&0111 == 0 {
-			return false, fmt.Sprintf("Agent binary is not executable: %s", binaryPath)
-		}
-	}
-
-	// Try to execute the binary with --version to check if it works
-	cmd := exec.Command(binaryPath, "--version")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		// Check file type using 'file' command to provide more diagnostics
-		fileCmd := exec.Command("file", binaryPath)
-		fileOutput, fileErr := fileCmd.CombinedOutput()
-		if fileErr == nil {
-			return false, fmt.Sprintf("Binary failed to execute: %v\nOutput: %s\nFile type: %s", 
-				err, string(output), string(fileOutput))
-		}
-		return false, fmt.Sprintf("Binary failed to execute: %v\nOutput: %s", 
-			err, string(output))
-	}
-
-	return true, fmt.Sprintf("Agent binary successfully verified: %s", strings.TrimSpace(string(output)))
 }
 
 // setupDiagnosticEnvironment creates a diagnostics directory and initializes logging
@@ -508,7 +434,7 @@ func diagnoseAgentBinary(agentBinary string, diagDir string, diagLog *os.File) {
 			} else {
 				logDiag("✅ All shared library dependencies are available")
 			}
-			
+
 			// Save full dependency list to diagnostic directory
 			if diagLog != nil {
 				depFilePath := filepath.Join(diagDir, "dependencies.log")
@@ -532,17 +458,17 @@ func diagnoseSystemDependencies(diagDir string, diagLog *os.File) {
 
 	// Check and report on dependency versions
 	logDiag("🔍 Checking system dependency versions...")
-	
+
 	// Define dependency commands and parser functions
 	dependencies := map[string]struct {
-		command     []string
-		parseFunc   func(string) string
+		command   []string
+		parseFunc func(string) string
 	}{
 		"socat":     {[]string{"socat", "-V"}, parseSocatVersion},
 		"conntrack": {[]string{"conntrack", "--version"}, parseConntrackVersion},
 		"ebtables":  {[]string{"ebtables", "--version"}, parseEbtablesVersion},
 	}
-	
+
 	// Check each dependency in a loop
 	for dep, info := range dependencies {
 		checkDepCmd := exec.Command(info.command[0], info.command[1:]...)
@@ -551,17 +477,17 @@ func diagnoseSystemDependencies(diagDir string, diagLog *os.File) {
 			logDiag("⚠️ Failed to check %s version: %v", dep, err)
 			continue
 		}
-		
+
 		version := info.parseFunc(string(checkOutput))
 		testedVersion := MinimumVersions[dep]
-		
+
 		if version == "unknown" {
 			logDiag("⚠️ Could not determine %s version", dep)
 		} else if !isVersionSufficient(dep, version) {
-			logDiag("⚠️ Installed %s version %s does not meet the minimum required version %s", 
+			logDiag("⚠️ Installed %s version %s does not meet the minimum required version %s",
 				dep, version, testedVersion)
 		} else {
-			logDiag("✅ %s version %s meets minimum requirement (%s)", 
+			logDiag("✅ %s version %s meets minimum requirement (%s)",
 				dep, version, testedVersion)
 		}
 	}
@@ -630,7 +556,7 @@ func diagnoseSystemEnvironment(diagDir string, diagLog *os.File) {
 			if len(dmesgOutput) > 0 {
 				logDiag("⚠️ Recent system errors found in dmesg:")
 				logDiag("📄 %s", string(dmesgOutput))
-				
+
 				// Save to file
 				dmesgFilePath := filepath.Join(diagDir, "dmesg_errors.log")
 				if err := os.WriteFile(dmesgFilePath, dmesgOutput, DefaultFilePerms); err != nil {
@@ -664,9 +590,9 @@ func diagnoseConfigurationIssues(byohDir string, diagDir string, diagLog *os.Fil
 	}
 
 	// Check if kubeconfig exists and is valid
-	kubeconfigPath := filepath.Join(byohDir, "kubeconfig")
+	kubeconfigPath := filepath.Join(byohDir, "config")
 	logDiag("🔍 Checking kubeconfig at %s", kubeconfigPath)
-	
+
 	if _, err := os.Stat(kubeconfigPath); os.IsNotExist(err) {
 		logDiag("⚠️ Kubeconfig does not exist")
 	} else {
@@ -713,7 +639,7 @@ func DiagnoseAgentFailure(byohDir, agentBinary string) error {
 			diagLog.Close()
 		}
 	}()
-	
+
 	// Helper function for logging to both console and diagnostic file
 	logDiag := func(format string, args ...interface{}) {
 		message := fmt.Sprintf(format, args...)
@@ -722,23 +648,35 @@ func DiagnoseAgentFailure(byohDir, agentBinary string) error {
 			fmt.Fprintln(diagLog, message)
 		}
 	}
-	
+
 	// Run all diagnostic modules
 	logDiag("🔎 Starting agent diagnostics...")
 	logDiag("📁 Diagnostic data will be saved to: %s", diagDir)
-	
+
 	diagnoseAgentBinary(agentBinary, diagDir, diagLog)
 	diagnoseSystemDependencies(diagDir, diagLog)
 	diagnoseSystemEnvironment(diagDir, diagLog)
 	diagnoseConfigurationIssues(byohDir, diagDir, diagLog)
 	logDiagnosticSummary(diagDir, diagLog)
-	
+
 	return fmt.Errorf("agent failed to start properly, diagnostics have been captured to %s", diagDir)
 }
 
 // StartAgent starts the BYOH agent using direct execution
 func StartAgent(byohDir, agentBinary, namespace string) error {
 	utils.LogInfo("Starting BYOH agent via direct execution...")
+
+	// Ensure the debug logger is initialized for diagnostics
+	logDir := filepath.Join(byohDir, "logs")
+	if err := os.MkdirAll(logDir, DefaultDirPerms); err != nil {
+		return fmt.Errorf("failed to create log directory: %v", err)
+	}
+
+	// Reinitialize loggers to ensure debug logs are available
+	if err := utils.InitLoggers(logDir, true); err != nil {
+		return fmt.Errorf("failed to initialize diagnostic logs: %v", err)
+	}
+	utils.LogInfo("Diagnostic logs will be written to: %s/byoh-agent-debug.log", logDir)
 
 	// Verify the binary before attempting to run it
 	isValid, verifyMsg := VerifyAgentBinary(agentBinary)
@@ -749,16 +687,11 @@ func StartAgent(byohDir, agentBinary, namespace string) error {
 	}
 
 	// Define log file path
-	logDir := filepath.Join(byohDir, "logs")
-	if err := os.MkdirAll(logDir, DefaultDirPerms); err != nil {
-		return utils.LogErrorf("failed to create log directory: %v", err)
-	}
-
 	logFilePath := filepath.Join(logDir, "agent.log")
 	utils.LogInfo("Agent logs will be written to: %s", logFilePath)
 
 	// Ensure the KUBECONFIG environment variable is set correctly
-	kubeConfigPath := filepath.Join(byohDir, ".byoh", "config")
+	kubeConfigPath := filepath.Join(byohDir, "config")
 	if _, err := os.Stat(kubeConfigPath); err == nil {
 		if err := os.Setenv("KUBECONFIG", kubeConfigPath); err != nil {
 			utils.LogWarn("Failed to set KUBECONFIG environment variable: %v", err)
@@ -785,9 +718,16 @@ func StartAgent(byohDir, agentBinary, namespace string) error {
 	cmd.Stderr = logFile
 	cmd.Dir = byohDir
 
-	// Set HOME environment variable explicitly to ensure the agent knows where to find its config
+	// Set HOME environment variable properly to avoid the agent looking for .byoh/.byoh/config
+	// The agent looks for $HOME/.byoh/config, so HOME should be the parent of .byoh
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		utils.LogWarn("Failed to get user home directory: %v, using fallback", err)
+		homeDir = filepath.Dir(byohDir) // Fallback to parent of byohDir
+	}
+	
 	cmd.Env = append(os.Environ(),
-		fmt.Sprintf("HOME=%s", byohDir),
+		fmt.Sprintf("HOME=%s", homeDir),
 		fmt.Sprintf("KUBECONFIG=%s", kubeConfigPath))
 
 	// Set process to a new process group to avoid termination when the parent process exits
@@ -839,9 +779,16 @@ func createSystemdService(byohDir, agentBinary, namespace string) error {
 	wrapperScriptPath := filepath.Join(byohDir, "byoh-agent-wrapper.sh")
 	wrapperTemplate := agentWrapperTemplate
 
+	// Get the user's home directory for proper HOME setting
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		utils.LogWarn("Failed to get user home directory: %v, using fallback", err)
+		homeDir = filepath.Dir(byohDir) // Fallback to parent of byohDir
+	}
+
 	// Create the wrapper script with proper parameters
-	finalWrapperContent := strings.Replace(wrapperTemplate, "$1", byohDir, -1)
-	finalWrapperContent = strings.Replace(finalWrapperContent, "$2", filepath.Join(byohDir, ".byoh", "config"), -1)
+	finalWrapperContent := strings.Replace(wrapperTemplate, "$1", homeDir, -1)
+	finalWrapperContent = strings.Replace(finalWrapperContent, "$2", filepath.Join(byohDir, "config"), -1)
 	finalWrapperContent = strings.Replace(finalWrapperContent, "$3", agentBinary, -1)
 	finalWrapperContent = strings.Replace(finalWrapperContent, "$4", namespace, -1)
 
@@ -862,7 +809,7 @@ func createSystemdService(byohDir, agentBinary, namespace string) error {
 	servicePath := "/etc/systemd/system/byoh-agent.service"
 
 	// Write service content to file - this may require sudo privileges
-	err := writeFileWithSudo(servicePath, []byte(serviceContent))
+	err = writeFileWithSudo(servicePath, []byte(serviceContent))
 	if err != nil {
 		return fmt.Errorf("failed to create systemd service file: %v", err)
 	}
@@ -1013,12 +960,22 @@ func PrepareAgentDirectory() (string, error) {
 func ConfigureAgent(byohDir, kubeConfigPath string) error {
 	utils.LogInfo("Configuring agent with kubeconfig")
 
-	// Copy the kubeconfig to the agent directory
-	if err := CopyKubeconfig(byohDir, kubeConfigPath); err != nil {
-		return err
+	// Check if the kubeconfig exists and is valid
+	if _, err := os.Stat(kubeConfigPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("kubeconfig does not exist at %s", kubeConfigPath)
+		}
+		return fmt.Errorf("error checking kubeconfig existence: %v", err)
 	}
 
-	utils.LogSuccess("Successfully configured agent")
+	// Set KUBECONFIG environment variable
+	if err := os.Setenv("KUBECONFIG", kubeConfigPath); err != nil {
+		utils.LogWarn("Failed to set KUBECONFIG environment variable: %v", err)
+	} else {
+		utils.LogDebug("Set KUBECONFIG environment variable to %s", kubeConfigPath)
+	}
+
+	utils.LogSuccess("Successfully configured agent with kubeconfig at %s", kubeConfigPath)
 	return nil
 }
 
@@ -1060,4 +1017,42 @@ func RegisterHostsEntry(hostEntry string) error {
 
 	utils.LogSuccess("Successfully registered host entry")
 	return nil
+}
+
+// VerifyAgentBinary verifies the agent binary is valid and executable
+func VerifyAgentBinary(binaryPath string) (bool, string) {
+	// Check if file exists
+	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
+		return false, fmt.Sprintf("Agent binary does not exist at path: %s", binaryPath)
+	}
+
+	// Check executable permission
+	fileInfo, err := os.Stat(binaryPath)
+	if err != nil {
+		return false, fmt.Sprintf("Failed to get file info: %v", err)
+	}
+
+	// On Unix systems, check if file is executable
+	if runtime.GOOS != "windows" {
+		if fileInfo.Mode()&0111 == 0 {
+			return false, fmt.Sprintf("Agent binary is not executable: %s", binaryPath)
+		}
+	}
+
+	// Try to execute the binary with --version to check if it works
+	cmd := exec.Command(binaryPath, "--version")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Check file type using 'file' command to provide more diagnostics
+		fileCmd := exec.Command("file", binaryPath)
+		fileOutput, fileErr := fileCmd.CombinedOutput()
+		if fileErr == nil {
+			return false, fmt.Sprintf("Binary failed to execute: %v\nOutput: %s\nFile type: %s",
+				err, string(output), string(fileOutput))
+		}
+		return false, fmt.Sprintf("Binary failed to execute: %v\nOutput: %s",
+			err, string(output))
+	}
+
+	return true, fmt.Sprintf("Agent binary successfully verified: %s", strings.TrimSpace(string(output)))
 }

@@ -21,8 +21,6 @@ import (
 const (
 	// DefaultTimeout is the default timeout for HTTP requests
 	DefaultTimeout = 30 * time.Second
-	// DefaultTempDir is the default temporary directory for storing files
-	DefaultTempDir = "/tmp/pf9"
 	// DefaultFilePerms is the default file permissions
 	DefaultFilePerms = 0644
 	// DefaultDirPerms is the default directory permissions
@@ -98,18 +96,7 @@ func (c *K8sClient) GetSecret(secretName string) (*types.Secret, error) {
 	return &secret, nil
 }
 
-// ensureTempDirectory ensures the temp directory exists
-func ensureTempDirectory(path string) error {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		utils.LogInfo("Creating directory: %s", path)
-		if err := os.MkdirAll(path, DefaultDirPerms); err != nil {
-			return fmt.Errorf("error creating directory: %v", err)
-		}
-	}
-	return nil
-}
-
-// SaveKubeConfig retrieves and saves the kubeconfig to a temp location
+// SaveKubeConfig retrieves and saves the kubeconfig directly to the byoh agent config location
 func (c *K8sClient) SaveKubeConfig(secretName string) error {
 	start := time.Now()
 	defer utils.TrackTime(start, "Saving kubeconfig")
@@ -133,16 +120,23 @@ func (c *K8sClient) SaveKubeConfig(secretName string) error {
 		return utils.LogErrorf("error decoding config: %v", err)
 	}
 
-	// Ensure temp directory exists
-	if err := ensureTempDirectory(DefaultTempDir); err != nil {
-		return utils.LogErrorf("%v", err)
+	// Prepare agent directory
+	byohDir, err := service.PrepareAgentDirectory()
+	if err != nil {
+		return utils.LogErrorf("failed to prepare agent directory: %v", err)
 	}
 
-	// Write kubeconfig to temp location
-	filePath := filepath.Join(DefaultTempDir, "bootstrap-kubeconfig.yaml")
+	// The byohDir already includes the .byoh directory, so we don't need to append it again
+	configDir := byohDir
+	if err := os.MkdirAll(configDir, service.DefaultDirPerms); err != nil {
+		return utils.LogErrorf("failed to create config directory %s: %v", configDir, err)
+	}
+
+	// Write kubeconfig directly to the final location
+	filePath := filepath.Join(configDir, "config")
 	utils.LogDebug("Writing kubeconfig to: %s", filePath)
 	
-	if err := os.WriteFile(filePath, decodedConfig, DefaultFilePerms); err != nil {
+	if err := os.WriteFile(filePath, decodedConfig, service.DefaultFilePerms); err != nil {
 		return utils.LogErrorf("error writing kubeconfig: %v", err)
 	}
 
@@ -189,7 +183,7 @@ func (c *K8sClient) RunByohAgent() error {
 	}
 
 	// Step 3: Copy kubeconfig
-	kubeConfigPath := filepath.Join(DefaultTempDir, "bootstrap-kubeconfig.yaml")
+	kubeConfigPath := filepath.Join(byohDir, "config")
 	if err := service.ConfigureAgent(byohDir, kubeConfigPath); err != nil {
 		return utils.LogErrorf("%v", err)
 	}
