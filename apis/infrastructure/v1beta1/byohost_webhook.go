@@ -49,10 +49,12 @@ func (v *ByoHostValidator) handleCreateUpdate(req *admission.Request) admission.
 	}
 	userName := req.UserInfo.Username
 	substrs := strings.Split(userName, ":")
-	if substrs[0] == "system" && substrs[1] == "serviceaccount" && substrs[4] == "byoh-controller-manager" && req.Operation == v1.Update {
-	// allow manager service account to patch ByoHost
-	// if userName == managerServiceAccount && req.Operation == v1.Update {
-		return admission.Allowed("")
+	if len(substrs) == 4 {
+		if substrs[0] == "system" && substrs[1] == "serviceaccount" && substrs[3] == "byoh-controller-manager" && req.Operation == v1.Update {
+		// allow manager service account to patch ByoHost
+		// if userName == managerServiceAccount && req.Operation == v1.Update {
+			return admission.Allowed("")
+		}
 	}
 	if len(substrs) < 2 { //nolint: gomnd
 		return admission.Denied(fmt.Sprintf("%s is not a valid agent username", userName))
