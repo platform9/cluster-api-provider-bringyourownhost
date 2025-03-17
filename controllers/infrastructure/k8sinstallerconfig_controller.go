@@ -169,12 +169,9 @@ func (r *K8sInstallerConfigReconciler) storeInstallationData(ctx context.Context
 	logger := scope.Logger
 	logger.Info("creating installation secret")
 
-	// Currently the secret name is set to byomachine name, but both kubeadm control plan
-	// & byoh try to create secret with same name. Changing secret name
-	secretName := "byoinstall-" + scope.Config.Name
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      secretName,
+			Name:      scope.Config.Name,
 			Namespace: scope.Config.Namespace,
 			Labels: map[string]string{
 				clusterv1.ClusterNameLabel: scope.Cluster.Name,

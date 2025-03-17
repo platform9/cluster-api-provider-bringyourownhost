@@ -3,7 +3,7 @@
 # Copyright 2021 VMware, Inc. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-set -ex
+set -e
 
 build-bundle.sh $1 $2
 if [ $BUILD_ONLY -eq 0 ]

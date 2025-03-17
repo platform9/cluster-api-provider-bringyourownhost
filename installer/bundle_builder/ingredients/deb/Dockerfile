@@ -13,12 +13,11 @@ FROM $BASE_IMAGE as build
 
 # Override to download other version
 ENV CONTAINERD_VERSION=1.6.26
-ENV KUBERNETES_VERSION=1.26.6-1.1
-ENV KUBERNETES_MAJOR_VERSION=v1.26
+ENV KUBERNETES_VERSION=1.26.6-00
 ENV ARCH=amd64
 
 RUN apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends sudo gnupg
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends sudo
 
 WORKDIR /bundle-builder
 COPY download.sh .

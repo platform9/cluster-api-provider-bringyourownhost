@@ -1,9 +1,0 @@
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: byo-cluster-patch-clusterrole
-rules:
-- apiGroups: ["infrastructure.cluster.x-k8s.io"]
-  resources: ["byoclusters", "byoclusters/status"]
-  verbs: ["patch"]
-
