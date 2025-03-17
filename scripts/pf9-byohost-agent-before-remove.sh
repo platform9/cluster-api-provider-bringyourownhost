@@ -55,9 +55,9 @@ else
     echo "Log files already removed or not found" | tee -a "$LOG_FILE"
 fi
 
-if [-f /etc/pf9-byohost* ]; then
+if [ -f /etc/pf9-byohost* ]; then
 	echo "Removing Pf9 conf files" | tee -a "$LOG_FILE"
-	rm -f /etc/pf9*
+	rm -f /etc/pf9-byohost*
 	echo "conf files Removed Successfully" | tee -a "$LOG_FILE"
 else 
 	echo "Conf files already removed or not found " | tee -a "$LOG_FILE"
