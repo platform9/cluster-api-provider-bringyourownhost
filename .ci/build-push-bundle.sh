@@ -2,11 +2,13 @@ set -ex
 echo 'alias shasum="sha512sum"' >> ~/.bashrc
 source ~/.bashrc
 
-export BUILD_ONLY
-export CONTAINERD_VERSION 
-export KUBERNETES_VERSION
-export KUBERNETES_MAJOR_VERSION
-export ARCH
+
+export BUILD_ONLY=${BUILD_ONLY:-1}
+export CONTAINERD_VERSION=${CONTAINERD_VERSION:-1.7.26}
+export KUBERNETES_VERSION=${KUBERNETES_VERSION:-1.31.0-1.1}
+export KUBERNETES_MAJOR_VERSION=${KUBERNETES_MAJOR_VERSION:-v1.31}
+export ARCH=${ARCH:-amd64}
+export CNI_VERSION=${CNI_VERSION:-1.4.0-1.1}
 
 #alias shasum="sha512sum"
 echo "installing imgpkg"
