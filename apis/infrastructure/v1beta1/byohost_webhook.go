@@ -56,9 +56,6 @@ func (v *ByoHostValidator) handleCreateUpdate(req *admission.Request) admission.
 	if len(substrs) < 2 { //nolint: gomnd
 		return admission.Denied(fmt.Sprintf("%s is not a valid agent username", userName))
 	}
-	//if !strings.Contains(byoHost.Name, substrs[2]) {
-	//	return admission.Denied(fmt.Sprintf("%s cannot create/update resource %s", userName, byoHost.Name))
-	//}
 	return admission.Allowed("")
 }
 
