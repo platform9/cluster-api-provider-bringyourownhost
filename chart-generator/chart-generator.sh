@@ -150,7 +150,7 @@ main() {
   major_minor_version=${BYOH_VERSION:-0.1}
   build_number=${BUILD_NUMBER:-0}
   release_version="$major_minor_version.$build_number"
-  byoh_image="byoh-controller-manager:dev"
+  byoh_image="byoh-controller-manager:local"
 
   while getopts ":h:e:o:" opt; do
   case $opt in
