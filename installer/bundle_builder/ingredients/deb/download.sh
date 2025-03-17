@@ -29,5 +29,5 @@ echo Update apt package index, install kubelet, kubeadm and kubectl
  mv cri-containerd-cni-${CONTAINERD_VERSION}-linux-amd64.tar.gz /ingredients/ 
  cd /ingredients 
  apt-get download {kubelet,kubeadm,kubectl}:$ARCH=$KUBERNETES_VERSION
- apt-get download kubernetes-cni:amd64=1.4.1-1.1
+ apt-get download kubernetes-cni:$ARCH=1.1.1-00
  apt-get download cri-tools:$ARCH=$KUBERNETES_VERSION
