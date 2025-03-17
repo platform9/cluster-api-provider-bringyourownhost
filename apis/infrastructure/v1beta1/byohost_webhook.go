@@ -23,7 +23,7 @@ type ByoHostValidator struct {
 }
 
 // To allow byoh manager service account to patch ByoHost CR
-//const managerServiceAccount = "system:serviceaccount:kaapi:byoh-controller-manager"
+const managerServiceAccount = "system:serviceaccount:kaapi:byoh-controller-manager"
 
 //nolint: gocritic
 // Handle handles all the requests for ByoHost resource
@@ -48,14 +48,12 @@ func (v *ByoHostValidator) handleCreateUpdate(req *admission.Request) admission.
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 	userName := req.UserInfo.Username
-	substrs := strings.Split(userName, ":")
-	if len(substrs) == 4 {
-		if substrs[0] == "system" && substrs[1] == "serviceaccount" && substrs[3] == "byoh-controller-manager" && req.Operation == v1.Update {
-		// allow manager service account to patch ByoHost
-		// if userName == managerServiceAccount && req.Operation == v1.Update {
+	// allow manager service account to patch ByoHost
+	if userName == managerServiceAccount && req.Operation == v1.Update {
 			return admission.Allowed("")
-		}
 	}
+	
+	substrs := strings.Split(userName, ":")
 	if len(substrs) < 2 { //nolint: gomnd
 		return admission.Denied(fmt.Sprintf("%s is not a valid agent username", userName))
 	}
