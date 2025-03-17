@@ -1,6 +1,8 @@
 set -ex
 export BUILD_NUMBER
-export BYOH_DEB_VERSION
+export MAJOR_MINOR_VERSION=0.1
+export BYOH_DEB_VERSION=${MAJOR_MINOR_VERSION}-${BUILD_NUMBER}
+
 echo 'alias shasum="sha512sum"' >> ~/.bashrc
 source ~/.bashrc
 
@@ -19,5 +21,6 @@ curl -LO https://github.com/carvel-dev/imgpkg/releases/download/v0.43.1/imgpkg-l
 mv imgpkg-linux-amd64 imgpkg
 chmod +x imgpkg
 
-echo "pushing deb bundle to quay.io/platform9/byoh-deb"
-./imgpkg push -f build/pf9-byohost/debsrc/ -i quay.io/platform9/byoh-deb
+echo "pushing deb bundle to quay.io/platform9/byoh-deb:$BYOH_DEB_VERSION"
+./imgpkg push -f build/pf9-byohost/debsrc/ -i quay.io/platform9/byoh-deb:$BYOH_DEB_VERSION
+
