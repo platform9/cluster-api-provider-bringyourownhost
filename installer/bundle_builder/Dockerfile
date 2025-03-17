@@ -20,12 +20,6 @@ FROM ubuntu:20.04
 
 # If set to 1 bundle is built and available as bundle/bundle.tar
 # If set to 0 bundle is build and pushed to repo
-ENV BUILD_ONLY=1
-ENV CONTAINERD_VERSION=1.6.26
-ENV KUBERNETES_VERSION=1.31.0-1.1
-ENV KUBERNETES_MAJOR_VERSION=v1.31
-ENV ARCH=amd64
-ENV BUILD_ONLY=1
 
 RUN apt-get update && apt-get install -y gpg \
     curl \
