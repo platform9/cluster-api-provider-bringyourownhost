@@ -3,11 +3,14 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils"
 )
@@ -95,21 +98,25 @@ func ConfigureAgent(namespace string, kubeconfig string) error {
 		return fmt.Errorf("failed to create agent configuration directory: %v", err)
 	}
 
-	// Create the systemd directory if it doesn't exist
+	// Create systemd drop-in directory for environment variables
 	systemdDir := filepath.Dir(ByohAgentConfFile)
 	if err := os.MkdirAll(systemdDir, DefaultDirPerms); err != nil {
 		return fmt.Errorf("failed to create systemd directory: %v", err)
 	}
 
 	// Write the kubeconfig
-	kubeconfigPath := filepath.Join(filepath.Dir(ByohAgentConfDir), "kubeconfig")
-	if err := os.WriteFile(kubeconfigPath, []byte(kubeconfig), DefaultFilePerms); err != nil {
+	// Use the predefined constant path for consistency
+	if err := os.MkdirAll(filepath.Dir(ByohAgentKubeconfigPath), DefaultDirPerms); err != nil {
+		return fmt.Errorf("failed to create kubeconfig directory: %v", err)
+	}
+	
+	if err := os.WriteFile(ByohAgentKubeconfigPath, []byte(kubeconfig), DefaultFilePerms); err != nil {
 		return fmt.Errorf("failed to write kubeconfig: %v", err)
 	}
-	utils.LogSuccess("Wrote kubeconfig to %s", kubeconfigPath)
+	utils.LogSuccess("Wrote kubeconfig to %s", ByohAgentKubeconfigPath)
 
 	// Create environment file for agent service
-	envContent := fmt.Sprintf("NAMESPACE=%s\nBOOTSTRAP_KUBECONFIG=%s\n", namespace, kubeconfigPath)
+	envContent := fmt.Sprintf("NAMESPACE=%s\nBOOTSTRAP_KUBECONFIG=%s\n", namespace, ByohAgentKubeconfigPath)
 	if err := os.WriteFile(ByohAgentConfFile, []byte(envContent), DefaultFilePerms); err != nil {
 		return fmt.Errorf("failed to write agent environment file: %v", err)
 	}
@@ -145,19 +152,30 @@ func InstallPrerequisites() error {
 
 // fixBrokenDependencies attempts to fix any broken package dependencies
 func fixBrokenDependencies() error {
-	cleanCmd := exec.Command("dpkg", "--configure", "-a")
-	cleanOutput, cleanErr := cleanCmd.CombinedOutput()
-	if cleanErr != nil {
-		utils.LogDebug("dpkg --configure -a output: %s", string(cleanOutput))
+	utils.LogInfo("Attempting to fix broken dependencies")
+	
+	// Create a context with timeout to prevent hanging
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	
+	// Run apt-get update first
+	updateCmd := exec.CommandContext(ctx, "apt-get", "update")
+	if updateOutput, err := updateCmd.CombinedOutput(); err != nil {
+		utils.LogWarn("apt-get update failed: %v\nOutput: %s", err, string(updateOutput))
 	}
-
-	// Try the fix-broken install
-	fixCmd := exec.Command("apt-get", "--fix-broken", "install", "-y")
-	_, fixErr := fixCmd.CombinedOutput()
-	if fixErr != nil {
-		return fmt.Errorf("failed to fix broken dependencies: %v", fixErr)
+	
+	// Try to fix broken dependencies
+	cmd := exec.CommandContext(ctx, "apt-get", "-f", "install", "-y")
+	output, err := cmd.CombinedOutput()
+	
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("dependency fix timed out after 2 minutes")
+		}
+		return fmt.Errorf("failed to fix dependencies: %v\nOutput: %s", err, string(output))
 	}
-
+	
+	utils.LogSuccess("Fixed dependencies")
 	return nil
 }
 
@@ -318,7 +336,7 @@ func checkPackageInstalled(packageName string) bool {
 	return cmd.Run() == nil
 }
 
-// checkLibseccompVersion verifies if libseccomp2 meets the version requirement (>= 2.5.1-1ubuntu1~20.04.2)
+// checkLibseccompVersion verifies if libseccomp2 meets the version requirement (>= 2.5.1)
 func checkLibseccompVersion() (bool, error) {
 	// Check if libseccomp2 is installed at all
 	if !checkPackageInstalled("libseccomp2") {
@@ -333,22 +351,61 @@ func checkLibseccompVersion() (bool, error) {
 	}
 
 	version := strings.TrimSpace(string(output))
+	return isValidVersion(version)
+}
 
-	// Check if the version is at least 2.5.1-1ubuntu1~20.04.2
-	// This is a simplified version check - we need to make sure the major version is at least 2.5
-	if len(version) < 3 {
-		return false, fmt.Errorf("invalid version format: %s", version)
+// isValidVersion checks if the version string meets our requirements (2.5.1 or higher)
+func isValidVersion(version string) (bool, error) {
+	if version == "" {
+		return false, fmt.Errorf("empty version string")
 	}
 
-	// Simple check: 2.5.1 starts with "2.5"
-	if !strings.HasPrefix(version, "2.5") {
-		return false, nil
+	// Normalize version string by removing 'v' prefix if present
+	version = strings.TrimPrefix(version, "v")
+	
+	// Split the version string into its components
+	parts := strings.Split(version, ".")
+	if len(parts) < 2 {
+		return false, fmt.Errorf("invalid version format, expected at least major.minor: %s", version)
 	}
-
-	// For a more thorough check, we could parse the version components
-	// and compare them numerically, but this simple check should work for now
-
-	return true, nil
+	
+	// Parse major and minor version components
+	major, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return false, fmt.Errorf("failed to parse major version: %v", err)
+	}
+	
+	minor, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return false, fmt.Errorf("failed to parse minor version: %v", err)
+	}
+	
+	// Parse patch version if available
+	patch := 0
+	if len(parts) > 2 {
+		// Extract numeric part from patch (might include build info)
+		patchStr := parts[2]
+		patchParts := strings.Split(patchStr, "-")
+		patch, err = strconv.Atoi(patchParts[0])
+		if err != nil {
+			utils.LogDebug("Could not parse patch version cleanly, using 0: %v", err)
+		}
+	}
+	
+	// Check if version is at least 2.5.1
+	if major > 2 {
+		return true, nil
+	}
+	
+	if major == 2 && minor > 5 {
+		return true, nil
+	}
+	
+	if major == 2 && minor == 5 && patch >= 1 {
+		return true, nil
+	}
+	
+	return false, nil
 }
 
 // runCommandWithOutput runs a command and returns its combined output
