@@ -23,9 +23,9 @@ type ByoHostValidator struct {
 }
 
 // To allow byoh manager service account to patch ByoHost CR
-const managerServiceAccount = "system:serviceaccount:byoh-system:byoh-controller-manager"
+const managerServiceAccount = "system:serviceaccount:kaapi:byoh-controller-manager"
 
-//nolint: gocritic
+// nolint: gocritic
 // Handle handles all the requests for ByoHost resource
 func (v *ByoHostValidator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	var response admission.Response
@@ -49,15 +49,18 @@ func (v *ByoHostValidator) handleCreateUpdate(req *admission.Request) admission.
 	}
 	userName := req.UserInfo.Username
 	// allow manager service account to patch ByoHost
-	if userName == managerServiceAccount && req.Operation == v1.Update {
+	if userName == managerServiceAccount {
 		return admission.Allowed("")
 	}
 	substrs := strings.Split(userName, ":")
+	
 	if len(substrs) < 2 { //nolint: gomnd
 		return admission.Denied(fmt.Sprintf("%s is not a valid agent username", userName))
 	}
-	if !strings.Contains(byoHost.Name, substrs[2]) {
-		return admission.Denied(fmt.Sprintf("%s cannot create/update resource %s", userName, byoHost.Name))
+	if len(substrs) >= 3 {
+		if !strings.Contains(byoHost.Name, substrs[2]) {
+			return admission.Denied(fmt.Sprintf("%s cannot create/update resource %s", userName, byoHost.Name))
+		}
 	}
 	return admission.Allowed("")
 }

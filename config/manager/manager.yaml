@@ -31,14 +31,14 @@ spec:
         args:
         - --enable-leader-election
         - "--metrics-bind-addr=127.0.0.1:8080"
-        image: gcr.io/k8s-staging-cluster-api/cluster-api-byoh-controller:latest 
+        image: docker.io/psarwate/pf9-cluster-api-byoh-controller:dev 
         name: manager
         resources:
           limits:
-            cpu: 100m
-            memory: 30Mi
+            cpu: 200m
+            memory: 500Mi
           requests:
             cpu: 100m
-            memory: 20Mi
+            memory: 250Mi
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10
