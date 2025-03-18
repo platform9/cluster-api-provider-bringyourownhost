@@ -80,7 +80,7 @@ var _ = Describe("Controllers/K8sInstallerConfigController", func() {
 
 		byoMachineLookupKey = types.NamespacedName{Name: byoMachine.Name, Namespace: byoMachine.Namespace}
 		k8sInstallerConfigLookupKey = types.NamespacedName{Name: k8sinstallerConfig.Name, Namespace: k8sinstallerConfig.Namespace}
-		installerSecretLookupKey = types.NamespacedName{Name: k8sinstallerConfig.Name, Namespace: k8sinstallerConfig.Namespace}
+		installerSecretLookupKey = types.NamespacedName{Name: "byoh-install-" + k8sinstallerConfig.Name, Namespace: k8sinstallerConfig.Namespace}
 	})
 
 	AfterEach(func() {
@@ -319,7 +319,7 @@ var _ = Describe("Controllers/K8sInstallerConfigController", func() {
 
 			createdSecret := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      k8sinstallerConfig.Name,
+					Name:      "byoh-install-" + k8sinstallerConfig.Name,
 					Namespace: k8sinstallerConfig.Namespace,
 					OwnerReferences: []metav1.OwnerReference{
 						{
