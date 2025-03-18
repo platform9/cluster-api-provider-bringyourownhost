@@ -22,5 +22,5 @@ mv imgpkg-linux-amd64 imgpkg
 chmod +x imgpkg
 
 echo "pushing deb bundle to quay.io/platform9/byoh-deb:$BYOH_DEB_VERSION"
-./imgpkg push -f build/pf9-byohost/debsrc/ -i quay.io/platform9/byoh-deb:$BYOH_DEB_VERSION
+./imgpkg push -f build/pf9-byohost/debsrc/ -i quay.io/platform9/byoh-agent-deb:$BYOH_DEB_VERSION
 
