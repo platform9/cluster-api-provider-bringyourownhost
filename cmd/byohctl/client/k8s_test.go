@@ -77,7 +77,7 @@ func TestGetSecret(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(types.Secret{
 			Data: map[string]string{
-				"value": base64.StdEncoding.EncodeToString([]byte("test-kubeconfig")),
+				"config": base64.StdEncoding.EncodeToString([]byte("test-kubeconfig")),
 			},
 		})
 	}))
@@ -106,9 +106,9 @@ func TestGetSecret(t *testing.T) {
 		t.Fatal("GetSecret returned nil")
 	}
 	
-	value, ok := secret.Data["value"]
+	value, ok := secret.Data["config"]
 	if !ok {
-		t.Error("Secret data doesn't contain 'value' key")
+		t.Error("Secret data doesn't contain 'config' key")
 	}
 	
 	decoded, err := base64.StdEncoding.DecodeString(value)

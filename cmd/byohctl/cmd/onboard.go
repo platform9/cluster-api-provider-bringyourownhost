@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/client"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/service"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -76,7 +77,6 @@ func runOnboard(cmd *cobra.Command, args []string) {
 		fmt.Printf("Error getting user home directory: %v\n", err)
 		os.Exit(1)
 	}
-	logDir := filepath.Join(homeDir, ".byoh", "logs")
 	byohDir := filepath.Join(homeDir, ".byoh")
 	// Initialize loggers with debug enabled for file logs
 	if err = utils.InitLoggers(byohDir, true); err != nil {
@@ -115,31 +115,31 @@ func runOnboard(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// 2. Create Kubernetes client 
+	// 2. Create Kubernetes client
 	k8sClient := client.NewK8sClient(fqdn, domain, tenant, token)
 
 	// 3. Save kubeconfig
-	utils.LogInfo("Saving kubeconfig file")
-	err = k8sClient.SaveKubeConfig("byoh-bootstrap-kc")
+	utils.LogInfo("Starting BYOH agent installation process")
+	// This call will handle kubeconfig saving and agent setup together
+	err = k8sClient.RunByohAgent("byoh-bootstrap-kc")
 	if err != nil {
-		utils.LogError("Failed to save kubeconfig: %v", err)
-		os.Exit(1)
-	}
-
-	// 4. Run BYOH agent
-	utils.LogInfo("Starting BYOH agent")
-	err = k8sClient.RunByohAgent()
-	if err != nil {
-		utils.LogError("Failed to run BYOH agent: %v", err)
+		utils.LogError("Failed to install BYOH agent: %v", err)
 		os.Exit(1)
 	}
 
 	utils.LogSuccess("Successfully onboarded the host")
-	
-	// Display log locations at the end of the command
-	logDir = filepath.Join(filepath.Join(homeDir, ".byoh"), "logs")
-	// Use LogSuccess to ensure these messages are shown even in minimal verbosity mode
+
+	timeElapsed := time.Since(start)
+	utils.LogDebug("Time elapsed: %s", timeElapsed)
+
+	// Get the user's home directory for logging agent setup info
+	homeDir, err = os.UserHomeDir()
+	if err != nil {
+		utils.LogError("Error getting home directory: %v", err)
+		return
+	}
+
 	utils.LogSuccess("BYOH Agent Service logs are available at:")
-	utils.LogSuccess("   - Agent service logs: %s/agent.log", logDir)
-	utils.LogSuccess("   - byohctl tool logs: %s/byoh-agent-debug.log", logDir)
+	utils.LogSuccess("   - Agent service logs: %s", service.ByohAgentLogPath)
+	utils.LogSuccess("   - Check service status: sudo systemctl status pf9-byohost-agent.service")
 }
