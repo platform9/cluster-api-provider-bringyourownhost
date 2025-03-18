@@ -16,20 +16,25 @@
 # // Build and store a BYOH bundle
 # docker run --rm -v <INGREDIENTS_HOST_ABS_PATH>:/ingredients  -v <BUNDLE_OUTPUT_ABS_PATH>:/bundle --env <THIS_IMAGE>
 
-FROM harbor-repo.vmware.com/dockerhub-proxy-cache/k14s/image
+FROM ubuntu:20.04 
 
 # If set to 1 bundle is built and available as bundle/bundle.tar
 # If set to 0 bundle is build and pushed to repo
-ENV BUILD_ONLY=1
+
+RUN apt-get update && apt-get install -y gpg \
+    curl \
+    libdigest-sha-perl  
 
 WORKDIR /bundle-builder
 COPY *.sh ./
-RUN chmod a+x *.sh
 #Default config
 COPY config/ubuntu/20_04/k8s/1_22 /config/
+COPY ingredients/deb/download.sh download.sh
 
+RUN chmod a+x *.sh
 RUN mkdir /ingredients && mkdir /bundle
+
 ENV PATH="/bundle-builder:${PATH}"
 
-WORKDIR /tmp/bundle
+WORKDIR /bundle
 ENTRYPOINT ["build-push-bundle.sh", "/ingredients", "/config"]
