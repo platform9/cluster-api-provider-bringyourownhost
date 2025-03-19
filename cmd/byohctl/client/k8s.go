@@ -97,46 +97,49 @@ func (c *K8sClient) GetSecret(secretName string) (*types.Secret, error) {
 	return &secret, nil
 }
 
-// SaveKubeConfig saves the kubeconfig from the secret to disk
+// SaveKubeConfig saves the kubeconfig from the secret to the user's BYOH directory
 func (c *K8sClient) SaveKubeConfig(secretName string) error {
 	// Step 1: Get secret
 	secret, err := c.GetSecret(secretName)
 	if err != nil {
 		return fmt.Errorf("failed to get secret: %v", err)
 	}
-	utils.LogSuccess("Successfully retrieved secret")
 
 	// Step 2: Get kubeconfig from secret
 	kubeconfigString, ok := secret.Data["config"]
 	if !ok {
-		return fmt.Errorf("kubeconfig not found in secret (missing 'config' key)")
+		return fmt.Errorf("kubeconfig not found in secret")
 	}
 
-	// Step 3: Decode the base64 encoded kubeconfig
-	decodedKubeconfig, err := base64.StdEncoding.DecodeString(kubeconfigString)
+	// Step 3: Decode kubeconfig
+	kubeconfig, err := base64.StdEncoding.DecodeString(string(kubeconfigString))
 	if err != nil {
 		return fmt.Errorf("failed to decode kubeconfig: %v", err)
 	}
 
-	// Step 4: Write kubeconfig to disk
+	// Step 4: Create byohDir if it doesn't exist
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("failed to get home directory: %v", err)
 	}
 
-	// Create directory if it doesn't exist
 	byohDir := filepath.Join(homeDir, service.ByohConfigDir)
-	if err := os.MkdirAll(byohDir, service.DefaultDirPerms); err != nil {
-		return fmt.Errorf("failed to create directory: %v", err)
+	
+	// Ensure the directory exists
+	if err = os.MkdirAll(byohDir, service.DefaultDirPerms); err != nil {
+		return fmt.Errorf("failed to create directory %s: %v", byohDir, err)
 	}
 
-	// Write decoded kubeconfig
+	// Step 5: Write kubeconfig to byohDir
 	kubeconfigPath := filepath.Join(byohDir, "config")
-	if err := os.WriteFile(kubeconfigPath, decodedKubeconfig, service.DefaultFilePerms); err != nil {
+
+	// Write kubeconfig to byohDir
+	if err = os.WriteFile(kubeconfigPath, kubeconfig, service.DefaultFilePerms); err != nil {
 		return fmt.Errorf("failed to write kubeconfig: %v", err)
 	}
 
-	utils.LogSuccess("Successfully saved kubeconfig to %s", kubeconfigPath)
+	// Success
+	utils.LogSuccess("Successfully wrote kubeconfig to %s", kubeconfigPath)
 	return nil
 }
 
@@ -158,80 +161,4 @@ func (c *K8sClient) CheckDNSResolution() ([]string, error) {
 
 	utils.LogSuccess("DNS resolution successful: %v", addrs)
 	return addrs, nil
-}
-
-// RunByohAgent sets up and starts the BYOH agent
-func (c *K8sClient) RunByohAgent(secretName string) error {
-	start := time.Now()
-	defer utils.TrackTime(start, "BYOH Agent Setup")
-
-	utils.LogInfo("Starting BYOH Agent installation")
-
-	// Step 1: Verify DNS resolution before proceeding
-	if _, err := c.CheckDNSResolution(); err != nil {
-		return utils.LogErrorf("%v", err)
-	}
-
-	// Step 2: Prepare directory structure
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return utils.LogErrorf("failed to get home directory: %v", err)
-	}
-
-	byohDir := filepath.Join(homeDir, service.ByohConfigDir)
-	if err := service.PrepareAgentDirectory(byohDir); err != nil {
-		return utils.LogErrorf("%v", err)
-	}
-
-	// Step 3: Save kubeconfig - only do this once
-	if err := c.SaveKubeConfig(secretName); err != nil {
-		return utils.LogErrorf("failed to save kubeconfig: %v", err)
-	}
-
-	// Step 4: Configure agent with the kubeconfig
-	kubeConfigPath := filepath.Join(byohDir, "config")
-	kubeConfigData, err := os.ReadFile(kubeConfigPath)
-	if err != nil {
-		return utils.LogErrorf("failed to read kubeconfig at %s: %v", kubeConfigPath, err)
-	}
-
-	namespace := c.getNamespace()
-	if err := service.ConfigureAgent(namespace, string(kubeConfigData)); err != nil {
-		return utils.LogErrorf("failed to configure agent: %v", err)
-	}
-
-	// Create a packages directory for downloads
-	pkgDir := filepath.Join(byohDir, "packages")
-	if err := os.MkdirAll(pkgDir, service.DefaultDirPerms); err != nil {
-		utils.LogWarn("Failed to create packages directory: %v", err)
-		// Fall back to using byohDir if packages dir creation fails
-		pkgDir = byohDir
-	}
-
-	// Step 5: Setup agent (download and install) - SetupAgent already calls ensureRequiredPackages
-	_, err = service.SetupAgent(pkgDir)
-	if err != nil {
-		utils.LogError("Failed to setup agent: %v", err)
-		
-		// Run diagnostics when the agent fails
-		utils.LogInfo("Running diagnostics to identify issues...")
-		if diagErr := service.DiagnoseAgent(); diagErr != nil {
-			utils.LogError("Diagnostics also encountered errors: %v", diagErr)
-		}
-		
-		return fmt.Errorf("failed to setup agent: %v", err)
-	}
-
-	// Step 6: Ensure log directory exists
-	logDir := filepath.Dir(service.ByohAgentLogPath)
-	if err := os.MkdirAll(logDir, service.DefaultDirPerms); err != nil {
-		utils.LogWarn("Failed to create log directory: %v", err)
-	}
-
-	// Success message with concise, helpful information
-	utils.LogSuccess("BYOH Agent setup completed successfully in %v", time.Since(start))
-	utils.LogInfo("Agent logs are available at: %s", service.ByohAgentLogPath)
-	utils.LogInfo("Check agent status with: systemctl status %s", service.ByohAgentServiceName)
-
-	return nil
 }

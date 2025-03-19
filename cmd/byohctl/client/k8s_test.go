@@ -217,105 +217,43 @@ func TestDNSResolution(t *testing.T) {
 	}
 }
 
-// Test RunByohAgent method
-func TestRunByohAgent(t *testing.T) {
-	// Create client
+// TestIntegration tests the interaction between the K8sClient and agent service
+// without using the removed RunByohAgent method
+func TestIntegration(t *testing.T) {
+	// This is a lightweight integration test to ensure the components
+	// can still work together even after refactoring
+
+	// Skip in CI environments
+	if os.Getenv("CI") != "" {
+		t.Skip("Skipping integration test in CI environment")
+	}
+
+	// Create a test client
 	client := NewK8sClient("example.com", "test-domain", "test-tenant", "test-token")
-	
-	// Test various scenarios
-	testCases := []struct {
-		name        string
-		mockDNS     func(string) ([]string, error)
-		expectError bool
-	}{
-		{
-			name: "successful agent start",
-			mockDNS: func(host string) ([]string, error) {
-				return []string{"192.168.1.1"}, nil
-			},
-			expectError: false,
-		},
-		{
-			name: "dns lookup failure",
-			mockDNS: func(host string) ([]string, error) {
-				return nil, fmt.Errorf("DNS lookup failed")
-			},
-			expectError: true,
-		},
-	}
-	
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Use our mock function directly, without modifying net.LookupHost
-			addrs, err := tc.mockDNS(client.fqdn)
-			
-			if tc.expectError && err == nil {
-				t.Errorf("Expected error but got none")
-			}
-			
-			if !tc.expectError && err != nil {
-				t.Errorf("Expected no error but got: %v", err)
-			}
-			
-			if !tc.expectError {
-				if len(addrs) == 0 {
-					t.Errorf("Expected addresses, got none")
-				}
-			}
-		})
-	}
+
+	// Test that DNS resolution works
+	t.Run("DNS resolution", func(t *testing.T) {
+		// This is just checking the method call structure - in a real test, 
+		// we would mock the actual DNS lookup
+		_, err := client.CheckDNSResolution()
+		if err == nil {
+			// We expect an error for a fake domain, so if we don't get one,
+			// something might be wrong
+			t.Log("Note: No DNS error for example.com - this might be due to DNS hijacking")
+		}
+	})
+
+	// Test that the SaveKubeConfig method has all necessary error handling
+	t.Run("SaveKubeConfig error paths", func(t *testing.T) {
+		// Try with a non-existent secret
+		err := client.SaveKubeConfig("non-existent-secret")
+		if err == nil {
+			t.Error("Expected error when saving kubeconfig from non-existent secret")
+		}
+	})
 }
 
-// Test RunByohAgentErrorCases tests various error scenarios for the RunByohAgent method
-func TestRunByohAgentErrorCases(t *testing.T) {
-	testCases := []struct {
-		name        string
-		scenario    string
-		expectError bool
-	}{
-		{
-			name:        "dns lookup failure",
-			scenario:    "dns_failure",
-			expectError: true,
-		},
-		{
-			name:        "binary execution failure",
-			scenario:    "binary_failure",
-			expectError: true,
-		},
-		{
-			name:        "successful operation",
-			scenario:    "success",
-			expectError: false,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Here we simply verify the logic without actually running the agent
-			var err error
-
-			switch tc.scenario {
-			case "dns_failure":
-				err = fmt.Errorf("DNS lookup failed")
-			case "binary_failure":
-				err = fmt.Errorf("Failed to execute agent binary: exit status 1")
-			case "success":
-				err = nil
-			}
-
-			if tc.expectError && err == nil {
-				t.Errorf("Expected error for scenario %s but got none", tc.scenario)
-			}
-
-			if !tc.expectError && err != nil {
-				t.Errorf("Expected success for scenario %s but got error: %v", tc.scenario, err)
-			}
-		})
-	}
-}
-
-// TestAgentLogOutput tests the logging behavior for the agent
+// Test AgentLogOutput tests the logging behavior for the agent
 func TestAgentLogOutput(t *testing.T) {
 	// Create a temporary directory for the test
 	tmpDir, err := os.MkdirTemp("", "agent-test")

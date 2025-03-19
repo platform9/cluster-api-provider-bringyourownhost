@@ -118,12 +118,37 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	// 2. Create Kubernetes client
 	k8sClient := client.NewK8sClient(fqdn, domain, tenant, token)
 
-	// 3. Save kubeconfig
-	utils.LogInfo("Starting BYOH agent installation process")
-	// This call will handle kubeconfig saving and agent setup together
-	err = k8sClient.RunByohAgent("byoh-bootstrap-kc")
+	// 3. Prepare directories
+	utils.LogInfo("Preparing directory structure for BYOH agent")
+	homeDir, err = os.UserHomeDir()
 	if err != nil {
-		utils.LogError("Failed to install BYOH agent: %v", err)
+		utils.LogError("Error getting home directory: %v", err)
+		os.Exit(1)
+	}
+	byohDir = filepath.Join(homeDir, service.ByohConfigDir)
+	if err := service.PrepareAgentDirectory(byohDir); err != nil {
+		utils.LogError("Failed to prepare agent directory: %v", err)
+		os.Exit(1)
+	}
+
+	// 4. Save kubeconfig
+	utils.LogInfo("Saving kubeconfig from bootstrap secret")
+	if err := k8sClient.SaveKubeConfig("byoh-bootstrap-kc"); err != nil {
+		utils.LogError("Failed to save kubeconfig: %v", err)
+		os.Exit(1)
+	}
+
+	// 5. Create packages directory for downloads
+	pkgDir := filepath.Join(byohDir, "packages")
+	if err := os.MkdirAll(pkgDir, service.DefaultDirPerms); err != nil {
+		utils.LogWarn("Failed to create packages directory: %v", err)
+	}
+
+	// 6. Setup agent (download and install)
+	utils.LogInfo("Setting up BYOH agent")
+	err = service.SetupAgent(pkgDir)
+	if err != nil {
+		utils.LogError("Failed to setup agent: %v", err)
 		os.Exit(1)
 	}
 
@@ -131,13 +156,6 @@ func runOnboard(cmd *cobra.Command, args []string) {
 
 	timeElapsed := time.Since(start)
 	utils.LogDebug("Time elapsed: %s", timeElapsed)
-
-	// Get the user's home directory for logging agent setup info
-	homeDir, err = os.UserHomeDir()
-	if err != nil {
-		utils.LogError("Error getting home directory: %v", err)
-		return
-	}
 
 	utils.LogSuccess("BYOH Agent Service logs are available at:")
 	utils.LogSuccess("   - Agent service logs: %s", service.ByohAgentLogPath)
