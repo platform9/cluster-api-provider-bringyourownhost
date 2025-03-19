@@ -161,7 +161,8 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	// 5. Create packages directory for downloads
 	pkgDir := filepath.Join(byohDir, "packages")
 	if err := os.MkdirAll(pkgDir, service.DefaultDirPerms); err != nil {
-		utils.LogWarn("Failed to create packages directory: %v", err)
+		utils.LogError("Failed to create packages directory: %v", err)
+		os.Exit(1)
 	}
 
 	// 6. Setup agent (download and install)
