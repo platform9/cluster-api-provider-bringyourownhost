@@ -70,7 +70,6 @@ var ensureRequiredPackages = func() error {
 	utils.LogInfo("Checking for required packages...")
 
 	// Fix any broken package state first
-	exec.Command("dpkg", "--configure", "-a").Run()
 	exec.Command("apt-get", "--fix-broken", "install", "-y").Run()
 
 	// Install imgpkg if needed
@@ -89,22 +88,9 @@ var ensureRequiredPackages = func() error {
 	cmd := exec.Command("bash", "-c",
 		"apt-get update && apt-get install -y --no-install-recommends dpkg ebtables conntrack socat libseccomp2")
 
-	_, err := cmd.CombinedOutput()
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		utils.LogWarn("Initial package installation failed: %v", err)
-		utils.LogInfo("Trying to fix and reinstall...")
-
-		// Try to fix broken dependencies
-		exec.Command("apt-get", "--fix-broken", "install", "-y").Run()
-
-		// Try again with reinstall
-		retryCmd := exec.Command("bash", "-c",
-			"apt-get install -y --reinstall --no-install-recommends dpkg ebtables conntrack socat libseccomp2")
-		retryOutput, retryErr := retryCmd.CombinedOutput()
-
-		if retryErr != nil {
-			return fmt.Errorf("failed to install packages: %v\nOutput: %s", retryErr, string(retryOutput))
-		}
+		return fmt.Errorf("failed to install packages: %v\nOutput: %s", err, string(output))
 	}
 
 	utils.LogSuccess("All required packages installed successfully")
@@ -114,11 +100,7 @@ var ensureRequiredPackages = func() error {
 var downloadDebianPackage = func(tempDir string) (string, error) {
 	utils.LogInfo("Downloading BYOH agent Debian package from %s", ByohAgentDebPackageURL)
 
-	// Check if imgpkg is available (this is now handled by ensureRequiredPackages)
-	imgpkgPath, err := exec.LookPath("imgpkg")
-	if err != nil {
-		return "", fmt.Errorf("imgpkg not found in PATH: %v", err)
-	}
+	imgpkgPath, _ := exec.LookPath("imgpkg")
 
 	// Use a buffer to capture the command output
 	var outputBuffer bytes.Buffer
@@ -142,11 +124,7 @@ var downloadDebianPackage = func(tempDir string) (string, error) {
 }
 
 var installDebianPackage = func(debFilePath string) error {
-
-	dpkgPath, err := exec.LookPath("dpkg")
-	if err != nil {
-		return fmt.Errorf("dpkg not found in PATH: %v", err)
-	}
+	dpkgPath, _ := exec.LookPath("dpkg")
 
 	// Install the package
 	utils.LogInfo("Installing package %s", debFilePath)
@@ -157,24 +135,6 @@ var installDebianPackage = func(debFilePath string) error {
 	outputStr := string(output)
 
 	if err != nil {
-		// // If there was a dependency error, try to fix and install again
-		// if strings.Contains(outputStr, "dependency problems") {
-		// 	utils.LogWarn("Dependency issues detected. Attempting to fix...")
-
-		// 	// Fix dependencies and retry installation
-		// 	if err := fixBrokenDependencies(); err != nil {
-		// 		return fmt.Errorf("failed to fix dependencies: %v", err)
-		// 	}
-
-		// 	// Try installing again
-		// 	retryCmd := exec.Command(dpkgPath, "-i", debFilePath)
-		// 	retryOutput, retryErr := retryCmd.CombinedOutput()
-
-		// 	if retryErr != nil {
-		// 		return fmt.Errorf("failed to install package after dependency fix: %v\nOutput: %s",
-		// 			retryErr, string(retryOutput))
-		// 	}
-		// } else {
 		return fmt.Errorf("failed to install package: %v\nOutput: %s", err, outputStr)
 	}
 
