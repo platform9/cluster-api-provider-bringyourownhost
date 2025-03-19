@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/client"
@@ -70,7 +72,25 @@ func init() {
 	rootCmd.AddCommand(onboardCmd)
 }
 
+// Check if running on Ubuntu
+func isUbuntuSystem() bool {
+	if runtime.GOOS != "linux" {
+		return false
+	}
+	data, err := os.ReadFile("/etc/os-release")
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(data), "Ubuntu")
+}
+
 func runOnboard(cmd *cobra.Command, args []string) {
+	// Check if running on Ubuntu system
+	if !isUbuntuSystem() {
+		fmt.Println("Error: This command requires an Ubuntu system")
+		os.Exit(1)
+	}
+
 	// Initialize loggers
 	homeDir, err := os.UserHomeDir()
 	if err != nil {

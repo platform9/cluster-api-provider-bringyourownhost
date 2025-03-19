@@ -4,6 +4,8 @@ package service
 import (
 	"bytes"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +29,9 @@ const (
 	ByohAgentLogPath = "/var/log/pf9/byoh/byoh-agent.log"
 	// ByohConfigDir is the directory for BYOH configuration
 	ByohConfigDir = ".byoh"
+
+	ImgPkgURL  = "https://github.com/carvel-dev/imgpkg/releases/download/v0.45.0/imgpkg-linux-amd64"
+	ImgPkgPath = "/usr/local/bin/imgpkg"
 )
 
 // SetupAgent installs the BYOH agent in the host
@@ -75,12 +80,33 @@ var ensureRequiredPackages = func() error {
 	// Install imgpkg if needed
 	if _, err := exec.LookPath("imgpkg"); err != nil {
 		utils.LogInfo("Installing imgpkg...")
-		cmd := exec.Command("bash", "-c", "curl -s -L https://carvel.dev/install.sh | bash")
-		if _, err := cmd.CombinedOutput(); err != nil {
-			utils.LogWarn("Failed to install imgpkg: %v", err)
-		} else {
-			utils.LogSuccess("Installed imgpkg successfully")
+
+		// Download imgpkg binar
+
+		// Simple HTTP GET request
+		resp, err := http.Get(ImgPkgURL)
+		if err != nil {
+			return fmt.Errorf("failed to download imgpkg: %v", err)
 		}
+		defer resp.Body.Close()
+
+		// Create the file
+		out, err := os.Create(ImgPkgPath)
+		if err != nil {
+			return fmt.Errorf("failed to create file: %v", err)
+		}
+		defer out.Close()
+
+		// Copy data to file
+		_, err = io.Copy(out, resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to write file: %v", err)
+		}
+
+		// Make executable
+		os.Chmod(ImgPkgPath, 0755)
+
+		utils.LogSuccess("Installed imgpkg v0.45.0")
 	}
 
 	// Install all required packages in one command
