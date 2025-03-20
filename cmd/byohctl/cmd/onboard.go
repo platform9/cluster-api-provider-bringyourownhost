@@ -116,6 +116,10 @@ func runOnboard(cmd *cobra.Command, args []string) {
 			utils.LogError("Failed to read password: %v", err)
 			os.Exit(1)
 		}
+		if len(pwBytes) == 0 {
+			utils.LogError("Password cannot be empty")
+			os.Exit(1)
+		}
 		fmt.Println() // Add newline after password input
 		password = string(pwBytes)
 	}
