@@ -30,8 +30,8 @@ echo "creating bundle dir to push k8s packages"
 mkdir -p ./bundle
 
 echo "coping bundle from docker image"
-docker cp byoh-bundle-container:/bundle ./bundle
+docker cp byoh-bundle-container:/bundle/. ./bundle/
 
 echo "pushing oci bundle to quay.io/platform9/byoh-bundle-ubuntu_20.04.1_x86-64_k8s"
-./imgpkg push -f ./bundle/ -i quay.io/platform9/byoh-bundle-ubuntu_20.04.1_x86-64_k8s:$BUNDLE_VERSION
+./imgpkg push -f ./bundle -i quay.io/platform9/byoh-bundle-ubuntu_20.04.1_x86-64_k8s:$BUNDLE_VERSION
 
