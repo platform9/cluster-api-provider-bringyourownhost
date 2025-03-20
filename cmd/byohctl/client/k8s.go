@@ -51,7 +51,8 @@ func NewK8sClient(fqdn, domain, tenant, token string) *K8sClient {
 // getNamespace returns the namespace for the client
 func (c *K8sClient) getNamespace() string {
 	fqdnPrefix := strings.Split(c.fqdn, ".")[0]
-	return fmt.Sprintf("%s-%s-%s", fqdnPrefix, c.domain, c.tenant)
+	tenant := strings.ReplaceAll(c.tenant, "_", "-")
+	return fmt.Sprintf("%s-%s-%s", fqdnPrefix, c.domain, tenant)
 }
 
 // GetSecret retrieves a secret from the Kubernetes API
