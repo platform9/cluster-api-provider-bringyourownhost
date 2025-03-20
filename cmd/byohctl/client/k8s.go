@@ -124,11 +124,6 @@ func (c *K8sClient) SaveKubeConfig(secretName string) error {
 	}
 
 	byohDir := filepath.Join(homeDir, service.ByohConfigDir)
-	
-	// Ensure the directory exists
-	if err = os.MkdirAll(byohDir, service.DefaultDirPerms); err != nil {
-		return fmt.Errorf("failed to create directory %s: %v", byohDir, err)
-	}
 
 	// Step 5: Write kubeconfig to byohDir
 	kubeconfigPath := filepath.Join(byohDir, "config")

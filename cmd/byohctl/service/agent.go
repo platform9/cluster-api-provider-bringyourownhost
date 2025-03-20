@@ -38,6 +38,92 @@ const (
 	ImgPkgPath = "/usr/local/bin/imgpkg"
 )
 
+// Package represents a required package and its installation details
+type Package struct {
+	Name            string
+	InstallCommand  string
+	InstallArgs     []string
+	VerifyCommand   string
+	PackageName     string // Debian package name for dpkg verification
+	CustomInstaller func() error
+}
+
+func isPackageInstalled(packageName string) bool {
+	cmd := exec.Command("dpkg", "-l", packageName)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return false
+	}
+	// dpkg -l output has "ii" at the start of the line for installed packages
+	return bytes.Contains(output, []byte("ii  "+packageName))
+}
+
+var requiredPackages = []Package{
+	{
+		Name:          "imgpkg",
+		VerifyCommand: "imgpkg",
+		CustomInstaller: func() error {
+			resp, err := http.Get(ImgPkgURL)
+			if err != nil {
+				return fmt.Errorf("failed to download imgpkg: %v", err)
+			}
+			defer resp.Body.Close()
+
+			out, err := os.Create(ImgPkgPath)
+			if err != nil {
+				return fmt.Errorf("failed to create file: %v", err)
+			}
+			defer out.Close()
+
+			if _, err = io.Copy(out, resp.Body); err != nil {
+				return fmt.Errorf("failed to write file: %v", err)
+			}
+
+			if err := os.Chmod(ImgPkgPath, 0755); err != nil {
+				return fmt.Errorf("failed to make file executable: %v", err)
+			}
+
+			utils.LogSuccess("Installed imgpkg " + ImgPkgVersion)
+			return nil
+		},
+	},
+	{
+		Name:           "dpkg",
+		VerifyCommand:  "dpkg",
+		PackageName:    "dpkg",
+		InstallCommand: "apt-get",
+		InstallArgs:    []string{"install", "-y", "dpkg"},
+	},
+	{
+		Name:           "ebtables",
+		VerifyCommand:  "ebtables",
+		PackageName:    "ebtables",
+		InstallCommand: "apt-get",
+		InstallArgs:    []string{"install", "-y", "ebtables"},
+	},
+	{
+		Name:           "conntrack",
+		VerifyCommand:  "conntrack",
+		PackageName:    "conntrack",
+		InstallCommand: "apt-get",
+		InstallArgs:    []string{"install", "-y", "conntrack"},
+	},
+	{
+		Name:           "socat",
+		VerifyCommand:  "socat",
+		PackageName:    "socat",
+		InstallCommand: "apt-get",
+		InstallArgs:    []string{"install", "-y", "socat"},
+	},
+	{
+		Name:           "libseccomp2",
+		VerifyCommand:  "libseccomp2",
+		PackageName:    "libseccomp2",
+		InstallCommand: "apt-get",
+		InstallArgs:    []string{"install", "-y", "libseccomp2"},
+	},
+}
+
 // SetupAgent installs the BYOH agent in the host
 func SetupAgent(byohDirPath string) error {
 	utils.LogInfo("Setting up BYOH agent")
@@ -84,45 +170,28 @@ var ensureRequiredPackages = func() error {
 		return fmt.Errorf("failed to fix broken packages: %v\nOutput: %s", err, string(output))
 	}
 
-	// Install imgpkg if needed
-	if _, err := exec.LookPath("imgpkg"); err != nil {
-		utils.LogInfo("Installing imgpkg...")
+	for _, pkg := range requiredPackages {
+		if pkg.CustomInstaller != nil {
+			if _, err := exec.LookPath(pkg.VerifyCommand); err == nil {
+				continue
+			}
+			utils.LogInfo("Installing %s...", pkg.Name)
+			if err := pkg.CustomInstaller(); err != nil {
+				return fmt.Errorf("failed to install %s: %v", pkg.Name, err)
+			}
+			continue
+		}
 
-		resp, err := http.Get(ImgPkgURL)
+		if isPackageInstalled(pkg.PackageName) {
+			continue
+		}
+
+		utils.LogInfo("Installing %s...", pkg.Name)
+		output, err := exec.Command(pkg.InstallCommand, pkg.InstallArgs...).CombinedOutput()
 		if err != nil {
-			return fmt.Errorf("failed to download imgpkg: %v", err)
+			return fmt.Errorf("failed to install %s: %v\nOutput: %s", pkg.Name, err, string(output))
 		}
-		defer resp.Body.Close()
-
-		// Create the file
-		out, err := os.Create(ImgPkgPath)
-		if err != nil {
-			return fmt.Errorf("failed to create file: %v", err)
-		}
-		defer out.Close()
-
-		// Copy data to file
-		_, err = io.Copy(out, resp.Body)
-		if err != nil {
-			return fmt.Errorf("failed to write file: %v", err)
-		}
-
-		// Make executable
-		if err := os.Chmod(ImgPkgPath, 0755); err != nil {
-			return fmt.Errorf("failed to make file executable: %v", err)
-		}
-
-		utils.LogSuccess("Installed imgpkg " + ImgPkgVersion)
-	}
-
-	// Install all required packages in one command
-	utils.LogInfo("Installing required packages...")
-	cmd := exec.Command("bash", "-c",
-		"apt-get update && apt-get install -y --no-install-recommends dpkg ebtables conntrack socat libseccomp2")
-
-	output, err = cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to install packages: %v\nOutput: %s", err, string(output))
+		utils.LogSuccess("Installed %s successfully", pkg.Name)
 	}
 
 	utils.LogSuccess("All required packages installed successfully")
