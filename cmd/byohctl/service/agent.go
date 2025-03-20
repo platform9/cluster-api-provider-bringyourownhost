@@ -30,7 +30,11 @@ const (
 	// ByohConfigDir is the directory for BYOH configuration
 	ByohConfigDir = ".byoh"
 
-	ImgPkgURL  = "https://github.com/carvel-dev/imgpkg/releases/download/v0.45.0/imgpkg-linux-amd64"
+	// ImgPkgVersion is the version of imgpkg to install
+	ImgPkgVersion = "v0.45.0"
+	// ImgPkgURL is the URL to download imgpkg
+	ImgPkgURL = "https://github.com/carvel-dev/imgpkg/releases/download/" + ImgPkgVersion + "/imgpkg-linux-amd64"
+	// ImgPkgPath is the path where imgpkg will be installed
 	ImgPkgPath = "/usr/local/bin/imgpkg"
 )
 
@@ -75,15 +79,15 @@ var ensureRequiredPackages = func() error {
 	utils.LogInfo("Checking for required packages...")
 
 	// Fix any broken package state first
-	exec.Command("apt-get", "--fix-broken", "install", "-y").Run()
+	output, err := exec.Command("apt-get", "--fix-broken", "install", "-y").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to fix broken packages: %v\nOutput: %s", err, string(output))
+	}
 
 	// Install imgpkg if needed
 	if _, err := exec.LookPath("imgpkg"); err != nil {
 		utils.LogInfo("Installing imgpkg...")
 
-		// Download imgpkg binar
-
-		// Simple HTTP GET request
 		resp, err := http.Get(ImgPkgURL)
 		if err != nil {
 			return fmt.Errorf("failed to download imgpkg: %v", err)
@@ -104,9 +108,11 @@ var ensureRequiredPackages = func() error {
 		}
 
 		// Make executable
-		os.Chmod(ImgPkgPath, 0755)
+		if err := os.Chmod(ImgPkgPath, 0755); err != nil {
+			return fmt.Errorf("failed to make file executable: %v", err)
+		}
 
-		utils.LogSuccess("Installed imgpkg v0.45.0")
+		utils.LogSuccess("Installed imgpkg " + ImgPkgVersion)
 	}
 
 	// Install all required packages in one command
@@ -114,7 +120,7 @@ var ensureRequiredPackages = func() error {
 	cmd := exec.Command("bash", "-c",
 		"apt-get update && apt-get install -y --no-install-recommends dpkg ebtables conntrack socat libseccomp2")
 
-	output, err := cmd.CombinedOutput()
+	output, err = cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to install packages: %v\nOutput: %s", err, string(output))
 	}
