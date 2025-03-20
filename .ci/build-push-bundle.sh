@@ -27,6 +27,7 @@ docker run -e BUILD_ONLY -e CONTAINERD_VERSION -e KUBERNETES_VERSION -e KUBERNET
 
 echo "creating bundle dir to push k8s packages"
 mkdir -p ./bundle
+mv ./imgpkg ./bundle/imgpkg
 
 echo "coping bundle from docker image"
 docker cp byoh-bundle-container:/bundle ./bundle
