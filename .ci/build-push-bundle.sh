@@ -32,5 +32,6 @@ echo "coping bundle from docker image"
 docker cp byoh-bundle-container:/bundle ./bundle
 
 echo "pushing oci bundle to quay.io/platform9/byoh-bundle-ubuntu_20.04.1_x86-64_k8s"
-./imgpkg push -f ./bundle -i quay.io/platform9/byoh-bundle-ubuntu_20.04.1_x86-64_k8s:$KUBERNETES_MAJOR_VERSION
+cd bundle
+./imgpkg push -f . -i quay.io/platform9/byoh-bundle-ubuntu_20.04.1_x86-64_k8s:$KUBERNETES_MAJOR_VERSION
 
