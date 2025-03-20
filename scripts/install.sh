@@ -1,5 +1,8 @@
 #!/bin/bash
-echo "setting up kernal modules inside container"
+echo "set chroot to mount root on host "
+
+chroot /host bash
+
 echo "setting up kernel modules inside container"
 	apt-get update
 	KERNEL_VERSION=$(uname -r)
@@ -11,7 +14,6 @@ echo "setting up kernel modules inside container"
 
 echo " Starting pf9-byohost-agent"
 hostnamectl set-hostname $HOSTNAME
-if ! dpkg -i pf9-byohost-agent.deb; then
-	    echo "Failed to install pf9-byohost-agent package"
-	    exit 1
-	fi
+
+./byoh-hostagent-linux-amd64 --bootstrap-kubeconfig bootstrap-kubeconfig.yaml  > ~/var/log/pf9/byoh/byoh-agent.log 2>&1 & disown -a
+

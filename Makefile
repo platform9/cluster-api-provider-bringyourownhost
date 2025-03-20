@@ -324,18 +324,47 @@ $(PF9_BYOHOST_DEB_FILE): $(DEB_SRC_ROOT)
 
 build-host-agent-deb: $(PF9_BYOHOST_DEB_FILE)
 
-DEB_DEP_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/dependencies
-$(DEB_DEP_SRC_ROOT):	build-host-agent-deb
-			echo "\n Building DEB for dependency package "
-			mkdir -p $(DEB_DEP_SRC_ROOT)
-			echo "copy pf9-byohost-agent deb package"
-			cp $(PF9_BYOHOST_DEB_FILE) $(DEB_DEP_SRC_ROOT)/. && echo "Successfully copied byoh-sgent deb pkg\n"
-			cp $(AGENT_SRC_DIR)/scripts/Dockerfile $(DEB_DEP_SRC_ROOT)/Dockerfile && echo "Successfully copied Dockerfile"
-			cp $(AGENT_SRC_DIR)/scripts/install.sh $(DEB_DEP_SRC_ROOT)/install.sh && echo "Successfully copied install.sh"
+######################################################################
+
+$(CONT_DEB_SRC_ROOT):
+	echo "Building CONT_DEB_SRC_ROOT "
+	mkdir -p $(CONT_DEB_SRC_ROOT)
+	echo "coping containerized-byo-agent-service "
+	mkdir -p $(CONT_DEB_SRC_ROOT)/lib/systemd/system/
+	cp $(AGENT_SRC_DIR)/service/containerized-byo-agent.service $(CONT_DEB_SRC_ROOT)/lib/systemd/system/pf9-byohost-agent.service
+
+ 
+$(CONT_BYO_AGENT_DEB_FILE): $(CONT_DEB_SRC_ROOT)
+	fpm -t deb -s dir -n containerized-byo-agent \
+	 --description "Platform9 containerized byo-agent deb package" \
+	 --license "Commercial" --architecture all --url "http://www.platform9.net" --vendor Platform9 \
+         -d containerd \
+	 --after-install $(AGENT_SRC_DIR)/scripts/containerized/containerized-byo-host-after-install.sh \
+	 --before-remove $(AGENT_SRC_DIR)/scripts/containerized/containerized-byo-host-before-remove.sh \
+	 --after-remove $(AGENT_SRC_DIR)/scripts/containerized/containerized-byo-host-after-remove.sh \
+	 -p $(CONT_BYO_AGENT_DEB_FILE) \
+	 -C $(CONT_DEB_SRC_ROOT)/ .
+	$(AGENT_SRC_DIR)/sign_packages_deb.sh  $(CONT_BYO_AGENT_DEB_FILE)
+	md5sum $(CONT_BYO_AGENT_DEB_FILE) | cut -d' ' -f 1 > $(CONT_BYO_AGENT_DEB_FILE).md5
+
+# build-containerized-host-agent-deb - will create deb package containing systemd service for containerized byo-agent 
+build-containerized-host-agent-deb: $(CONT_BYO_AGENT_DEB_FILE)
 
 
-build-byoh-image : | $(DEB_DEP_SRC_ROOT)
-	echo $(DEB_DEP_SRC_ROOT)
+
+# CONT_BYOH_AGENT_SRC_ROOT = containerized byo agent source root dir content: 1)Dockerfile 2)install.sh and 3)pf9-byoh-agent binary
+CONT_BYOH_AGENT_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/dependencies
+
+$(CONT_BYOH_AGENT_SRC_ROOT): build-host-agent-binary
+	echo "\n Building directory for containerized byo agent "
+	mkdir -p $(CONT_BYOH_AGENT_SRC_ROOT)
+	echo "copy byo-agent binary"
+	cp $(RELEASE_DIR)/byoh-hostagent-linux-amd64  $(CONT_BYOH_AGENT_SRC_ROOT)/byoh-hostagent-linux-amd64  && echo "Successfully copied byo-agent binary \n"
+	cp $(AGENT_SRC_DIR)/scripts/Dockerfile $(CONT_BYOH_AGENT_SRC_ROOT)/Dockerfile && echo "Successfully copied Dockerfile"
+	cp $(AGENT_SRC_DIR)/scripts/install.sh $(CONT_BYOH_AGENT_SRC_ROOT)/install.sh && echo "Successfully copied install.sh"
+
+build-containerized-byo-agent : | $(CONT_BYOH_AGENT_SRC_ROOT)
+	echo $(CONT_BYOH_AGENT_SRC_ROOT)
 
 ########################################################################
 

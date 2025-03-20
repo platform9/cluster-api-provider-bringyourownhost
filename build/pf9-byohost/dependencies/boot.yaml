@@ -1,0 +1,19 @@
+apiVersion: v1
+clusters:
+- cluster:
+    insecure-skip-tls-verify: true
+    server: https://vaibhav-dev.app.dev-pcd.platform9.com/k8s-api
+  name: vaibhav-dev-default-service
+contexts:
+- context:
+    cluster: vaibhav-dev-default-service
+    namespace: vaibhav-dev-default-service
+    user: byoh
+  name: byoh-vaibhav-dev-default-service
+current-context: byoh-vaibhav-dev-default-service
+kind: Config
+preferences: {}
+users:
+- name: byoh
+  user:
+    token: eyJhbGciOiJSUzI1NiIsImtpZCI6IlFoTzFkQVBtMGx1NWU0cVVnOVZZTngwN056aEtMUDllaGQ3dXBkbjU3Y0UifQ.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJ2YWliaGF2LWRldi1kZWZhdWx0LXNlcnZpY2UiLCJrdWJlcm5ldGVzLmlvL3NlcnZpY2VhY2NvdW50L3NlY3JldC5uYW1lIjoiYnlvaC10b2tlbiIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50Lm5hbWUiOiJieW9oIiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9zZXJ2aWNlLWFjY291bnQudWlkIjoiNTM1NWRkNTYtYTM4MC00NDlkLWFhZGYtYTkwMWU0MTgzNTVkIiwic3ViIjoic3lzdGVtOnNlcnZpY2VhY2NvdW50OnZhaWJoYXYtZGV2LWRlZmF1bHQtc2VydmljZTpieW9oIn0.uZxRL-7bRN1oBsIOTzLMN23DyU77b9B8L7iYS90pFPKyrq02xyZ-nHhzGUKm5ee9ZxJdc9RZssNRP0A2Jlu6wQVgzAaCFTBBvJYqmmnVw3TDDMFah2hV0HI_GgOr9bwvhvW503LtLCyq67HlKvZi0eKIv8rlOjchCvMDb-wjB7ZkbDu_zunx79TEfm1igyXegWcFMc1PYmbswTd4egm7jgjkeFsETjpHFalRP2rHLRTL0brHCdQH1ARijIgwf9l4LhgU_lk__-rLdKjCL1y2bGl4rtxPDDf2FmJPKa13iw6rovZJVB4PWNRtgRYtjFQVTwtuEVOI_H5ldsHRq6lwag
