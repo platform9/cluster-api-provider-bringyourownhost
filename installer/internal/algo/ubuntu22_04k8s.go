@@ -151,6 +151,7 @@ done
 
 ## removing os configuration
 tar tf "$BUNDLE_PATH/conf.tar" | xargs -n 1 echo '/' | sed 's/ //g' | grep -e "[^/]$" | xargs rm -f
+rm -f /etc/sysctl.d/99-kubernetes.conf
 
 ## remove kernel modules
 modprobe -rq overlay && modprobe -r br_netfilter

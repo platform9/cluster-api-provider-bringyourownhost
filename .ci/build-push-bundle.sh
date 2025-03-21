@@ -7,13 +7,9 @@ export BUILD_ONLY=${BUILD_ONLY:-1}
 export CONTAINERD_VERSION=${CONTAINERD_VERSION:-1.7.26}
 export KUBERNETES_VERSION=${KUBERNETES_VERSION:-1.31.0-1.1}
 export KUBERNETES_MAJOR_VERSION=${KUBERNETES_MAJOR_VERSION:-v1.31}
-<<<<<<< HEAD
-=======
 export BUNDLE_VERSION=${BUNDLE_VERSION:-v1.31.0}
->>>>>>> ced5aae (removed nested directory (#20))
 export ARCH=${ARCH:-amd64}
-export UBUNTU_VERSION=${UBUNTU_VERSION:-"22.04"}  # Default to 22.04, can be overridden
-export BUNDLE_VERSION=${BUNDLE_VERSION:-v1.31.0}
+export UBUNTU_VERSION=${UBUNTU_VERSION:-"22.04"}  # Default to 22.04, can be overridden\
 # export CNI_VERSION=${CNI_VERSION:-1.4.0-1.1}
 
 #alias shasum="sha512sum"
