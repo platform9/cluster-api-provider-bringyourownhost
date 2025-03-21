@@ -6,7 +6,8 @@ source ~/.bashrc
 export BUILD_ONLY=${BUILD_ONLY:-1}
 export CONTAINERD_VERSION=${CONTAINERD_VERSION:-1.7.26}
 export KUBERNETES_VERSION=${KUBERNETES_VERSION:-1.31.0-1.1}
-export KUBERNETES_MAJOR_VERSION=${KUBERNETES_MAJOR_VERSION:-v1.31.0}
+export KUBERNETES_MAJOR_VERSION=${KUBERNETES_MAJOR_VERSION:-v1.31}
+export BUNDLE_VERSION=${BUNDLE_VERSION:-v1.31.0}
 export ARCH=${ARCH:-amd64}
 # export CNI_VERSION=${CNI_VERSION:-1.4.0-1.1}
 
@@ -29,8 +30,8 @@ echo "creating bundle dir to push k8s packages"
 mkdir -p ./bundle
 
 echo "coping bundle from docker image"
-docker cp byoh-bundle-container:/bundle ./bundle
+docker cp byoh-bundle-container:/bundle/. ./bundle/
 
 echo "pushing oci bundle to quay.io/platform9/byoh-bundle-ubuntu_20.04.1_x86-64_k8s"
-./imgpkg push -f ./bundle -i quay.io/platform9/byoh-bundle-ubuntu_20.04.1_x86-64_k8s:$KUBERNETES_MAJOR_VERSION
+./imgpkg push -f ./bundle -i quay.io/platform9/byoh-bundle-ubuntu_20.04.1_x86-64_k8s:$BUNDLE_VERSION
 
