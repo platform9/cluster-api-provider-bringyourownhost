@@ -314,9 +314,9 @@ $(PF9_BYOHOST_DEB_FILE): $(DEB_SRC_ROOT)
 	 --description "Platform9 Bring Your Own Host deb package" \
 	 --license "Commercial" --architecture all --url "http://www.platform9.net" --vendor Platform9 \
 	 -d socat -d ethtool -d ebtables -d conntrack \
-	 --after-install $(AGENT_SRC_DIR)/scripts/pf9-byohost-agent-after-install.sh \
-	 --before-remove $(AGENT_SRC_DIR)/scripts/pf9-byohost-agent-before-remove.sh \
-	 --after-remove $(AGENT_SRC_DIR)/scripts/pf9-byohost-agent-after-remove.sh \
+	 --after-install $(AGENT_SRC_DIR)/scripts/agentonhost/pf9-byohost-agent-after-install.sh \
+	 --before-remove $(AGENT_SRC_DIR)/scripts/agentonhost/pf9-byohost-agent-before-remove.sh \
+	 --after-remove $(AGENT_SRC_DIR)/scripts/agentonhost/pf9-byohost-agent-after-remove.sh \
 	 -p $(PF9_BYOHOST_DEB_FILE) \
 	 -C $(DEB_SRC_ROOT)/ .
 	$(AGENT_SRC_DIR)/sign_packages_deb.sh $(PF9_BYOHOST_DEB_FILE)
@@ -348,11 +348,14 @@ $(CONT_BYO_AGENT_DEB_FILE): $(CONT_DEB_SRC_ROOT)
 	md5sum $(CONT_BYO_AGENT_DEB_FILE) | cut -d' ' -f 1 > $(CONT_BYO_AGENT_DEB_FILE).md5
 
 # build-containerized-host-agent-deb - will create deb package containing systemd service for containerized byo-agent 
+
 build-containerized-host-agent-deb: $(CONT_BYO_AGENT_DEB_FILE)
 
+# CONT_BYOH_AGENT_SRC_ROOT = containerized-byo-agent-source-root dir contains:
+#  1)Dockerfile 
+#  2)install.sh 
+#  and 3)pf9-byoh-agent binary
 
-
-# CONT_BYOH_AGENT_SRC_ROOT = containerized byo agent source root dir content: 1)Dockerfile 2)install.sh and 3)pf9-byoh-agent binary
 CONT_BYOH_AGENT_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/dependencies
 
 $(CONT_BYOH_AGENT_SRC_ROOT): build-host-agent-binary
@@ -360,8 +363,8 @@ $(CONT_BYOH_AGENT_SRC_ROOT): build-host-agent-binary
 	mkdir -p $(CONT_BYOH_AGENT_SRC_ROOT)
 	echo "copy byo-agent binary"
 	cp $(RELEASE_DIR)/byoh-hostagent-linux-amd64  $(CONT_BYOH_AGENT_SRC_ROOT)/byoh-hostagent-linux-amd64  && echo "Successfully copied byo-agent binary \n"
-	cp $(AGENT_SRC_DIR)/scripts/Dockerfile $(CONT_BYOH_AGENT_SRC_ROOT)/Dockerfile && echo "Successfully copied Dockerfile"
-	cp $(AGENT_SRC_DIR)/scripts/install.sh $(CONT_BYOH_AGENT_SRC_ROOT)/install.sh && echo "Successfully copied install.sh"
+	cp $(AGENT_SRC_DIR)/scripts/containerized/Dockerfile $(CONT_BYOH_AGENT_SRC_ROOT)/Dockerfile && echo "Successfully copied Dockerfile"
+	cp $(AGENT_SRC_DIR)/scripts/containerized/install.sh $(CONT_BYOH_AGENT_SRC_ROOT)/install.sh && echo "Successfully copied install.sh"
 
 build-containerized-byo-agent : | $(CONT_BYOH_AGENT_SRC_ROOT)
 	echo $(CONT_BYOH_AGENT_SRC_ROOT)
