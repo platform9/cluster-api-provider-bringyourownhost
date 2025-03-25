@@ -7,6 +7,10 @@ export BUILD_ONLY=${BUILD_ONLY:-1}
 export CONTAINERD_VERSION=${CONTAINERD_VERSION:-1.7.26}
 export KUBERNETES_VERSION=${KUBERNETES_VERSION:-1.31.0-1.1}
 export KUBERNETES_MAJOR_VERSION=${KUBERNETES_MAJOR_VERSION:-v1.31}
+<<<<<<< HEAD
+=======
+export BUNDLE_VERSION=${BUNDLE_VERSION:-v1.31.0}
+>>>>>>> ced5aae (removed nested directory (#20))
 export ARCH=${ARCH:-amd64}
 export UBUNTU_VERSION=${UBUNTU_VERSION:-"22.04"}  # Default to 22.04, can be overridden
 export BUNDLE_VERSION=${BUNDLE_VERSION:-v1.31.0}
@@ -31,7 +35,7 @@ echo "creating bundle dir to push k8s packages"
 mkdir -p ./bundle
 
 echo "coping bundle from docker image"
-docker cp byoh-bundle-container:/bundle ./bundle
+docker cp byoh-bundle-container:/bundle/. ./bundle/
 
 # Determine bundle name based on Ubuntu version
 if [ "$UBUNTU_VERSION" = "20.04" ]; then
