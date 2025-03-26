@@ -10,7 +10,6 @@ export KUBERNETES_MAJOR_VERSION=${KUBERNETES_MAJOR_VERSION:-v1.31}
 export BUNDLE_VERSION=${BUNDLE_VERSION:-v1.31.0}
 export ARCH=${ARCH:-amd64}
 export CRITOOL_VERSION=${CRITOOL_VERSION:-1.31.0-1.1}
-# export CNI_VERSION=${CNI_VERSION:-1.4.0-1.1}
 
 #alias shasum="sha512sum"
 echo "installing imgpkg"
@@ -25,7 +24,7 @@ docker build -t byoh-bundle .
 docker rm -f byoh-bundle-container
 
 echo "executing docker image"
-docker run -e BUILD_ONLY -e CONTAINERD_VERSION -e KUBERNETES_VERSION -e KUBERNETES_MAJOR_VERSION -e ARCH --name byoh-bundle-container -i byoh-bundle /bin/bash
+docker run -e CRITOOL_VERSION -e BUILD_ONLY -e CONTAINERD_VERSION -e KUBERNETES_VERSION -e KUBERNETES_MAJOR_VERSION -e ARCH --name byoh-bundle-container -i byoh-bundle /bin/bash
 
 echo "creating bundle dir to push k8s packages"
 mkdir -p ./bundle
