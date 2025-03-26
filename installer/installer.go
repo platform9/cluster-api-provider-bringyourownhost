@@ -5,6 +5,7 @@ package installer
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/installer/internal/algo"
@@ -42,6 +43,8 @@ const (
 	ErrBundleInstall = Error("Error installing bundle")
 	// ErrBundleUninstall error type when the bundle uninstallation fails
 	ErrBundleUninstall = Error("Error uninstalling bundle")
+	// ErrInstallerCreation error type when installer creation fails
+	ErrInstallerCreation = Error("Error creating installer")
 )
 
 // archOldNameMap keeps the mapping of architecture new name to old name mapping
@@ -67,8 +70,17 @@ func NewInstaller(ctx context.Context, osDist, arch, k8sVersion string, download
 	addrs := downloader.GetBundleAddr(osbundle, k8sVersion)
 
 	// Use appropriate installer based on OS version
+	var installer K8sInstaller
+	var err error
+
 	if strings.Contains(osbundle, "Ubuntu_22.04") {
-		return algo.NewUbuntu22_04Installer(ctx, arch, addrs)
+		installer, err = algo.NewUbuntu22_04Installer(ctx, arch, addrs)
+	} else {
+		installer, err = algo.NewUbuntu20_04Installer(ctx, arch, addrs)
 	}
-	return algo.NewUbuntu20_04Installer(ctx, arch, addrs)
+
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInstallerCreation, err)
+	}
+	return installer, nil
 }

@@ -34,6 +34,20 @@ echo "coping bundle from docker image"
 docker cp byoh-bundle-container:/bundle/. ./bundle/
 
 # Determine bundle name based on Ubuntu version
+case "$UBUNTU_VERSION" in
+    "20.04")
+        BUNDLE_NAME="byoh-bundle-ubuntu_20.04.1_x86-64_k8s"
+        ;;
+    "22.04")
+        BUNDLE_NAME="byoh-bundle-ubuntu_22.04_x86-64_k8s"
+        ;;
+    *)
+        echo "Error: Unsupported Ubuntu version '$UBUNTU_VERSION'"
+        echo "Supported versions are: 20.04, 22.04"
+        docker rm byoh-bundle-container
+        exit 1
+        ;;
+esac
 
 if [ "$UBUNTU_VERSION" = "20.04" ]; then
     BUNDLE_NAME="byoh-bundle-ubuntu_20.04.1_x86-64_k8s"
