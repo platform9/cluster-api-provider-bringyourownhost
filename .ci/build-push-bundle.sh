@@ -34,4 +34,3 @@ docker cp byoh-bundle-container:/bundle/. ./bundle/
 
 echo "pushing oci bundle to quay.io/platform9/byoh-bundle-ubuntu_20.04.1_x86-64_k8s"
 ./imgpkg push -f ./bundle -i quay.io/platform9/byoh-bundle-ubuntu_20.04.1_x86-64_k8s:$BUNDLE_VERSION
-
