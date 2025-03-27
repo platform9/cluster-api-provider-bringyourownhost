@@ -23,12 +23,11 @@ mkdir -p /etc/apt/keyrings
 curl -fsSL https://pkgs.k8s.io/core:/stable:/${KUBERNETES_MAJOR_VERSION}/deb/Release.key |  gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
 
 echo Update apt package index, install kubelet, kubeadm and kubectl
- apt-get update
- chown -Rv _apt:root /bundle/
- chown -R _apt:root /ingredients
- mv cri-containerd-cni-${CONTAINERD_VERSION}-linux-amd64.tar.gz /ingredients/ 
- cd /ingredients 
- apt-get download {kubelet,kubeadm,kubectl}:$ARCH=$KUBERNETES_VERSION
- apt-get download kubernetes-cni:$ARCH
- apt-get download cri-tools:$ARCH=$CRITOOL_VERSION
-
+apt-get update
+chown -Rv _apt:root /bundle/
+chown -R _apt:root /ingredients
+mv cri-containerd-cni-${CONTAINERD_VERSION}-linux-amd64.tar.gz /ingredients/ 
+cd /ingredients 
+apt-get download {kubelet,kubeadm,kubectl}:$ARCH=$KUBERNETES_VERSION
+apt-get download kubernetes-cni:$ARCH
+apt-get download cri-tools:$ARCH=$CRITOOL_VERSION

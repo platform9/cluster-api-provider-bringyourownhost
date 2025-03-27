@@ -9,7 +9,7 @@ import (
 
 const (
 	// systemdCgroupConfig is the command to enable systemd cgroup in containerd for Ubuntu 22.04
-	systemdCgroupConfig = `sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml`
+	systemdCgroupConfig = `sed -i "s/SystemdCgroup = false/SystemdCgroup = true/" /etc/containerd/config.toml`
 )
 
 // Ubuntu22_04Installer represent the installer implementation for ubuntu22.04.* os distribution
