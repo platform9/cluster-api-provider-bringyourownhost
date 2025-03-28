@@ -15,7 +15,7 @@ fi
 
 ## removing deb packages
 for pkg in kubeadm kubelet kubectl kubernetes-cni cri-tools; do
-    dpkg --purge $pkg dpkg -l $pkg &>/dev/null && dpkg --purge $pkg || echo "Package $pkg not installed"
+    dpkg -l $pkg &>/dev/null && dpkg --purge $pkg || echo "Package $pkg not installed"
 done
 
 ## removing os configuration
