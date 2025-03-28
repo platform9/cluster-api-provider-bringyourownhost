@@ -10,6 +10,7 @@ export KUBERNETES_MAJOR_VERSION=${KUBERNETES_MAJOR_VERSION:-v1.31}
 export BUNDLE_VERSION=${BUNDLE_VERSION:-v1.31.0}
 export ARCH=${ARCH:-amd64}
 export CRITOOL_VERSION=${CRITOOL_VERSION:-1.31.0-1.1}
+export UBUNTU_VERSION=${UBUNTU_VERSION:-"22.04"} # Default to 22.04, can be overridden
 
 #alias shasum="sha512sum"
 echo "installing imgpkg"
@@ -24,7 +25,7 @@ docker build -t byoh-bundle .
 docker rm -f byoh-bundle-container
 
 echo "executing docker image"
-docker run -e CRITOOL_VERSION -e BUILD_ONLY -e CONTAINERD_VERSION -e KUBERNETES_VERSION -e KUBERNETES_MAJOR_VERSION -e ARCH --name byoh-bundle-container -i byoh-bundle /bin/bash
+docker run -e CRITOOL_VERSION -e BUILD_ONLY -e CONTAINERD_VERSION -e KUBERNETES_VERSION -e KUBERNETES_MAJOR_VERSION -e ARCH -e UBUNTU_VERSION --name byoh-bundle-container -i byoh-bundle /bin/bash
 
 echo "creating bundle dir to push k8s packages"
 mkdir -p ./bundle
@@ -32,5 +33,28 @@ mkdir -p ./bundle
 echo "coping bundle from docker image"
 docker cp byoh-bundle-container:/bundle/. ./bundle/
 
-echo "pushing oci bundle to quay.io/platform9/byoh-bundle-ubuntu_20.04.1_x86-64_k8s"
-./imgpkg push -f ./bundle -i quay.io/platform9/byoh-bundle-ubuntu_20.04.1_x86-64_k8s:$BUNDLE_VERSION
+# Determine bundle name based on Ubuntu version
+case "$UBUNTU_VERSION" in
+    "20.04")
+        BUNDLE_NAME="byoh-bundle-ubuntu_20.04.1_x86-64_k8s"
+        ;;
+    "22.04")
+        BUNDLE_NAME="byoh-bundle-ubuntu_22.04_x86-64_k8s"
+        ;;
+    *)
+        echo "Error: Unsupported Ubuntu version '$UBUNTU_VERSION'"
+        echo "Supported versions are: 20.04, 22.04"
+        docker rm byoh-bundle-container
+        exit 1
+        ;;
+esac
+
+if [ "$UBUNTU_VERSION" = "20.04" ]; then
+    BUNDLE_NAME="byoh-bundle-ubuntu_20.04.1_x86-64_k8s"
+else
+    BUNDLE_NAME="byoh-bundle-ubuntu_22.04_x86-64_k8s"
+fi
+
+# Push bundle
+echo "pushing oci bundle to quay.io/platform9/$BUNDLE_NAME"
+./imgpkg push -f ./bundle -i quay.io/platform9/$BUNDLE_NAME:$BUNDLE_VERSION
