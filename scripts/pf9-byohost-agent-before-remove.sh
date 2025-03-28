@@ -87,7 +87,17 @@ else
     echo ".byoh already removed or not found" | tee -a "$LOG_FILE"
 fi
 
-echo "not removed dependencies like socat conntrack ebtables and ethtools, remove it according to your need" | tee -a "$LOG_FILE"
+echo " | not removed dependencies              |" | tee -a "$LOG_FILE" 
+echo " | socat conntrack ebtables and ethtools |" | tee -a "$LOG_FILE"
+echo " | remove it according to your need      |" | tee -a "$LOG_FILE"
+
+if [ -f /usr/bin/byohctl ]; then
+    echo "Removing byohctl..." | tee -a "$LOG_FILE"
+    rm /usr/bin/byohctl 
+    echo "byohctl removed successfully" | tee -a "$LOG_FILE"
+else
+    echo "byohctl already removed or not found" | tee -a "$LOG_FILE"
+fi
 
 echo "Uninstallation of pf9-byoh-hostagent completed successfully" | tee -a "$LOG_FILE"
 
