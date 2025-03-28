@@ -40,6 +40,14 @@ func (s *BaseUbuntuInstaller) Uninstall() string {
 
 // NewBaseUbuntuInstaller creates a new base Ubuntu installer
 func NewBaseUbuntuInstaller(ctx context.Context, arch, bundleAddrs string, containerdConfig string) (*BaseUbuntuInstaller, error) {
+	// Validate embedded templates
+	if commonUbuntuInstallTemplate == "" {
+		return nil, fmt.Errorf("install template is empty - template file may be missing")
+	}
+	if commonUbuntuUninstallTemplate == "" {
+		return nil, fmt.Errorf("uninstall template is empty - template file may be missing")
+	}
+
 	data := map[string]string{
 		"BundleAddrs":        bundleAddrs,
 		"Arch":               arch,
@@ -48,8 +56,16 @@ func NewBaseUbuntuInstaller(ctx context.Context, arch, bundleAddrs string, conta
 		"BundleDownloadPath": "/var/lib/byoh/bundles",
 	}
 
-	installTemplate := template.Must(template.New("install").Parse(commonUbuntuInstallTemplate))
-	uninstallTemplate := template.Must(template.New("uninstall").Parse(commonUbuntuUninstallTemplate))
+	// Parse and validate templates
+	installTemplate, err := template.New("install").Parse(commonUbuntuInstallTemplate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse install template: %v", err)
+	}
+
+	uninstallTemplate, err := template.New("uninstall").Parse(commonUbuntuUninstallTemplate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse uninstall template: %v", err)
+	}
 
 	var install, uninstall string
 	var buf strings.Builder

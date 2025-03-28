@@ -8,18 +8,25 @@ BUNDLE_PATH=$BUNDLE_DOWNLOAD_PATH/$BUNDLE_ADDR
 systemctl stop containerd && systemctl disable containerd && systemctl daemon-reload
 
 ## removing containerd configurations and cni plugins
-rm -rf /opt/cni/ && rm -rf /opt/containerd/ &&  tar tf "$BUNDLE_PATH/containerd.tar" | xargs -n 1 echo '/' | sed 's/ //g'  | grep -e '[^/]$' | xargs rm -f
+rm -rf /opt/cni/ && rm -rf /opt/containerd/ 
+if [ -f "$BUNDLE_PATH/containerd.tar" ]; then
+  tar tf "$BUNDLE_PATH/containerd.tar" | xargs -n 1 echo '/' | sed 's/ //g'  | grep -e '[^/]$' | xargs rm -f
+fi
 
 ## removing deb packages
 for pkg in kubeadm kubelet kubectl kubernetes-cni cri-tools; do
-    dpkg --purge $pkg
+    dpkg --purge $pkg dpkg -l $pkg &>/dev/null && dpkg --purge $pkg || echo "Package $pkg not installed"
 done
 
 ## removing os configuration
-tar tf "$BUNDLE_PATH/conf.tar" | xargs -n 1 echo '/' | sed 's/ //g' | grep -e "[^/]$" | xargs rm -f
+if [ -f "$BUNDLE_PATH/conf.tar" ]; then
+    tar tf "$BUNDLE_PATH/conf.tar" | xargs -n 1 echo '/' | sed 's/ //g' | grep -e "[^/]$" | xargs rm -f
+else
+    echo "Warning: conf.tar not found, skipping OS configuration removal"
+fi
 
 ## remove kernal modules
-modprobe -rq overlay && modprobe -r br_netfilter
+modprobe -rq overlay || true && modprobe -r br_netfilter || true
 
 ## enable firewall
 if command -v ufw >>/dev/null; then

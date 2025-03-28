@@ -27,3 +27,13 @@ func NewUbuntu22_04Installer(ctx context.Context, arch, bundleAddrs string) (*Ub
 		BaseUbuntuInstaller: base,
 	}, nil
 }
+
+// Install will return k8s install script
+func (s *Ubuntu22_04Installer) Install() string {
+	return s.BaseUbuntuInstaller.Install()
+}
+
+// Uninstall will return k8s uninstall script
+func (s *Ubuntu22_04Installer) Uninstall() string {
+	return s.BaseUbuntuInstaller.Uninstall()
+}
