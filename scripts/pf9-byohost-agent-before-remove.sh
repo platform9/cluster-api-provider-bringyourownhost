@@ -63,5 +63,31 @@ else
 	echo "Conf files already removed or not found " | tee -a "$LOG_FILE"
 fi
 
+if [ -f /root/.byoh/config ]; then
+    echo "Removing Config File" | tee -a "$LOG_FILE"
+    rm -f /root/.byoh/config
+    echo "Config file removed successfully" | tee -a "$LOG_FILE"
+else
+    echo "Config file already removed or not found" | tee -a "$LOG_FILE"
+fi
+
+if [ -d /root/.byoh/packages ]; then
+    echo "Removing packages directory..." | tee -a "$LOG_FILE"
+    rm -rf /root/.byoh/packages 
+    echo "packages dir removed successfully" | tee -a "$LOG_FILE"
+else
+    echo "packages already removed or not found" | tee -a "$LOG_FILE"
+fi
+
+if [ -d /root/.byoh ]; then
+    echo "Removing .byoh directory..." | tee -a "$LOG_FILE"
+    rm -rf /root/.byoh
+    echo ".byoh dir removed successfully" | tee -a "$LOG_FILE"
+else
+    echo ".byoh already removed or not found" | tee -a "$LOG_FILE"
+fi
+
+echo "not removed dependencies like socat conntrack ebtables and ethtools, remove it according to your need" | tee -a "$LOG_FILE"
+
 echo "Uninstallation of pf9-byoh-hostagent completed successfully" | tee -a "$LOG_FILE"
 
