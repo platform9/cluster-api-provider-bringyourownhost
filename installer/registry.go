@@ -117,9 +117,6 @@ func GetSupportedRegistry() registry {
 		linuxDistro20_04 := "Ubuntu_20.04.1_x86-64"
 		linuxDistro22_04 := "Ubuntu_22.04_x86-64"
 
-		reg.AddBundleInstaller(linuxDistro20_04, "v1.24.*")
-		reg.AddBundleInstaller(linuxDistro20_04, "v1.25.*")
-		reg.AddBundleInstaller(linuxDistro20_04, "v1.26.*")
 		reg.AddBundleInstaller(linuxDistro20_04, "v1.31.*")
 
 		reg.AddBundleInstaller(linuxDistro22_04, "v1.31.*")
@@ -128,9 +125,6 @@ func GetSupportedRegistry() registry {
 		 */
 
 		// Match any patch version of the specified Major & Minor K8s version
-		reg.AddK8sFilter("v1.24.*")
-		reg.AddK8sFilter("v1.25.*")
-		reg.AddK8sFilter("v1.26.*")
 		reg.AddK8sFilter("v1.31.*")
 
 		// Match concrete os version to repository os version
