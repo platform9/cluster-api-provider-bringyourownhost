@@ -27,17 +27,6 @@ var (
 	verbosity           string
 )
 
-var rootCmd = &cobra.Command{
-	Use:   "byohctl",
-	Short: "BYOH control tool for Platform9",
-	Long: `BYOH (Bring Your Own Host) control tool for Platform9.
-This tool helps onboard hosts to your Platform9 deployment.`,
-}
-
-func Execute() error {
-	return rootCmd.Execute()
-}
-
 var onboardCmd = &cobra.Command{
 	Use:   "onboard",
 	Short: "Onboard a host to Platform9",
