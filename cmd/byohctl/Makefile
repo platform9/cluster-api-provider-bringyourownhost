@@ -2,7 +2,7 @@
 BINARY_NAME=byohctl
 
 # Build directory
-BUILD_DIR=$(TEAMCITY_CHECKOUT_DIR)/cmd/byohctl/bin
+BUILD_DIR=$(shell pwd)/bin
 
 # Go build flags
 GOOS?=linux
