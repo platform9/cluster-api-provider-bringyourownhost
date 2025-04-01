@@ -218,6 +218,9 @@ host-agent-binaries: ## Builds the binaries for the host-agent
 	RELEASE_BINARY=./byoh-hostagent GOOS=linux GOARCH=amd64 GOLDFLAGS="$(LDFLAGS) $(STATIC)" \
 	HOST_AGENT_DIR=./$(HOST_AGENT_DIR) $(MAKE) host-agent-binary
 
+CONT_USER := $(shell id -u)
+CONT_GRP := $(shell id -g)
+
 host-agent-binary: $(RELEASE_DIR)
 	docker run \
 		--rm \
@@ -225,6 +228,7 @@ host-agent-binary: $(RELEASE_DIR)
 		-e GOOS=$(GOOS) \
 		-e GOARCH=$(GOARCH) \
 		-v "$$(pwd):/workspace$(DOCKER_VOL_OPTS)" \
+		--user $(CONT_USER):$(CONT_GRP) \
 		-w /workspace \
 		golang:1.20.7 \
 		go build -buildvcs=false -a -ldflags "$(GOLDFLAGS)" \
