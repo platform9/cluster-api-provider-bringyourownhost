@@ -221,7 +221,7 @@ var installDebianPackage = func(debFilePath string) error {
 var PurgeDebianPackage = func() error {
 	dpkgPath, _ := exec.LookPath("dpkg")
 
-	// First, try a clean installation
+	// Purge the package
 	cmd := exec.Command(dpkgPath, "--purge", ByohAgentServiceName)
 	output, err := cmd.CombinedOutput()
 	outputStr := string(output)

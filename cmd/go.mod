@@ -74,3 +74,5 @@ require (
 	go.uber.org/zap v1.27.0 // indirect
 	k8s.io/client-go v0.26.1
 )
+
+replace github.com/vmware-tanzu/cluster-api-provider-bringyourownhost => ../
