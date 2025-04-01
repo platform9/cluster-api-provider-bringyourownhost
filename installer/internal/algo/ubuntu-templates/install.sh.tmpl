@@ -1,0 +1,59 @@
+set -euox pipefail
+
+BUNDLE_DOWNLOAD_PATH={{.BundleDownloadPath}}
+BUNDLE_ADDR={{.BundleAddrs}}
+IMGPKG_VERSION={{.ImgpkgVersion}}
+ARCH={{.Arch}}
+BUNDLE_PATH=$BUNDLE_DOWNLOAD_PATH/$BUNDLE_ADDR
+
+if ! command -v imgpkg >>/dev/null; then
+    echo "installing imgpkg"	
+    
+    if command -v wget >>/dev/null; then
+        dl_bin="wget -nv -O-"
+    elif command -v curl >>/dev/null; then
+        dl_bin="curl -s -L"
+    else
+        echo "installing curl"
+        apt-get install -y curl
+        dl_bin="curl -s -L"
+    fi
+    
+    $dl_bin github.com/vmware-tanzu/carvel-imgpkg/releases/download/$IMGPKG_VERSION/imgpkg-linux-$ARCH > /tmp/imgpkg
+    mv /tmp/imgpkg /usr/local/bin/imgpkg
+    chmod +x /usr/local/bin/imgpkg
+fi
+
+echo "downloading bundle"
+mkdir -p $BUNDLE_PATH
+imgpkg pull -i $BUNDLE_ADDR -o $BUNDLE_PATH
+
+## disable swap
+swapoff -a && sed -ri '/\sswap\s/s/^#?/#/' /etc/fstab
+
+## disable firewall
+if command -v ufw >>/dev/null; then
+    ufw disable
+fi
+
+## load kernal modules
+modprobe overlay && modprobe br_netfilter
+
+## adding os configuration
+tar -C / -xvf "$BUNDLE_PATH/conf.tar" && sysctl --system 
+
+## installing deb packages
+for pkg in cri-tools kubernetes-cni kubectl kubelet kubeadm; do
+    dpkg --install "$BUNDLE_PATH/$pkg.deb" && apt-mark hold $pkg
+done
+
+## intalling containerd
+tar -C / -xvf "$BUNDLE_PATH/containerd.tar"
+mkdir -p /etc/containerd
+containerd config default > /etc/containerd/config.toml
+{{.ContainerdConfig}}
+
+## starting containerd service
+systemctl daemon-reload && systemctl enable containerd && systemctl start containerd
+
+echo "Installation complete!"
