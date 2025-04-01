@@ -69,7 +69,7 @@ func GetNamespaceFromConfig(kubeconfigPath string) (string, error) {
 	// Read the kubeconfig file and get the namespace
 	data, err := os.ReadFile(kubeconfigPath)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("error reading kubeconfig: %v", err)
 	}
 
 	var config service.Config
@@ -316,8 +316,7 @@ func (client *Client) ScaleDownMachineDeployment(machineObj *unstructured.Unstru
 	// Get the machine deployment object
 	unstructuredDeploymentObj, err := client.DynamicClient.Resource(deploymentGVR).Namespace(namespace).Get(context.TODO(), machineDeploymentName, metav1.GetOptions{})
 	if err != nil {
-		fmt.Errorf("error getting machine deployment object: %v", err)
-		return err
+		return fmt.Errorf("error getting machine deployment object: %v", err)
 	}
 	machineDeploymentObj := &capiv1beta1.MachineDeployment{}
 	err = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredDeploymentObj.UnstructuredContent(), machineDeploymentObj)

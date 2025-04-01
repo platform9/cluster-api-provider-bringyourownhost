@@ -135,7 +135,7 @@ func PerformHostOperation(operationType HostOperationType, namespace string) err
 		return fmt.Errorf("failed to wait for machineRef to be unset: %v", err)
 	}
 
-	utils.LogSuccess("Successfully waited for machineRef to be unset")
+	utils.LogSuccess("machineRef successfully unset for the host")
 
 	// If operation is decommission, delete the byohost object and run dpkg purge
 	if operationType == OperationDecommission {
