@@ -13,31 +13,6 @@ import (
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils"
 )
 
-const (
-	// DefaultDirPerms is the default directory permission
-	DefaultDirPerms = 0755
-	// DefaultFilePerms is the default file permission
-	DefaultFilePerms = 0644
-
-	// ByohAgentDebPackageURL is the URL to download the agent package
-	ByohAgentDebPackageURL = "quay.io/platform9/byoh-agent-deb:0.1.2"
-	// ByohAgentDebPackageFilename is the filename of the agent package
-	ByohAgentDebPackageFilename = "pf9-byohost-agent.deb"
-	// ByohAgentServiceName is the name of the agent service
-	ByohAgentServiceName = "pf9-byohost-agent"
-	// ByohAgentLogPath is the path to the BYOH agent log file
-	ByohAgentLogPath = "/var/log/pf9/byoh/byoh-agent.log"
-	// ByohConfigDir is the directory for BYOH configuration
-	ByohConfigDir = ".byoh"
-
-	// ImgPkgVersion is the version of imgpkg to install
-	ImgPkgVersion = "v0.45.0"
-	// ImgPkgURL is the URL to download imgpkg
-	ImgPkgURL = "https://github.com/carvel-dev/imgpkg/releases/download/" + ImgPkgVersion + "/imgpkg-linux-amd64"
-	// ImgPkgPath is the path where imgpkg will be installed
-	ImgPkgPath = "/usr/local/bin/imgpkg"
-)
-
 // Package represents a required package and its installation details
 type Package struct {
 	Name            string
@@ -240,5 +215,21 @@ var installDebianPackage = func(debFilePath string) error {
 	}
 
 	utils.LogSuccess("Successfully installed Debian package %s", debFilePath)
+	return nil
+}
+
+var PurgeDebianPackage = func() error {
+	dpkgPath, _ := exec.LookPath("dpkg")
+
+	// Purge the package
+	cmd := exec.Command(dpkgPath, "--purge", ByohAgentServiceName)
+	output, err := cmd.CombinedOutput()
+	outputStr := string(output)
+
+	if err != nil {
+		return fmt.Errorf("failed to purge package: %v\nOutput: %s", err, outputStr)
+	}
+
+	utils.LogSuccess("Successfully purged Debian package pf9-byohost-agent")
 	return nil
 }
