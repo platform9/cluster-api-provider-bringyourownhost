@@ -325,6 +325,24 @@ $(PF9_BYOHOST_DEB_FILE): $(DEB_SRC_ROOT)
 build-host-agent-deb: $(PF9_BYOHOST_DEB_FILE)
 
 ########################################################################
+# CONT_BYOH_AGENT_SRC_ROOT = containerized-byo-agent-source-root dir contains:
+#  1)Dockerfile 
+#  2)install.sh 
+#  and 3)pf9-byoh-agent binary
+
+CONT_BYOH_AGENT_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/dependencies
+
+$(CONT_BYOH_AGENT_SRC_ROOT): build-host-agent-binary
+	echo "\n Building directory for containerized byo agent "
+	mkdir -p $(CONT_BYOH_AGENT_SRC_ROOT)
+	echo "copy byo-agent binary"
+	cp $(RELEASE_DIR)/byoh-hostagent-linux-amd64  $(CONT_BYOH_AGENT_SRC_ROOT)/byoh-hostagent-linux-amd64  && echo "Successfully copied byo-agent binary \n"
+	cp $(AGENT_SRC_DIR)/scripts/containerized/Dockerfile $(CONT_BYOH_AGENT_SRC_ROOT)/Dockerfile && echo "Successfully copied Dockerfile"
+	cp $(AGENT_SRC_DIR)/scripts/containerized/install.sh $(CONT_BYOH_AGENT_SRC_ROOT)/install.sh && echo "Successfully copied install.sh"
+
+build-containerized-byo-agent : | $(CONT_BYOH_AGENT_SRC_ROOT)
+	echo $(CONT_BYOH_AGENT_SRC_ROOT)
+###############################################################################
 
 # go-get-tool will 'go get' any package $2 and install it to $1.
 PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
