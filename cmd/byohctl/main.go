@@ -10,18 +10,12 @@ import (
 )
 
 // Version information set by linker flags
-var (
-	buildVersion string
-	buildCommit  string
-)
+var buildVersion string
 
 func init() {
 	// Set version information
 	if buildVersion != "" {
 		version.Version = buildVersion
-	}
-	if buildCommit != "" {
-		version.GitCommit = buildCommit
 	}
 }
 

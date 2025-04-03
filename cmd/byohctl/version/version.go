@@ -1,20 +1,12 @@
 package version
 
-var (
-	// Version is the version of byohctl
-	Version string
+// Version is the version of byohctl
+var Version string
 
-	// GitCommit is the git commit hash
-	GitCommit string
-)
-
-// GetVersion returns the full version string
+// GetVersion returns the version string
 func GetVersion() string {
-	if Version == "" {
-		Version = "dev"
-	}
-	if GitCommit != "" {
-		return Version + " (" + GitCommit + ")"
-	}
-	return Version
+    if Version == "" {
+        Version = "0.0.0"
+    }
+    return Version
 }
