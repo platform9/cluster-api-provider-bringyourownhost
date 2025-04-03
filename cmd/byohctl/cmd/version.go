@@ -12,7 +12,7 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print the version information",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("byohctl version:", version.GetVersion())
+		fmt.Print(version.GetVersion())
 	},
 }
 
