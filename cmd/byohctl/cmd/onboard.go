@@ -4,6 +4,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -77,6 +78,19 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	// Check if running on Ubuntu system
 	if !isUbuntuSystem() {
 		fmt.Println("Error: This command requires an Ubuntu system")
+		os.Exit(1)
+	}
+
+	// Before proceeding ahead with onboard, check if pf9-byohost-agent service already exists
+	systemctlCommand := exec.Command("systemctl", "list-unit-files", service.ByohAgentServiceName+".service")
+	output, err := systemctlCommand.CombinedOutput()
+	if err != nil {
+		fmt.Printf("Error checking pf9-byohost-agent service status: %v\nOutput: %s", err, string(output))
+		os.Exit(1)
+	}
+	if strings.Contains(string(output), service.ByohAgentServiceName+".service") {
+		utils.LogError("pf9-byohost-agent service is already installed on this host. Host already onboarded in some tenant.")
+		fmt.Println("Run 'byohctl decommission' to remove the service and then run 'byohctl onboard' again.")
 		os.Exit(1)
 	}
 
