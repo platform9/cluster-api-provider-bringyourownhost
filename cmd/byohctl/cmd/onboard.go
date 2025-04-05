@@ -81,16 +81,12 @@ func runOnboard(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// Before proceeding ahead with onboard, check if pf9-byohost-agent service already exists
-	systemctlCommand := exec.Command("systemctl", "list-unit-files", service.ByohAgentServiceName+".service")
-	output, err := systemctlCommand.CombinedOutput()
+	// Check if service present
+	out, err := service.RunWithStdout(service.Systemctl, service.SystemctlServiceExists...)
 	if err != nil {
-		fmt.Printf("Error checking pf9-byohost-agent service status: %v\nOutput: %s", err, string(output))
-		os.Exit(1)
-	}
-	if strings.Contains(string(output), service.ByohAgentServiceName+".service") {
+		utils.LogSuccess("Byoh service is not installed, proceeding with onboarding")
+	} else if len(out) > 0 {
 		utils.LogError("pf9-byohost-agent service is already installed on this host. Host already onboarded in some tenant.")
-		fmt.Println("Run 'byohctl decommission' to remove the service and then run 'byohctl onboard' again.")
 		os.Exit(1)
 	}
 
