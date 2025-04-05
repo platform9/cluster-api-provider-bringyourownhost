@@ -80,6 +80,15 @@ func runOnboard(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	// Check if service present
+	out, err := service.RunWithStdout(service.Systemctl, service.SystemctlServiceExists...)
+	if err != nil {
+		utils.LogSuccess("Byoh service is not installed, proceeding with onboarding")
+	} else if len(out) > 0 {
+		utils.LogError("pf9-byohost-agent service is already installed on this host. Host already onboarded in some tenant.")
+		os.Exit(1)
+	}
+
 	// Initialize loggers
 	homeDir, err := os.UserHomeDir()
 	if err != nil {

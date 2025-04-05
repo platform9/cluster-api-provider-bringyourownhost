@@ -32,6 +32,9 @@ const (
 
 	// Timeout for waiting for machineRef to be unset
 	WaitForMachineRefToBeUnsetTimeout = 5 * time.Minute
+
+	// Systemctl constants
+	Systemctl = "systemctl"
 )
 
 var (
@@ -39,6 +42,8 @@ var (
 	ByohDir    = filepath.Join(HomeDir, ByohConfigDir)
 
 	KubeconfigFilePath = filepath.Join(ByohDir, "config")
+
+	SystemctlServiceExists = []string{"list-unit-files", ByohAgentServiceName + ".service"}
 )
 
 // Config defines the structure of our kubeconfig file.

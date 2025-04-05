@@ -233,3 +233,17 @@ var PurgeDebianPackage = func() error {
 	utils.LogSuccess("Successfully purged Debian package pf9-byohost-agent")
 	return nil
 }
+
+// RunWithStdout runs a command locally returning stdout and err
+func RunWithStdout(name string, args ...string) (string, error) {
+
+	cmd := exec.Command(name, args...)
+	byt, err := cmd.Output()
+	stderr := ""
+	if exitError, ok := err.(*exec.ExitError); ok {
+		stderr = string(exitError.Stderr)
+	}
+
+	utils.LogDebug("stdout: %s, stderr: %v", string(byt), stderr)
+	return string(byt), err
+}

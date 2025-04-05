@@ -9,7 +9,7 @@ import (
 // AskBool function asks for the user input
 // for a boolean input
 func AskBool(msg string, args ...interface{}) (bool, error) {
-	_, err := fmt.Fprintf(os.Stdout, fmt.Sprintf("%s (y/n): ", msg), args...)
+	_, err := fmt.Fprintf(os.Stdout, fmt.Sprintf("%s: ", msg), args...)
 	if err != nil {
 		return false, fmt.Errorf("Unable to show options to user: %s", err.Error())
 	}
