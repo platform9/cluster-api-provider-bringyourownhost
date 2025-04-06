@@ -19,15 +19,18 @@ This command will:
 1. Authenticate with Platform9
 2. Deauthorise the host from the byo cluster
 3. Host must have been part of some cluster before deauthorisation`,
-	Example: `  byohctl deauthorise`,
+	Example: `  byohctl deauthorise -v all`,
 	Run:     runDeauthorise,
 }
 
 func init() {
 	rootCmd.AddCommand(deauthoriseCmd)
+	deauthoriseCmd.Flags().StringVarP(&verbosity, "verbosity", "v", "minimal", "Log verbosity level (all, important, minimal, critical, none)")
 }
 
 func runDeauthorise(cmd *cobra.Command, args []string) {
+
+	utils.SetConsoleOutputLevel(verbosity)
 
 	namespace, err := client.GetNamespaceFromConfig(service.KubeconfigFilePath)
 	if err != nil {
