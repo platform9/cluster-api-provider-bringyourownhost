@@ -36,7 +36,7 @@ func (v *ByoHostValidator) Handle(ctx context.Context, req admission.Request) ad
 	case v1.Create, v1.Update:
 		response = v.handleCreateUpdate(&req)
 	case v1.Delete:
-		response = v.handleDelete(&req)
+		response = v.handleDelete(ctx, &req)
 	default:
 		response = admission.Allowed("")
 	}
@@ -63,7 +63,7 @@ func (v *ByoHostValidator) handleCreateUpdate(req *admission.Request) admission.
 	return admission.Allowed("")
 }
 
-func (v *ByoHostValidator) handleDelete(req *admission.Request) admission.Response {
+func (v *ByoHostValidator) handleDelete(ctx context.Context, req *admission.Request) admission.Response {
 	byoHost := &ByoHost{}
 	err := v.decoder.DecodeRaw(req.OldObject, byoHost)
 	if err != nil {
@@ -75,7 +75,7 @@ func (v *ByoHostValidator) handleDelete(req *admission.Request) admission.Respon
 
 		// Fetch the ByoMachine instance
 		byoMachineObj := &ByoMachine{}
-		err = v.Client.Get(context.TODO(), client.ObjectKey{
+		err = v.Client.Get(ctx, client.ObjectKey{
 			Name:      byoMachine,
 			Namespace: byoHost.Namespace,
 		}, byoMachineObj)
