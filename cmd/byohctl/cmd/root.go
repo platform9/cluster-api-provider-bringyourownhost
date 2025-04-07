@@ -13,6 +13,7 @@ var rootCmd = &cobra.Command{
 	Short: "BYOH control tool for Platform9",
 	Long: `BYOH (Bring Your Own Host) control tool for Platform9.
 This tool helps onboard hosts to your Platform9 deployment.`,
+	CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Initialize loggers
 		if err := utils.InitLoggers(service.ByohDir, true); err != nil {

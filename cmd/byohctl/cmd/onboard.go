@@ -35,28 +35,24 @@ This command will:
 1. Authenticate with Platform9
 2. Get required configuration
 3. Setup the host for management`,
-	Example: `  byohctl onboard -u admin@platform9.com -p password -f your-fqdn.platform9.com
-  byohctl onboard -u admin@platform9.com -p password -f your-fqdn.platform9.com -d custom-domain -t custom-tenant`,
+	Example: `  byohctl onboard -u your-fqdn.platform9.com -e admin@platform9.com -c client-token
+  byohctl onboard -u your-fqdn.platform9.com -e admin@platform9.com -c client-token -d custom-domain -t custom-tenant`,
 	Run: runOnboard,
 }
 
 func init() {
-	onboardCmd.Flags().StringVarP(&username, "username", "u", "", "Platform9 username")
+	onboardCmd.Flags().StringVarP(&fqdn, "url", "u", "", "Platform9 FQDN")
+	onboardCmd.MarkFlagRequired("url")
+	onboardCmd.Flags().StringVarP(&username, "username", "e", "", "Platform9 username")
 	onboardCmd.MarkFlagRequired("username")
 	onboardCmd.Flags().StringVarP(&password, "password", "p", "", "Platform9 password")
 	onboardCmd.Flags().BoolVar(&passwordInteractive, "password-interactive", false, "Enter password interactively")
-	onboardCmd.Flags().StringVarP(&fqdn, "fqdn", "f", "", "Platform9 FQDN")
-	onboardCmd.MarkFlagRequired("fqdn")
+	onboardCmd.Flags().StringVarP(&clientToken, "client-token", "c", "", "Client token for authentication")
+	onboardCmd.MarkFlagRequired("client-token")
 	onboardCmd.Flags().StringVarP(&domain, "domain", "d", "default", "Platform9 domain")
 	onboardCmd.Flags().StringVarP(&tenant, "tenant", "t", "service", "Platform9 tenant")
-	onboardCmd.Flags().StringVar(&clientToken, "client-token", "", "Client token for authentication")
 	onboardCmd.Flags().StringVarP(&verbosity, "verbosity", "v", "minimal", "Log verbosity level (all, important, minimal, critical, none)")
 	onboardCmd.MarkFlagsMutuallyExclusive("password", "password-interactive")
-	onboardCmd.MarkFlagRequired("username")
-	onboardCmd.MarkFlagRequired("password")
-	onboardCmd.MarkFlagRequired("fqdn")
-	onboardCmd.MarkFlagRequired("client-token")
-	onboardCmd.MarkFlagRequired("tenant")
 
 	rootCmd.AddCommand(onboardCmd)
 }
@@ -78,6 +74,22 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	if !isUbuntuSystem() {
 		fmt.Println("Error: This command requires an Ubuntu system")
 		os.Exit(1)
+	}
+
+	// Continue with interactive password if needed
+	if passwordInteractive {
+		fmt.Print("Enter Password: ")
+		pwBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+		if err != nil {
+			utils.LogError("Failed to read password: %v", err)
+			os.Exit(1)
+		}
+		if len(pwBytes) == 0 {
+			utils.LogError("Password cannot be empty")
+			os.Exit(1)
+		}
+		fmt.Println() // Add newline after password input
+		password = string(pwBytes)
 	}
 
 	// Check if service present
@@ -106,21 +118,6 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	// Set console output level based on verbosity flag
 	utils.SetConsoleOutputLevel(verbosity)
 
-	// Continue with interactive password if needed
-	if passwordInteractive {
-		fmt.Print("Enter Password: ")
-		pwBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
-		if err != nil {
-			utils.LogError("Failed to read password: %v", err)
-			os.Exit(1)
-		}
-		if len(pwBytes) == 0 {
-			utils.LogError("Password cannot be empty")
-			os.Exit(1)
-		}
-		fmt.Println() // Add newline after password input
-		password = string(pwBytes)
-	}
 	start := time.Now()
 	defer utils.TrackTime(start, "Total onboarding process")
 
