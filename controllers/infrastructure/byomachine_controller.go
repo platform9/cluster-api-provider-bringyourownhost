@@ -510,7 +510,10 @@ func (r *ByoMachineReconciler) attachByoHost(ctx context.Context, machineScope *
 	byohostLabels, _ := labels.NewRequirement(clusterv1.ClusterNameLabel, selection.DoesNotExist, nil)
 	selector = selector.Add(*byohostLabels)
 
-	err = r.Client.List(ctx, hostsList, &client.ListOptions{LabelSelector: selector})
+	err = r.Client.List(ctx, hostsList, &client.ListOptions{
+		LabelSelector: selector,
+		Namespace:     machineScope.ByoMachine.Namespace,
+	})
 	if err != nil {
 		logger.Error(err, "failed to list byohosts")
 		return ctrl.Result{RequeueAfter: RequeueForbyohost}, err
