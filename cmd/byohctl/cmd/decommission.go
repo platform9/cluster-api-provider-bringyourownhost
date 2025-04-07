@@ -19,15 +19,18 @@ This command will:
 1. Authenticate with Platform9
 2. Decommission the host from the pf9 kaapi management cluster
 3. If host is part of some cluster, decommission will deauthorise the host first and then decommission`,
-	Example: `  byohctl decommission`,
+	Example: `  byohctl decommission -v all`,
 	Run:     runDecommission,
 }
 
 func init() {
 	rootCmd.AddCommand(decommissionCmd)
+	decommissionCmd.Flags().StringVarP(&verbosity, "verbosity", "v", "minimal", "Log verbosity level (all, important, minimal, critical, none)")
 }
 
 func runDecommission(cmd *cobra.Command, args []string) {
+
+	utils.SetConsoleOutputLevel(verbosity)
 
 	namespace, err := client.GetNamespaceFromConfig(service.KubeconfigFilePath)
 	if err != nil {
