@@ -59,7 +59,7 @@ func PerformHostOperation(operationType HostOperationType, namespace string) err
 				return fmt.Errorf("failed to get user input: %v", err)
 			}
 			if !continueDecommission {
-				return fmt.Errorf("Info: Host decommission cancelled by user.")
+				return nil
 			}
 			err = service.PurgeDebianPackage()
 			if err != nil {
@@ -83,17 +83,7 @@ func PerformHostOperation(operationType HostOperationType, namespace string) err
 		// If deauthorise, just return
 		if operationType == OperationDecommission {
 			utils.LogInfo("MachineRef is not set to the byohost object. Host is not part of any cluster. Deleting the byohost object and running dpkg purge.")
-			err = client.DeleteByoHostObject(namespace)
-			if err != nil {
-				return fmt.Errorf("failed to delete ByoHosts object: %v", err)
-			}
-			utils.LogSuccess("Successfully deleted ByoHosts object")
-			err = service.PurgeDebianPackage()
-			if err != nil {
-				return fmt.Errorf("failed to run dpkg purge: %v", err)
-			}
-			utils.LogSuccess("Successfully ran dpkg purge")
-			return nil
+			return performHostDecommissionWithNoMachineRef(client, namespace)
 		}
 		return fmt.Errorf("machineRef is not set for the byohost object. This host is not part of the cluster. Cannot proceed ahead with de-auth")
 
@@ -160,18 +150,34 @@ func PerformHostOperation(operationType HostOperationType, namespace string) err
 
 	// If operation is decommission, delete the byohost object and run dpkg purge
 	if operationType == OperationDecommission {
-		utils.LogInfo("Deleting ByoHosts object and running dpkg purge")
-		err = client.DeleteByoHostObject(namespace)
-		if err != nil {
-			return fmt.Errorf("failed to delete ByoHosts object: %v", err)
-		}
-		err = service.PurgeDebianPackage()
-		if err != nil {
-			return fmt.Errorf("failed to run dpkg purge: %v", err)
-		}
-
-		utils.LogSuccess("Successfully deleted ByoHosts object and ran dpkg purge")
+		return performHostDecommissionWithNoMachineRef(client, namespace)
 	}
+
+	return nil
+}
+
+// Helper function to consolidate decommissioning logic when no machineRef is set
+func performHostDecommissionWithNoMachineRef(client *client.Client, namespace string) error {
+	// 1. Delete the byohost object
+	// 2. Run dpkg purge
+	// 3. Return success
+
+	utils.LogInfo("Deleting ByoHosts object and running dpkg purge")
+	// 1. Delete the byohost object
+	err := client.DeleteByoHostObject(namespace)
+	if err != nil {
+		return fmt.Errorf("failed to delete ByoHosts object: %v", err)
+	}
+
+	utils.LogSuccess("Successfully deleted ByoHosts object")
+
+	// 2. Run dpkg purge
+	err = service.PurgeDebianPackage()
+	if err != nil {
+		return fmt.Errorf("failed to run dpkg purge: %v", err)
+	}
+
+	utils.LogSuccess("Successfully ran dpkg purge")
 
 	return nil
 }
