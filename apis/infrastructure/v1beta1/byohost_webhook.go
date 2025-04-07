@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	v1 "k8s.io/api/admission/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -18,7 +20,7 @@ import (
 // +k8s:deepcopy-gen=false
 // ByoHostValidator validates ByoHosts
 type ByoHostValidator struct {
-	//	Client  client.Client
+	Client  client.Client
 	decoder *admission.Decoder
 }
 
@@ -34,7 +36,7 @@ func (v *ByoHostValidator) Handle(ctx context.Context, req admission.Request) ad
 	case v1.Create, v1.Update:
 		response = v.handleCreateUpdate(&req)
 	case v1.Delete:
-		response = v.handleDelete(&req)
+		response = v.handleDelete(ctx, &req)
 	default:
 		response = admission.Allowed("")
 	}
@@ -61,13 +63,29 @@ func (v *ByoHostValidator) handleCreateUpdate(req *admission.Request) admission.
 	return admission.Allowed("")
 }
 
-func (v *ByoHostValidator) handleDelete(req *admission.Request) admission.Response {
+func (v *ByoHostValidator) handleDelete(ctx context.Context, req *admission.Request) admission.Response {
 	byoHost := &ByoHost{}
 	err := v.decoder.DecodeRaw(req.OldObject, byoHost)
 	if err != nil {
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 	if byoHost.Status.MachineRef != nil {
+		// allow webhook to delete ByoHost when MachineRef is assigned but respective byoMachine doesn't exist
+		byoMachine := byoHost.Status.MachineRef.Name
+
+		// Fetch the ByoMachine instance
+		byoMachineObj := &ByoMachine{}
+		err = v.Client.Get(ctx, client.ObjectKey{
+			Name:      byoMachine,
+			Namespace: byoHost.Namespace,
+		}, byoMachineObj)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				return admission.Allowed("")
+			}
+			return admission.Denied("cannot delete ByoHost when byomachine exists")
+		}
+
 		return admission.Denied("cannot delete ByoHost when MachineRef is assigned")
 	}
 	return admission.Allowed("")
