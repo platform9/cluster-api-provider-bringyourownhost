@@ -602,12 +602,17 @@ func ByoHostToByoMachineMapFunc(gvk schema.GroupVersionKind) handler.MapFunc {
 }
 
 func (r *ByoMachineReconciler) markHostForCleanup(ctx context.Context, machineScope *byoMachineScope) error {
+	logger := log.FromContext(ctx).WithValues("cluster", machineScope.Cluster.Name)
 	helper, _ := patch.NewHelper(machineScope.ByoHost, r.Client)
 
 	if machineScope.ByoHost.Annotations == nil {
 		machineScope.ByoHost.Annotations = map[string]string{}
 	}
 	machineScope.ByoHost.Annotations[infrav1.HostCleanupAnnotation] = ""
+
+	// remove the pf9 cluster label
+	logger.Info("Removing pf9 cluster label %s from ByoHost %s", infrav1.ClusterLabel, machineScope.ByoHost.Name)
+	delete(machineScope.ByoHost.Labels, infrav1.ClusterLabel)
 
 	// Issue the patch for byohost
 	return helper.Patch(ctx, machineScope.ByoHost)
