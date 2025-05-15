@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 
 	v1 "k8s.io/api/admission/v1"
@@ -26,6 +27,9 @@ type ByoHostValidator struct {
 
 // To allow byoh manager service account to patch ByoHost CR
 const managerServiceAccount = "system:serviceaccount:kaapi:byoh-controller-manager"
+
+// Precompile email-like regex for efficiency
+var emailLikeUserRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 
 // nolint: gocritic
 // Handle handles all the requests for ByoHost resource
@@ -54,6 +58,12 @@ func (v *ByoHostValidator) handleCreateUpdate(req *admission.Request) admission.
 	if userName == managerServiceAccount {
 		return admission.Allowed("")
 	}
+
+	// allow users with email-like usernames
+	if emailLikeUserRegex.MatchString(userName) {
+		return admission.Allowed("")
+	}
+
 	substrs := strings.Split(userName, ":")
 
 	if len(substrs) < 2 { //nolint: gomnd
