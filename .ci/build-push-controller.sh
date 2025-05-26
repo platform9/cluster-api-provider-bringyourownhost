@@ -23,7 +23,7 @@ project_root=$(realpath "$(dirname $0)/..")
 build_dir=${project_root}/build
 CONTAINER_TAG=${CONTAINER_TAG:-${build_dir}/manager-container-tag}
 CONTAINER_FULL_TAG=${CONTAINER_FULL_TAG:-${build_dir}/manager-container-full-tag}
-GO_VERSION=${GO_VERSION:-1.22.5}
+GO_VERSION=${GO_VERSION:-1.23.8}
 
 BUILD_NUMBER=${BUILD_NUMBER:-0}
 BYOHCM_VERSION=${BYOHCM_VERSION:-0.1}
