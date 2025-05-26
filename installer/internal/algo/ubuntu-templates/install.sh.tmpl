@@ -1,30 +1,194 @@
-set -euox pipefail
+#!/bin/bash
+set -euo pipefail
 
+# Configuration
 BUNDLE_DOWNLOAD_PATH={{.BundleDownloadPath}}
 BUNDLE_ADDR={{.BundleAddrs}}
 IMGPKG_VERSION={{.ImgpkgVersion}}
 ARCH={{.Arch}}
 BUNDLE_PATH=$BUNDLE_DOWNLOAD_PATH/$BUNDLE_ADDR
 
+# Logging setup
+LOG_FILE="/var/log/pf9/agent-upgrade-$(date +%Y%m%d-%H%M%S).log"
+LOG_DIR=$(dirname "$LOG_FILE")
+mkdir -p "$LOG_DIR"
+
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+echo "=== Starting installation/upgrade at $(date) ==="
+
+# Lock file to prevent concurrent execution
+LOCK_FILE="/var/run/pf9-agent-upgrade.lock"
+
+try_cleanup() {
+    local exit_code=$?
+    echo "=== Cleanup started with exit code: $exit_code ==="
+    
+    # Release the lock
+    if [ -f "$LOCK_FILE" ]; then
+        flock -u 200
+        rm -f "$LOCK_FILE"
+    fi
+    
+    echo "=== Cleanup completed at $(date) ==="
+    exit $exit_code
+}
+
+# Setup trap for cleanup
+trap try_cleanup EXIT INT TERM
+
+# Try to acquire lock
+exec 200>"$LOCK_FILE"
+if ! flock -n 200; then
+    echo "Error: Another instance is already running. Exiting." >&2
+    exit 1
+fi
+
+echo "=== Acquired lock, proceeding with installation/upgrade ==="
+
+# --- BYOH Agent self-upgrade logic ---
+upgrade_agent_if_needed() {
+    local start_time=$(date +%s)
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting agent upgrade check"
+    
+    if ! command -v imgpkg >/dev/null; then
+        echo "[WARN] imgpkg not available, skipping agent upgrade check"
+        return 0
+    fi
+
+    local agent_temp_dir
+    agent_temp_dir=$(mktemp -d)
+    echo "[INFO] Using temporary directory: $agent_temp_dir"
+    
+    # Enhanced cleanup function
+    cleanup() {
+        local cleanup_start=$(date +%s)
+        echo "[INFO] Starting cleanup of temporary files"
+        
+        if [ -d "$agent_temp_dir" ]; then
+            rm -rf "$agent_temp_dir"
+            echo "[INFO] Removed temporary directory: $agent_temp_dir"
+        fi
+        
+        local cleanup_duration=$(( $(date +%s) - cleanup_start ))
+        echo "[INFO] Cleanup completed in ${cleanup_duration}s"
+    }
+    trap cleanup EXIT
+
+    # Get current version
+    local current_ver
+    current_ver=$(dpkg-query --showformat='${Version}' --show pf9-byohost-agent 2>/dev/null || echo "0.0.0")
+    echo "[INFO] Current agent version: $current_ver"
+
+    # Pull latest agent
+    echo "[INFO] Checking for latest agent version..."
+    if ! imgpkg pull -i "quay.io/platform9/byoh-agent-deb:latest" -o "$agent_temp_dir"; then
+        echo "[WARN] Failed to pull agent image, continuing with existing version"
+        return 1
+    fi
+
+    # Find the deb package
+    local latest_deb
+    latest_deb=$(find "$agent_temp_dir" -name "pf9-byohost-agent*.deb" | head -1)
+    if [ -z "$latest_deb" ]; then
+        echo "[WARN] Could not find agent package in the downloaded image"
+        return 1
+    fi
+
+    # Get latest version
+    local latest_ver
+    latest_ver=$(dpkg-deb -f "$latest_deb" Version)
+    echo "[INFO] Latest available version: $latest_ver"
+    
+    # Compare versions
+    if dpkg --compare-versions "$latest_ver" gt "$current_ver" 2>/dev/null; then
+        echo "[INFO] Upgrading agent from $current_ver to $latest_ver"
+        
+        # Install the new version
+        if ! dpkg -i "$latest_deb"; then
+            echo "[ERROR] Failed to install agent package $latest_ver"
+            return 1
+        fi
+        
+        echo "[INFO] Agent package installed, restarting service..."
+        
+        # Reload systemd and restart service with retry logic
+        systemctl daemon-reload
+        
+        local max_retries=3
+        local retry_delay=5
+        local attempt=1
+        
+        while [ $attempt -le $max_retries ]; do
+            echo "[INFO] Restart attempt $attempt of $max_retries..."
+            
+            if systemctl restart pf9-byohost-agent; then
+                # Verify service is running
+                if systemctl is-active --quiet pf9-byohost-agent; then
+                    echo "[INFO] Agent service restarted successfully"
+                    break
+                fi
+            fi
+            
+            if [ $attempt -eq $max_retries ]; then
+                echo "[ERROR] Failed to restart agent service after $max_retries attempts"
+                return 1
+            fi
+            
+            echo "[WARN] Service restart failed, retrying in ${retry_delay}s..."
+            sleep $retry_delay
+            attempt=$((attempt + 1))
+        done
+        
+        # Final verification
+        if systemctl is-active --quiet pf9-byohost-agent; then
+            local end_time=$(date +%s)
+            local duration=$((end_time - start_time))
+            echo "[SUCCESS] Agent upgraded to $latest_ver in ${duration}s"
+            return 0
+        else
+            echo "[ERROR] Agent service is not running after upgrade"
+            return 1
+        fi
+    else
+        echo "[INFO] Agent is already at the latest version ($current_ver)"
+    fi
+    
+    cleanup
+    
+    local end_time=$(date +%s)
+    local duration=$((end_time - start_time))
+    echo "[INFO] Agent upgrade check completed in ${duration}s"
+}
+# --- End BYOH Agent self-upgrade logic ---
+
 if ! command -v imgpkg >>/dev/null; then
-    echo "installing imgpkg"	
+    echo "[INFO] Installing imgpkg"	
     
     if command -v wget >>/dev/null; then
         dl_bin="wget -nv -O-"
     elif command -v curl >>/dev/null; then
         dl_bin="curl -s -L"
     else
-        echo "installing curl"
-        apt-get install -y curl
+        echo "[INFO] Installing curl"
+        apt-get update && apt-get install -y curl
         dl_bin="curl -s -L"
     fi
     
-    $dl_bin github.com/vmware-tanzu/carvel-imgpkg/releases/download/$IMGPKG_VERSION/imgpkg-linux-$ARCH > /tmp/imgpkg
+    echo "[INFO] Downloading imgpkg..."
+    $dl_bin https://github.com/vmware-tanzu/carvel-imgpkg/releases/download/$IMGPKG_VERSION/imgpkg-linux-$ARCH > /tmp/imgpkg
     mv /tmp/imgpkg /usr/local/bin/imgpkg
     chmod +x /usr/local/bin/imgpkg
+    echo "[INFO] imgpkg installation complete"
 fi
 
-echo "downloading bundle"
+# Run agent upgrade after imgpkg is available
+echo "[INFO] Starting agent upgrade process"
+if ! upgrade_agent_if_needed; then
+    echo "[WARN] Agent upgrade encountered issues, but continuing with installation"
+fi
+
+echo "[INFO] Proceeding with bundle download"
 mkdir -p $BUNDLE_PATH
 imgpkg pull -i $BUNDLE_ADDR -o $BUNDLE_PATH
 
@@ -56,4 +220,5 @@ containerd config default > /etc/containerd/config.toml
 ## starting containerd service
 systemctl daemon-reload && systemctl enable containerd && systemctl start containerd
 
-echo "Installation complete!"
+echo "[SUCCESS] Installation complete!"
+echo "=== Installation completed at $(date) ==="
