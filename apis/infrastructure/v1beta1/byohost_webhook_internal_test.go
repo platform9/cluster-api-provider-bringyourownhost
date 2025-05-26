@@ -135,6 +135,32 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
 			Expect(resp.AdmissionResponse.Allowed).To(Equal(true))
 		})
+		It("Should allow update request from email-like user", func() {
+			admissionRequest := admissionv1.AdmissionRequest{
+				Operation: admissionv1.Update,
+				UserInfo:  v1.UserInfo{Username: "user@example.com"},
+				Object: runtime.RawExtension{
+					Raw:    byoHostRaw,
+					Object: byoHost,
+				},
+			}
+			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
+			Expect(resp.AdmissionResponse.Allowed).To(Equal(true))
+		})
+		It("should reject the update request from users who are not like email", func() {
+			admissionRequest := admissionv1.AdmissionRequest{
+				Operation: admissionv1.Update,
+				UserInfo:  v1.UserInfo{Username: "unauthorized-user"},
+				Object: runtime.RawExtension{
+					Raw:    byoHostRaw,
+					Object: byoHost,
+				},
+			}
+			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
+			Expect(resp.AdmissionResponse.Allowed).To(Equal(false))
+			Expect(string(resp.AdmissionResponse.Result.Reason)).To(Equal(fmt.Sprintf("%s is not a valid agent username", "unauthorized-user")))
+		})
+
 		It("Should reject request from another agent user in the group", func() {
 			admissionRequest := admissionv1.AdmissionRequest{
 				Operation: admissionv1.Update,
