@@ -59,6 +59,9 @@ main() {
   info "Configure go"
   configure_go
 
+  info "Tidying go modules"
+  go mod tidy
+
   # ensure vendor directory is present
   go mod vendor
 
