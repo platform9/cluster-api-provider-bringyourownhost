@@ -1,11 +1,14 @@
 package client
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -19,9 +22,29 @@ type AuthClient struct {
 	clientToken string
 }
 
-func NewAuthClient(fqdn, clientToken string) *AuthClient {
+func NewAuthClient(fqdn, clientToken string, caCertPath string, insecureSkipVerify bool) *AuthClient {
+	tr := &http.Transport{}
+	if insecureSkipVerify {
+		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	} else if caCertPath != "" {
+		caCert, err := os.ReadFile(caCertPath)
+		if err != nil {
+			utils.LogErrorf("Failed to read CA certificate: %v", err)
+			return nil
+		}
+		caCertPool := x509.NewCertPool()
+		if !caCertPool.AppendCertsFromPEM(caCert) {
+			utils.LogErrorf("Failed to append CA certificate")
+			return nil
+		}
+		tr.TLSClientConfig = &tls.Config{RootCAs: caCertPool}
+	}
+
 	return &AuthClient{
-		client:      &http.Client{Timeout: 30 * time.Second},
+		client: &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: tr,
+		},
 		fqdn:        fqdn,
 		clientToken: clientToken,
 	}

@@ -25,6 +25,8 @@ var (
 	tenant              string
 	clientToken         string
 	verbosity           string
+	caCert              string
+	insecure            bool
 )
 
 var onboardCmd = &cobra.Command{
@@ -51,6 +53,8 @@ func init() {
 	onboardCmd.MarkFlagRequired("client-token")
 	onboardCmd.Flags().StringVarP(&domain, "domain", "d", "default", "Platform9 domain")
 	onboardCmd.Flags().StringVarP(&tenant, "tenant", "t", "service", "Platform9 tenant")
+	onboardCmd.Flags().StringVarP(&caCert, "ca-cert", "ca", "", "Path to CA certificate file for SSL verification")
+	onboardCmd.Flags().BoolVar(&insecure, "insecure", false, "Skip SSL certificate verification")
 	onboardCmd.Flags().StringVarP(&verbosity, "verbosity", "v", "minimal", "Log verbosity level (all, important, minimal, critical, none)")
 	onboardCmd.MarkFlagsMutuallyExclusive("password", "password-interactive")
 
@@ -127,7 +131,7 @@ func runOnboard(cmd *cobra.Command, args []string) {
 
 	// 1. Get authentication token
 	utils.LogDebug("Getting authentication token for user %s", username)
-	authClient := client.NewAuthClient(fqdn, clientToken)
+	authClient := client.NewAuthClient(fqdn, clientToken, caCert, insecure)
 	token, err := authClient.GetToken(username, password)
 	if err != nil {
 		utils.LogError("Failed to get authentication token: %v", err)
