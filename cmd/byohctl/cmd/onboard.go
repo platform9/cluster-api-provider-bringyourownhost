@@ -53,7 +53,7 @@ func init() {
 	onboardCmd.MarkFlagRequired("client-token")
 	onboardCmd.Flags().StringVarP(&domain, "domain", "d", "default", "Platform9 domain")
 	onboardCmd.Flags().StringVarP(&tenant, "tenant", "t", "service", "Platform9 tenant")
-	onboardCmd.Flags().StringVarP(&caCert, "ca-cert", "ca", "", "Path to CA certificate file for SSL verification")
+	onboardCmd.Flags().StringVarP(&caCert, "ca-cert", "", "", "Path to CA certificate file for SSL verification")
 	onboardCmd.Flags().BoolVar(&insecure, "insecure", false, "Skip SSL certificate verification")
 	onboardCmd.Flags().StringVarP(&verbosity, "verbosity", "v", "minimal", "Log verbosity level (all, important, minimal, critical, none)")
 	onboardCmd.MarkFlagsMutuallyExclusive("password", "password-interactive")
