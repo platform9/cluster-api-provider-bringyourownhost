@@ -2,6 +2,8 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -53,9 +55,28 @@ type Client struct {
 }
 
 // NewK8sClient creates a new Kubernetes client with provided credentials
-func NewK8sClient(fqdn, domain, tenant, token string) *K8sClient {
+func NewK8sClient(fqdn, domain, tenant, token string, caCertPath string, insecureSkipVerify bool) *K8sClient {
+	tr := &http.Transport{}
+	if insecureSkipVerify {
+		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	} else if caCertPath != "" {
+		caCert, err := os.ReadFile(caCertPath)
+		if err != nil {
+			utils.LogErrorf("Failed to read CA certificate: %v", err)
+			return nil
+		}
+		caCertPool := x509.NewCertPool()
+		if !caCertPool.AppendCertsFromPEM(caCert) {
+			utils.LogErrorf("Failed to append CA certificate")
+			return nil
+		}
+		tr.TLSClientConfig = &tls.Config{RootCAs: caCertPool}
+	}
 	client := &K8sClient{
-		client:      &http.Client{Timeout: DefaultTimeout},
+		client: &http.Client{
+			Timeout:   DefaultTimeout,
+			Transport: tr,
+		},
 		fqdn:        fqdn,
 		domain:      domain,
 		tenant:      tenant,

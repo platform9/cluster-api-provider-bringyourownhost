@@ -139,7 +139,7 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	}
 
 	// 2. Create Kubernetes client
-	k8sClient := client.NewK8sClient(fqdn, domain, tenant, token)
+	k8sClient := client.NewK8sClient(fqdn, domain, tenant, token, caCert, insecure)
 
 	// 3. Prepare directories
 	utils.LogInfo("Preparing directory structure for BYOH agent")
