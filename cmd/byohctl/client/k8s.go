@@ -99,7 +99,7 @@ func (c *K8sClient) GetSecret(secretName string) (*types.Secret, error) {
 	utils.LogInfo("Fetching secret '%s'", secretName)
 
 	namespace := c.getNamespace()
-	secretEndpoint := fmt.Sprintf("https://%s/oidc-proxy/%s/api/v1/namespaces/%s/secrets/%s",
+	secretEndpoint := fmt.Sprintf("https://%s/oidc-proxy/%s/regionone/api/v1/namespaces/%s/secrets/%s",
 		c.fqdn, namespace, namespace, secretName)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", secretEndpoint, nil)
