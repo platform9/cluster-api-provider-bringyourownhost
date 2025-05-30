@@ -18,7 +18,7 @@ import (
 // Test client initialization with options
 func TestNewK8sClient(t *testing.T) {
 	t.Run("default values", func(t *testing.T) {
-		client := NewK8sClient("fqdn.test.com", "domain", "tenant", "token")
+		client := NewK8sClient("fqdn.test.com", "domain", "tenant", "token", "region")
 
 		// No more containerd or agent image to test
 		if client.fqdn != "fqdn.test.com" {
@@ -41,18 +41,18 @@ func TestNewK8sClient(t *testing.T) {
 
 // Test namespace generation
 func TestGetNamespace(t *testing.T) {
-	client := NewK8sClient("api.test.platform9.io", "test-domain", "test-tenant", "token")
+	client := NewK8sClient("api.test.platform9.io", "test-domain", "test-tenant", "token", "region")
 	namespace := client.getNamespace()
-	
+
 	expectedPrefix := "api-"
 	if !strings.HasPrefix(namespace, expectedPrefix) {
 		t.Errorf("Namespace %s does not start with expected prefix %s", namespace, expectedPrefix)
 	}
-	
+
 	if !strings.Contains(namespace, "test-domain") {
 		t.Errorf("Namespace %s does not contain domain", namespace)
 	}
-	
+
 	if !strings.Contains(namespace, "test-tenant") {
 		t.Errorf("Namespace %s does not contain tenant", namespace)
 	}
@@ -67,7 +67,7 @@ func TestGetSecret(t *testing.T) {
 		if r.URL.Path != expectedPath {
 			t.Errorf("Expected path %s, got %s", expectedPath, r.URL.Path)
 		}
-		
+
 		// The client may be using a different authorization mechanism now, so we'll be more flexible
 		if !strings.Contains(r.Header.Get("Authorization"), "Bearer") {
 			t.Errorf("Expected Bearer token in Authorization header, got %s", r.Header.Get("Authorization"))
@@ -85,37 +85,37 @@ func TestGetSecret(t *testing.T) {
 
 	// Extract host from test server URL
 	host := strings.TrimPrefix(ts.URL, "https://")
-	
+
 	// Create client that skips TLS verification
 	httpClient := &http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},
 	}
-	
-	client := NewK8sClient(host, "test-domain", "test-tenant", "test-token")
+
+	client := NewK8sClient(host, "test-domain", "test-tenant", "test-token", "region")
 	client.client = httpClient
-	
+
 	// Test GetSecret
 	secret, err := client.GetSecret("kubeconfig")
 	if err != nil {
 		t.Errorf("GetSecret returned error: %v", err)
 	}
-	
+
 	if secret == nil {
 		t.Fatal("GetSecret returned nil")
 	}
-	
+
 	value, ok := secret.Data["config"]
 	if !ok {
 		t.Error("Secret data doesn't contain 'config' key")
 	}
-	
+
 	decoded, err := base64.StdEncoding.DecodeString(value)
 	if err != nil {
 		t.Errorf("Failed to decode secret value: %v", err)
 	}
-	
+
 	if string(decoded) != "test-kubeconfig" {
 		t.Errorf("Expected secret value 'test-kubeconfig', got '%s'", string(decoded))
 	}
@@ -129,21 +129,21 @@ func TestSaveKubeConfig(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tempDir)
-	
+
 	// Save original environment variables to restore later
 	origHome := os.Getenv("HOME")
 	defer os.Setenv("HOME", origHome)
-	
+
 	// Set HOME to our temp directory for this test
 	os.Setenv("HOME", tempDir)
-	
+
 	// Set up test HTTP server
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Send test response with a valid kubeconfig structure
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(types.Secret{
 			Data: map[string]string{
-				"value": base64.StdEncoding.EncodeToString([]byte("apiVersion: v1\nkind: Config\n")),
+				"value":  base64.StdEncoding.EncodeToString([]byte("apiVersion: v1\nkind: Config\n")),
 				"config": base64.StdEncoding.EncodeToString([]byte("apiVersion: v1\nkind: Config\n")),
 			},
 		})
@@ -152,28 +152,28 @@ func TestSaveKubeConfig(t *testing.T) {
 
 	// Extract host from test server URL
 	host := strings.TrimPrefix(ts.URL, "https://")
-	
+
 	// Create client that skips TLS verification
 	httpClient := &http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},
 	}
-	
-	client := NewK8sClient(host, "test-domain", "test-tenant", "test-token")
+
+	client := NewK8sClient(host, "test-domain", "test-tenant", "test-token", "region")
 	client.client = httpClient
-	
+
 	// Test SaveKubeConfig
 	err = client.SaveKubeConfig("kubeconfig")
 	if err != nil {
 		t.Errorf("SaveKubeConfig returned error: %v", err)
 	}
-	
+
 	// Verify the kubeconfig file exists at the final location
 	// This should be ~/.byoh/config
 	byohDir := filepath.Join(tempDir, ".byoh")
 	kubeConfigPath := filepath.Join(byohDir, "config")
-	
+
 	if _, err := os.Stat(kubeConfigPath); os.IsNotExist(err) {
 		t.Errorf("Kubeconfig file not created at expected path: %s", kubeConfigPath)
 	} else if err != nil {
@@ -187,7 +187,7 @@ func TestSaveKubeConfig(t *testing.T) {
 			t.Errorf("Expected kubeconfig content 'apiVersion: v1\nkind: Config\n', got '%s'", string(content))
 		}
 	}
-	
+
 	t.Logf("SaveKubeConfig successfully created kubeconfig at %s", kubeConfigPath)
 }
 
@@ -200,7 +200,7 @@ func TestDNSResolution(t *testing.T) {
 		}
 		return nil, fmt.Errorf("lookup failed")
 	}
-	
+
 	// Test valid resolution with our mock function directly
 	addrs, err := lookupFunc("valid.example.com")
 	if err != nil {
@@ -209,7 +209,7 @@ func TestDNSResolution(t *testing.T) {
 	if len(addrs) != 1 || addrs[0] != "192.168.1.1" {
 		t.Errorf("Expected [192.168.1.1], got %v", addrs)
 	}
-	
+
 	// Test invalid resolution with our mock function directly
 	_, err = lookupFunc("invalid.example.com")
 	if err == nil {
@@ -229,11 +229,11 @@ func TestIntegration(t *testing.T) {
 	}
 
 	// Create a test client
-	client := NewK8sClient("example.com", "test-domain", "test-tenant", "test-token")
+	client := NewK8sClient("example.com", "test-domain", "test-tenant", "test-token", "region")
 
 	// Test that DNS resolution works
 	t.Run("DNS resolution", func(t *testing.T) {
-		// This is just checking the method call structure - in a real test, 
+		// This is just checking the method call structure - in a real test,
 		// we would mock the actual DNS lookup
 		_, err := client.CheckDNSResolution()
 		if err == nil {
@@ -261,14 +261,14 @@ func TestAgentLogOutput(t *testing.T) {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
-	
+
 	// Create logs directory
 	logDir := filepath.Join(tmpDir, "logs")
 	err = os.MkdirAll(logDir, 0755)
 	if err != nil {
 		t.Fatalf("Failed to create log directory: %v", err)
 	}
-	
+
 	// Create a test agent log file
 	agentLogPath := filepath.Join(logDir, "agent.log")
 	testContent := "===== AGENT STARTED ====\nTest log content\n"
@@ -276,17 +276,17 @@ func TestAgentLogOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to write test log file: %v", err)
 	}
-	
+
 	// Verify the agent log file was created correctly
 	content, err := os.ReadFile(agentLogPath)
 	if err != nil {
 		t.Fatalf("Failed to read agent log file: %v", err)
 	}
-	
+
 	if string(content) != testContent {
 		t.Errorf("Log file content doesn't match expected content, got: %s", string(content))
 	}
-	
+
 	// Test that log file location is displayed properly
 	// This is a basic test since the actual display happens in the command
 	if _, err := os.Stat(agentLogPath); os.IsNotExist(err) {

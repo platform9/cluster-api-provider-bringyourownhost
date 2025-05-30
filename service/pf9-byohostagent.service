@@ -9,8 +9,8 @@ StartLimitBurst=2
 Type=simple
 RestartSec=5s
 Restart=always
-EnvironmentFile=/etc/pf9-byohost-agent.service.d/pf9-byohost-agent.conf 
-ExecStart=/bin/bash -c "/binary/pf9-byoh-hostagent-linux-amd64 --bootstrap-kubeconfig \"$BOOTSTRAP_KUBECONFIG\" --namespace \"$NAMESPACE\" >> /var/log/pf9/byoh/byoh-agent.log 2>&1"
+EnvironmentFile=/etc/pf9-byohost-agent.service.d/pf9-byohost-agent.conf
+ExecStart=/bin/bash -c "/binary/pf9-byoh-hostagent-linux-amd64 --bootstrap-kubeconfig \"$BOOTSTRAP_KUBECONFIG\" --namespace \"$NAMESPACE\" --label \"$REGION\" >> /var/log/pf9/byoh/byoh-agent.log 2>&1"
 User=root
 Group=root
 [Install]
