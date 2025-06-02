@@ -15,15 +15,18 @@ echo Ingredients $INGREDIENTS_PATH
 ls -l $INGREDIENTS_PATH
 
 cd /bundle
-echo Strip version to well-known names
+echo "Copying binaries with well-known names"
 # Mandatory
 cp $INGREDIENTS_PATH/*containerd* containerd.tar
-cp $INGREDIENTS_PATH/*kubeadm*.deb ./kubeadm.deb
-cp $INGREDIENTS_PATH/*kubelet*.deb ./kubelet.deb
-cp $INGREDIENTS_PATH/*kubectl*.deb ./kubectl.deb
-# Optional
-cp  $INGREDIENTS_PATH/*cri-tools*.deb cri-tools.deb > /dev/null | true
-cp  $INGREDIENTS_PATH/*kubernetes-cni*.deb kubernetes-cni.deb > /dev/null | true
+cp $INGREDIENTS_PATH/kubectl ./kubectl
+cp $INGREDIENTS_PATH/kubelet ./kubelet
+cp $INGREDIENTS_PATH/kubeadm ./kubeadm
+cp $INGREDIENTS_PATH/crictl ./crictl
+cp $INGREDIENTS_PATH/cni-plugins.tgz ./cni-plugins.tgz
+
+# Create directories for binaries
+mkdir -p bin
+mv kubectl kubelet kubeadm crictl bin/
 
 echo Configuration $CONFIG_PATH
 ls -l $CONFIG_PATH

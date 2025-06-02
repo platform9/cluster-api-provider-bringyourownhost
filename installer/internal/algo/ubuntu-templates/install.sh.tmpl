@@ -42,10 +42,48 @@ modprobe overlay && modprobe br_netfilter
 ## adding os configuration
 tar -C / -xvf "$BUNDLE_PATH/conf.tar" && sysctl --system 
 
-## installing deb packages
-for pkg in cri-tools kubernetes-cni kubectl kubelet kubeadm; do
-    dpkg --install "$BUNDLE_PATH/$pkg.deb" && apt-mark hold $pkg
-done
+## installing kubernetes binaries directly
+BIN_DIR="/usr/local/bin"
+CNI_DIR="/opt/cni/bin"
+
+# Create necessary directories
+mkdir -p $BIN_DIR $CNI_DIR
+
+# Install kubectl, kubelet, kubeadm, and crictl
+echo "Installing Kubernetes binaries..."
+cp "$BUNDLE_PATH/bin/kubectl" "$BIN_DIR/kubectl"
+cp "$BUNDLE_PATH/bin/kubelet" "$BIN_DIR/kubelet"
+cp "$BUNDLE_PATH/bin/kubeadm" "$BIN_DIR/kubeadm"
+cp "$BUNDLE_PATH/bin/crictl" "$BIN_DIR/crictl"
+
+# Ensure binaries are executable
+chmod +x "$BIN_DIR/kubectl" "$BIN_DIR/kubelet" "$BIN_DIR/kubeadm" "$BIN_DIR/crictl"
+
+# Install CNI plugins
+echo "Installing CNI plugins..."
+mkdir -p "$CNI_DIR"
+tar -C "$CNI_DIR" -xzf "$BUNDLE_PATH/cni-plugins.tgz"
+
+# Create kubelet systemd service file
+cat > /etc/systemd/system/kubelet.service << EOF
+[Unit]
+Description=kubelet: The Kubernetes Node Agent
+Documentation=https://kubernetes.io/docs/home/
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+ExecStart=$BIN_DIR/kubelet
+Restart=always
+StartLimitInterval=0
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Create kubelet configuration directory
+mkdir -p /etc/kubernetes/manifests
 
 ## intalling containerd
 tar -C / -xvf "$BUNDLE_PATH/containerd.tar"

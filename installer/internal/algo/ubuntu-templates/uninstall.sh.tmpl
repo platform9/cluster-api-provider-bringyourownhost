@@ -13,10 +13,33 @@ if [ -f "$BUNDLE_PATH/containerd.tar" ]; then
   tar tf "$BUNDLE_PATH/containerd.tar" | xargs -n 1 echo '/' | sed 's/ //g'  | grep -e '[^/]$' | xargs rm -f
 fi
 
-## removing deb packages
-for pkg in kubeadm kubelet kubectl kubernetes-cni cri-tools; do
-    dpkg -l $pkg &>/dev/null && dpkg --purge $pkg || echo "Package $pkg not installed"
-done
+## removing directly installed kubernetes binaries
+BIN_DIR="/usr/local/bin"
+CNI_DIR="/opt/cni/bin"
+
+# Stop kubelet service if running
+echo "Stopping kubelet service..."
+systemctl stop kubelet || true
+systemctl disable kubelet || true
+
+# Remove systemd service file
+echo "Removing kubelet service file..."
+rm -f /etc/systemd/system/kubelet.service
+systemctl daemon-reload
+
+# Remove binaries
+echo "Removing Kubernetes binaries..."
+rm -f "$BIN_DIR/kubectl" "$BIN_DIR/kubelet" "$BIN_DIR/kubeadm" "$BIN_DIR/crictl"
+
+# Remove CNI plugins directory
+echo "Removing CNI plugins..."
+rm -rf "$CNI_DIR"
+
+# Remove Kubernetes directories
+echo "Removing Kubernetes directories..."
+rm -rf /etc/kubernetes
+rm -rf /var/lib/kubelet
+rm -rf /var/lib/kubernetes
 
 ## removing os configuration
 if [ -f "$BUNDLE_PATH/conf.tar" ]; then
