@@ -134,7 +134,7 @@ upgrade_agent_if_needed() {
     echo '#!/bin/bash'
     echo 'set -e'
     echo 'set -u'
-    echo 'set -o pipefit'
+    echo 'set -o pipefail'
     echo ''
     echo '# Configuration'
     echo 'LATEST_DEB="$1"'
