@@ -101,91 +101,89 @@ upgrade_agent_if_needed() {
     local upgrade_script
     upgrade_script=$(mktemp)
     
-    # Write the upgrade script directly using printf to avoid template processing issues
-    printf '#!/bin/bash\n' > "$upgrade_script"
-    printf 'set -e\n' >> "$upgrade_script"
-    printf 'set -u\n' >> "$upgrade_script"
-    printf 'set -o pipefail\n' >> "$upgrade_script"
-
-# Configuration
-printf '# Configuration\n' >> "$upgrade_script"
-printf 'LATEST_DEB="$1"\n' >> "$upgrade_script"
-printf 'LOG_FILE="/var/log/pf9/byoh/upgrade-$(date +%%Y%%m%%d%%H%%M%%S).log"\n' >> "$upgrade_script"
-printf 'MAX_RETRIES=3\n' >> "$upgrade_script"
-printf 'RETRY_DELAY=5\n\n' >> "$upgrade_script"
-
-# Redirect output to log file
-printf '# Redirect all output to log file\n' >> "$upgrade_script"
-printf 'exec > "$LOG_FILE" 2>&1\n\n' >> "$upgrade_script"
-
-# Add logging functions
-printf 'echo "[$(date \''+%%Y-%%m-%%d %%H:%%M:%%S\'')]" Starting agent upgrade process\n\n' >> "$upgrade_script"
-printf '# Function to log messages\n' >> "$upgrade_script"
-printf 'log() {\n' >> "$upgrade_script"
-printf '    echo "[$(date \''+%%Y-%%m-%%d %%H:%%M:%%S\'')]" $1\n' >> "$upgrade_script"
-printf '}\n\n' >> "$upgrade_script"
-
-# Add cleanup function
-printf '# Function to clean up and exit\n' >> "$upgrade_script"
-printf 'cleanup() {\n' >> "$upgrade_script"
-printf '    local exit_code=$?\n' >> "$upgrade_script"
-printf '    log "Upgrade process completed with exit code $exit_code"\n' >> "$upgrade_script"
-printf '    exit $exit_code\n' >> "$upgrade_script"
-printf '}\n\n' >> "$upgrade_script"
-
-# Set up trap
-printf '# Set up trap for cleanup\n' >> "$upgrade_script"
-printf 'trap cleanup EXIT\n\n' >> "$upgrade_script"
-
-# Stop service if running
-printf '# Stop the service if it\'s running\n' >> "$upgrade_script"
-printf 'if systemctl is-active --quiet pf9-byoh-hostagent; then\n' >> "$upgrade_script"
-printf '    log "Stopping existing agent service..."\n' >> "$upgrade_script"
-printf '    systemctl stop pf9-byoh-hostagent || true\n' >> "$upgrade_script"
-printf 'fi\n\n' >> "$upgrade_script"
-
-# Install package
-printf '# Install the package with force-confold to preserve existing configs\n' >> "$upgrade_script"
-printf 'log "Installing agent package..."\n' >> "$upgrade_script"
-printf 'if ! dpkg -i --force-confold "$LATEST_DEB"; then\n' >> "$upgrade_script"
-printf '    log "dpkg reported errors, attempting to fix broken install..."\n' >> "$upgrade_script"
-printf '    apt-get -f install -y || {\n' >> "$upgrade_script"
-printf '        log "[ERROR] Failed to fix package installation"\n' >> "$upgrade_script"
-printf '        exit 1\n' >> "$upgrade_script"
-printf '    }\n' >> "$upgrade_script"
-printf 'fi\n\n' >> "$upgrade_script"
-
-# Reload and start service
-printf 'log "Agent package installed, starting service..."\n\n' >> "$upgrade_script"
-printf '# Reload systemd to pick up any new unit files\n' >> "$upgrade_script"
-printf 'systemctl daemon-reload\n\n' >> "$upgrade_script"
-
-# Add retry logic
-printf '# Start and enable the service\n' >> "$upgrade_script"
-printf 'attempt=1\n' >> "$upgrade_script"
-printf 'while [ $attempt -le $MAX_RETRIES ]; do\n' >> "$upgrade_script"
-printf '    log "Start attempt $attempt of $MAX_RETRIES..."\n' >> "$upgrade_script"
-printf '    \n' >> "$upgrade_script"
-printf '    if systemctl enable --now pf9-byoh-hostagent; then\n' >> "$upgrade_script"
-printf '        # Give it a moment to start\n' >> "$upgrade_script"
-printf '        sleep 2\n' >> "$upgrade_script"
-printf '        \n' >> "$upgrade_script"
-printf '        # Verify service is running\n' >> "$upgrade_script"
-printf '        if systemctl is-active --quiet pf9-byoh-hostagent; then\n' >> "$upgrade_script"
-printf '            log "[SUCCESS] Agent service started successfully"\n' >> "$upgrade_script"
-printf '            exit 0\n' >> "$upgrade_script"
-printf '        fi\n' >> "$upgrade_script"
-printf '    fi\n' >> "$upgrade_script"
-printf '    \n' >> "$upgrade_script"
-printf '    if [ $attempt -eq $MAX_RETRIES ]; then\n' >> "$upgrade_script"
-printf '        log "[ERROR] Failed to start agent service after $MAX_RETRIES attempts"\n' >> "$upgrade_script"
-printf '        exit 1\n' >> "$upgrade_script"
-printf '    fi\n' >> "$upgrade_script"
-printf '    \n' >> "$upgrade_script"
-printf '    log "[WARN] Failed to start agent, retrying in $RETRY_DELAY seconds..."\n' >> "$upgrade_script"
-printf '    sleep $RETRY_DELAY\n' >> "$upgrade_script"
-printf '    attempt=$((attempt + 1))\n' >> "$upgrade_script"
-printf 'done\n' >> "$upgrade_script"
+    # Create the upgrade script using echo to avoid here-document issues
+    {
+    echo '#!/bin/bash'
+    echo 'set -e'
+    echo 'set -u'
+    echo 'set -o pipefit'
+    echo ''
+    echo '# Configuration'
+    echo 'LATEST_DEB="$1"'
+    echo 'LOG_FILE="/var/log/pf9/byoh/upgrade-$(date +%Y%m%d%H%M%S).log"'
+    echo 'MAX_RETRIES=3'
+    echo 'RETRY_DELAY=5'
+    echo ''
+    echo '# Create log directory if it does not exist'
+    echo 'mkdir -p "$(dirname "$LOG_FILE")"'
+    echo ''
+    echo '# Redirect all output to log file'
+    echo 'exec > "$LOG_FILE" 2>&1'
+    echo ''
+    echo 'echo "[$(date "+%Y-%m-%d %H:%M:%S")] Starting agent upgrade process"'
+    echo ''
+    echo '# Function to log messages'
+    echo 'log() {'
+    echo '    echo "[$(date "+%Y-%m-%d %H:%M:%S")] $1"'
+    echo '}'
+    echo ''
+    echo '# Function to clean up and exit'
+    echo 'cleanup() {'
+    echo '    local exit_code=$?'
+    echo '    log "Upgrade process completed with exit code $exit_code"'
+    echo '    exit $exit_code'
+    echo '}'
+    echo ''
+    echo '# Set up trap for cleanup'
+    echo 'trap cleanup EXIT'
+    echo ''
+    echo '# Stop the service if it is running'
+    echo 'if systemctl is-active --quiet pf9-byoh-hostagent; then'
+    echo '    log "Stopping existing agent service..."'
+    echo '    systemctl stop pf9-byoh-hostagent || true'
+    echo 'fi'
+    echo ''
+    echo '# Install the package with force-confold to preserve existing configs'
+    echo 'log "Installing agent package..."'
+    echo 'if ! dpkg -i --force-confold "$LATEST_DEB"; then'
+    echo '    log "dpkg reported errors, attempting to fix broken install..."'
+    echo '    apt-get -f install -y || {'
+    echo '        log "[ERROR] Failed to fix package installation"'
+    echo '        exit 1'
+    echo '    }'
+    echo 'fi'
+    echo ''
+    echo 'log "Agent package installed, starting service..."'
+    echo ''
+    echo '# Reload systemd to pick up any new unit files'
+    echo 'systemctl daemon-reload'
+    echo ''
+    echo '# Start and enable the service'
+    echo 'attempt=1'
+    echo 'while [ $attempt -le $MAX_RETRIES ]; do'
+    echo '    log "Start attempt $attempt of $MAX_RETRIES..."'
+    echo '    '
+    echo '    if systemctl enable --now pf9-byoh-hostagent; then'
+    echo '        # Give it a moment to start'
+    echo '        sleep 2'
+    echo '        '
+    echo '        # Verify service is running'
+    echo '        if systemctl is-active --quiet pf9-byoh-hostagent; then'
+    echo '            log "[SUCCESS] Agent service started successfully"'
+    echo '            exit 0'
+    echo '        fi'
+    echo '    fi'
+    echo '    '
+    echo '    if [ $attempt -eq $MAX_RETRIES ]; then'
+    echo '        log "[ERROR] Failed to start agent service after $MAX_RETRIES attempts"'
+    echo '        exit 1'
+    echo '    fi'
+    echo '    '
+    echo '    log "[WARN] Failed to start agent, retrying in $RETRY_DELAY seconds..."'
+    echo '    sleep $RETRY_DELAY'
+    echo '    attempt=$((attempt + 1))'
+    echo 'done'
+    } > "$upgrade_script"
 
     # Make the script executable
     chmod +x "$upgrade_script"
