@@ -134,18 +134,23 @@ upgrade_agent_if_needed() {
     echo '#!/bin/bash'
     echo 'set -euo pipefail'
     echo ''
+    echo '# Log to stderr so it gets captured by nohup'
+    echo 'log() {'
+    echo '    echo "[$(date "+%Y-%m-%d %H:%M:%S")] $1" >&2'
+    echo '}'
+    echo ''
     echo 'LATEST_DEB=$1'
     echo 'MAX_RETRIES=3'
     echo ''
-    echo 'log() {'
-    echo '    echo "[$(date "+%Y-%m-%d %H:%M:%S")] $1"'
-    echo '}'
-    echo ''
+    echo 'log "=== Starting agent upgrade process ==="'
+    echo "log \"Running as: $(whoami)\""
+    echo "log \"Using DEB: $LATEST_DEB\""
+    echo ""
     echo '# Backup .byoh/config if it exists'
     echo 'if [ -f "$HOME/.byoh/config" ]; then'
     echo '    log "Backing up existing .byoh/config..."'
     echo '    mkdir -p /tmp/byoh-backup/'
-    echo '    cp -a "$HOME/.byoh/config" "/tmp/byoh-backup/config.$(date +%s)"'
+    echo '    cp -a "$HOME/.byoh/config" "/tmp/byoh-backup/config.$(date +%s)" || log "[WARN] Failed to backup config"'
     echo 'fi'
     echo ''
     echo '# Install the package with force-confold to preserve existing configs'
@@ -161,16 +166,18 @@ upgrade_agent_if_needed() {
     echo 'log "Agent package installed, configuring..."'
     echo ''
     echo '# Reload systemd to pick up any new unit files'
-    echo 'systemctl daemon-reload'
+    echo 'log "Reloading systemd daemon..."'
+    echo 'systemctl daemon-reload || log "[WARN] Failed to reload systemd"'
     echo ''
     echo '# Restore .byoh/config if it was backed up'
     echo 'if [ -d "/tmp/byoh-backup" ]; then'
     echo '    log "Restoring .byoh/config from backup..."'
     echo '    mkdir -p "$HOME/.byoh"'
-    echo '    cp -a "/tmp/byoh-backup/"* "$HOME/.byoh/" 2>/dev/null || true'
-    echo '    rm -rf /tmp/byoh-backup'
+    echo '    cp -a "/tmp/byoh-backup/"* "$HOME/.byoh/" 2>/dev/null || log "[WARN] Failed to restore some config files"'
+    echo '    rm -rf /tmp/byoh-backup || true'
     echo 'fi'
     echo ''
+    echo '# Start and enable the service'
     echo 'log "Starting agent service..."'
     echo '# Start and enable the service'
     echo 'attempt=1'
@@ -181,12 +188,15 @@ upgrade_agent_if_needed() {
     echo '        exit 0'
     echo '    else'
     echo '        log "[WARN] Failed to enable service, attempting to start directly..."'
-    echo '        systemctl start pf9-byohost-agent || true'
+    echo '        systemctl start pf9-byohost-agent || log "[WARN] Failed to start service directly"'
     echo '    fi'
     echo '    if [ $attempt -eq $MAX_RETRIES ]; then'
     echo '        log "[ERROR] Failed to start agent service after $MAX_RETRIES attempts"'
+    echo '        log "[DEBUG] Service status:"'
+    echo '        systemctl status pf9-byohost-agent || true'
     echo '        exit 1'
     echo '    fi'
+    echo '    log "Retrying in 5 seconds..."'
     echo '    sleep 5'
     echo '    attempt=$((attempt + 1))'
     echo 'done'
@@ -199,48 +209,54 @@ upgrade_agent_if_needed() {
     echo "[DEBUG] Upgrade script path: $upgrade_script"
     echo "[DEBUG] DEB file: $latest_deb"
     
-    # Execute the upgrade script directly
-    if bash -x "$upgrade_script" "$latest_deb"; then
-        echo "[DEBUG] Upgrade script completed successfully"
-        # Clean up the script file only if successful
-        rm -f "$upgrade_script"
-    else
-        local exit_code=$?
-        echo "[ERROR] Upgrade script failed with exit code $exit_code"
-        echo "[DEBUG] Keeping upgrade script for debugging: $upgrade_script"
-        return $exit_code
-    fi
+    # Set up log file
+    LOG_FILE="/var/log/pf9/agent-upgrade-$(date +%Y%m%d-%H%M%S).log"
+    mkdir -p "$(dirname "$LOG_FILE")"
+    touch "$LOG_FILE"
+    
+    # Run the upgrade script in the background and capture all output
+    {
+        echo "=== Starting upgrade process at $(date) ==="
+        echo "Script: $upgrade_script"
+        echo "DEB: $latest_deb"
+        echo ""
+        
+        # Execute the script with debug output
+        bash -x "$upgrade_script" "$latest_deb"
+        
+        echo ""
+        echo "=== Upgrade process completed at $(date) ==="
+    } >> "$LOG_FILE" 2>&1 &
+    UPGRADE_PID=$!
+    disown $UPGRADE_PID
+    
+    echo "[INFO] Upgrade process started in background with PID: $UPGRADE_PID"
+    echo "[INFO] Logs: $LOG_FILE"
+    
+    # Clean up the script file after a delay
+    (sleep 30 && rm -f "$upgrade_script") &
+    
+    # Return success immediately since we're running in background
     return 0
 }
 # --- End BYOH Agent self-upgrade logic ---
 
 
-# Check if upgrade is needed
+# Run agent upgrade if not already done
 UPGRADE_MARKER="$HOME/.byoh/upgrade_complete"
-if [ ! -f "$UPGRADE_MARKER" ]; then
-    # Create log directory if it doesn't exist
-    mkdir -p /var/log/pf9
-    LOG_FILE="/var/log/pf9/agent-upgrade-$(date +%Y%m%d-%H%M%S).log"
-    
-    # Run upgrade in background with nohup and disown, logging to file
-    nohup bash -c '
-        upgrade_log() {
-            echo "[$(date "+%Y-%m-%d %H:%M:%S")] $1" >> "$LOG_FILE"
-        }
-        
-        upgrade_log "Starting agent upgrade process"
-        
-        if upgrade_agent_if_needed; then
-            mkdir -p "$(dirname "$UPGRADE_MARKER")"
-            touch "$UPGRADE_MARKER"
-            upgrade_log "Agent upgrade completed successfully"
-        else
-            upgrade_log "Agent upgrade failed" >&2
-        fi
-    ' >> "$LOG_FILE" 2>&1 &
-    disown
-    
-    echo "[INFO] Upgrade process started in background. Logs: $LOG_FILE"
+
+# Check if upgrade has already been completed
+if [ -f "$UPGRADE_MARKER" ]; then
+    echo "[INFO] Upgrade already completed, skipping..."
+else
+    echo "[INFO] Starting agent upgrade process"
+    if upgrade_agent_if_needed; then
+        # Create marker file to indicate successful upgrade
+        mkdir -p "$HOME/.byoh"
+        touch "$UPGRADE_MARKER"
+    else
+        echo "[WARN] Agent upgrade encountered issues, but continuing with installation"
+    fi
 fi
 
 echo "[INFO] Proceeding with bundle download"
