@@ -22,6 +22,9 @@ echo "=== Starting installation/upgrade at $(date) ==="
 # Lock file to prevent concurrent execution
 LOCK_FILE="/var/run/pf9-agent-upgrade.lock"
 
+# Global variable for temporary directory
+AGENT_TEMP_DIR=""
+
 try_cleanup() {
     local exit_code=$?
     echo "=== Cleanup started with exit code: $exit_code ==="
@@ -32,7 +35,13 @@ try_cleanup() {
         rm -f "$LOCK_FILE"
     fi
     
-    echo "=== Cleanup completed at $(date) ==="
+    # Clean up temporary files
+    if [ -n "$AGENT_TEMP_DIR" ] && [ -d "$AGENT_TEMP_DIR" ]; then
+        rm -rf "$AGENT_TEMP_DIR"
+        echo "[INFO] Removed temporary directory: $AGENT_TEMP_DIR"
+    fi
+    
+    echo "=== Cleanup completed ==="
     exit $exit_code
 }
 
@@ -48,6 +57,27 @@ fi
 
 echo "=== Acquired lock, proceeding with installation/upgrade ==="
 
+
+if ! command -v imgpkg >>/dev/null; then
+    echo "[INFO] Installing imgpkg"	
+    
+    if command -v wget >>/dev/null; then
+        dl_bin="wget -nv -O-"
+    elif command -v curl >>/dev/null; then
+        dl_bin="curl -s -L"
+    else
+        echo "[INFO] Installing curl"
+        apt-get update && apt-get install -y curl
+        dl_bin="curl -s -L"
+    fi
+    
+    echo "[INFO] Downloading imgpkg..."
+    $dl_bin https://github.com/vmware-tanzu/carvel-imgpkg/releases/download/$IMGPKG_VERSION/imgpkg-linux-$ARCH > /tmp/imgpkg
+    mv /tmp/imgpkg /usr/local/bin/imgpkg
+    chmod +x /usr/local/bin/imgpkg
+    echo "[INFO] imgpkg installation complete"
+fi
+
 # --- BYOH Agent self-upgrade logic ---
 upgrade_agent_if_needed() {
     local start_time=$(date +%s)
@@ -58,35 +88,33 @@ upgrade_agent_if_needed() {
         return 0
     fi
 
-    local agent_temp_dir
-    agent_temp_dir=$(mktemp -d)
-    echo "[INFO] Using temporary directory: $agent_temp_dir"
+    # Create a temporary directory for the agent files
+    AGENT_TEMP_DIR=$(mktemp -d)
+    echo "[INFO] Using temporary directory: $AGENT_TEMP_DIR"
     
-    # Enhanced cleanup function
+    # Cleanup function for this scope
     cleanup() {
-        local cleanup_start=$(date +%s)
+        local exit_code=$?
         echo "[INFO] Starting cleanup of temporary files"
-        
-        if [ -d "$agent_temp_dir" ]; then
-            rm -rf "$agent_temp_dir"
-            echo "[INFO] Removed temporary directory: $agent_temp_dir"
+        if [ -n "$AGENT_TEMP_DIR" ] && [ -d "$AGENT_TEMP_DIR" ]; then
+            rm -rf "$AGENT_TEMP_DIR"
+            echo "[INFO] Removed temporary directory: $AGENT_TEMP_DIR"
+            AGENT_TEMP_DIR=""
         fi
-        
-        local cleanup_duration=$(( $(date +%s) - cleanup_start ))
-        echo "[INFO] Cleanup completed in ${cleanup_duration}s"
+        exit $exit_code
     }
     trap cleanup EXIT
 
-    # Pull latest agent
+    # Download the latest agent package
     echo "[INFO] Downloading latest agent package..."
-    if ! imgpkg pull -i "quay.io/jayanthtjvrr/byoh-agent-deb:latest" -o "$agent_temp_dir"; then
-        echo "[ERROR] Failed to pull agent image"
+    if ! imgpkg pull -i "quay.io/jayanthtjvrr/byoh-agent-deb:latest" -o "$AGENT_TEMP_DIR"; then
+        echo "[ERROR] Failed to download agent package"
         return 1
     fi
 
-    # Find the deb package
+    # Find the .deb file
     local latest_deb
-    latest_deb=$(find "$agent_temp_dir" -name "pf9-byohost-agent*.deb" | head -1)
+    latest_deb=$(find "$AGENT_TEMP_DIR" -name "pf9-byohost-agent*.deb" | head -1)
     if [ -z "$latest_deb" ]; then
         echo "[ERROR] Could not find agent package in the downloaded image"
         return 1
@@ -201,25 +229,6 @@ upgrade_agent_if_needed() {
 }
 # --- End BYOH Agent self-upgrade logic ---
 
-if ! command -v imgpkg >>/dev/null; then
-    echo "[INFO] Installing imgpkg"	
-    
-    if command -v wget >>/dev/null; then
-        dl_bin="wget -nv -O-"
-    elif command -v curl >>/dev/null; then
-        dl_bin="curl -s -L"
-    else
-        echo "[INFO] Installing curl"
-        apt-get update && apt-get install -y curl
-        dl_bin="curl -s -L"
-    fi
-    
-    echo "[INFO] Downloading imgpkg..."
-    $dl_bin https://github.com/vmware-tanzu/carvel-imgpkg/releases/download/$IMGPKG_VERSION/imgpkg-linux-$ARCH > /tmp/imgpkg
-    mv /tmp/imgpkg /usr/local/bin/imgpkg
-    chmod +x /usr/local/bin/imgpkg
-    echo "[INFO] imgpkg installation complete"
-fi
 
 # Run agent upgrade after imgpkg is available
 echo "[INFO] Starting agent upgrade process"
