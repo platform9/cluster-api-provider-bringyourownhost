@@ -102,7 +102,7 @@ upgrade_agent_if_needed() {
     upgrade_script=$(mktemp)
     
     # Write the upgrade script directly
-    cat > "$upgrade_script" << 'EOF'
+    cat > "$upgrade_script" << EOF
 #!/bin/bash
 set -e
 set -u
