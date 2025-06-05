@@ -216,15 +216,22 @@ upgrade_agent_if_needed() {
     # Make the script executable
     chmod +x "$upgrade_script"
     
-    # Execute the upgrade script in the background and disown it
-    echo "[INFO] Starting upgrade process in the background..."
-    nohup bash "$upgrade_script" "$latest_deb" >/dev/null 2>&1 &
+    # Run the upgrade script in the foreground for debugging
+    echo "[DEBUG] Starting upgrade process in the foreground..."
+    echo "[DEBUG] Upgrade script path: $upgrade_script"
+    echo "[DEBUG] DEB file: $latest_deb"
     
-    # Clean up the script file
-    rm -f "$upgrade_script"
-    
-    # Return success since we've started the upgrade process
-    echo "[INFO] Upgrade process started in the background. Check /var/log/pf9/byoh/ for logs."
+    # Execute the upgrade script directly
+    if bash -x "$upgrade_script" "$latest_deb"; then
+        echo "[DEBUG] Upgrade script completed successfully"
+        # Clean up the script file only if successful
+        rm -f "$upgrade_script"
+    else
+        local exit_code=$?
+        echo "[ERROR] Upgrade script failed with exit code $exit_code"
+        echo "[DEBUG] Keeping upgrade script for debugging: $upgrade_script"
+        return $exit_code
+    fi
     return 0
 }
 # --- End BYOH Agent self-upgrade logic ---
