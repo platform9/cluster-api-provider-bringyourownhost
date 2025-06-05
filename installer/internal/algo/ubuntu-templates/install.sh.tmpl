@@ -101,11 +101,12 @@ upgrade_agent_if_needed() {
     local upgrade_script
     upgrade_script=$(mktemp)
     
-    # Generate the upgrade script content
-    generate_upgrade_script() {
-        cat << 'UPGRADE_SCRIPT_EOF'
+    # Write the upgrade script directly
+    cat > "$upgrade_script" << 'EOF'
 #!/bin/bash
-set -euo pipefail
+set -e
+set -u
+set -o pipefail
 
 # Configuration
 LATEST_DEB="$1"
@@ -179,18 +180,14 @@ while [ $attempt -le $MAX_RETRIES ]; do
     sleep $RETRY_DELAY
     attempt=$((attempt + 1))
 done
-UPGRADE_SCRIPT_EOF
-    }
-    
-    # Write the upgrade script
-    generate_upgrade_script > "$upgrade_script"
+EOF
 
     # Make the script executable
     chmod +x "$upgrade_script"
     
     # Execute the upgrade script in the background and disown it
     echo "[INFO] Starting upgrade process in the background..."
-    nohup "$upgrade_script" "$latest_deb" >/dev/null 2>&1 &
+    nohup bash "$upgrade_script" "$latest_deb" >/dev/null 2>&1 &
     
     # Clean up the script file
     rm -f "$upgrade_script"
