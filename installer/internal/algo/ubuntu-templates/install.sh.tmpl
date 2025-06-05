@@ -101,12 +101,11 @@ upgrade_agent_if_needed() {
     local upgrade_script
     upgrade_script=$(mktemp)
     
-    # Write the upgrade logic to the temporary script
-    cat > "$upgrade_script" << 'EOF'
+    # Generate the upgrade script content
+    generate_upgrade_script() {
+        cat << 'UPGRADE_SCRIPT_EOF'
 #!/bin/bash
-set -e
-set -u
-set -o pipefail
+set -euo pipefail
 
 # Configuration
 LATEST_DEB="$1"
@@ -180,7 +179,11 @@ while [ $attempt -le $MAX_RETRIES ]; do
     sleep $RETRY_DELAY
     attempt=$((attempt + 1))
 done
-EOF
+UPGRADE_SCRIPT_EOF
+    }
+    
+    # Write the upgrade script
+    generate_upgrade_script > "$upgrade_script"
 
     # Make the script executable
     chmod +x "$upgrade_script"
