@@ -136,6 +136,8 @@ upgrade_agent_if_needed() {
     echo 'set -u'
     echo 'set -o pipefail'
     echo ''
+    echo 'UPGRADE_MARKER="/var/lib/pf9/byoh/upgrade_complete"'
+    echo ''
     echo '# Configuration'
     echo 'LATEST_DEB="$1"'
     echo 'LOG_FILE="/var/log/pf9/byoh/upgrade-$(date +%Y%m%d%H%M%S).log"'
@@ -210,10 +212,12 @@ upgrade_agent_if_needed() {
     echo '        log "[ERROR] Failed to start agent service after $MAX_RETRIES attempts"'
     echo '        exit 1'
     echo '    fi'
-    echo '    '
     echo '    log "[WARN] Failed to start agent, retrying in $RETRY_DELAY seconds..."'
     echo '    sleep $RETRY_DELAY'
     echo '    attempt=$((attempt + 1))'
+    echo 'done'
+    echo '    log "[ERROR] Failed to start agent service after $MAX_RETRIES attempts"'
+    echo '    exit 1'
     echo 'done'
     } > "$upgrade_script"
 
@@ -241,10 +245,21 @@ upgrade_agent_if_needed() {
 # --- End BYOH Agent self-upgrade logic ---
 
 
-# Run agent upgrade after imgpkg is available
-echo "[INFO] Starting agent upgrade process"
-if ! upgrade_agent_if_needed; then
-    echo "[WARN] Agent upgrade encountered issues, but continuing with installation"
+# Run agent upgrade if not already done
+UPGRADE_MARKER="$HOME/.byoh/upgrade_complete"
+
+# Check if upgrade has already been completed
+if [ -f "$UPGRADE_MARKER" ]; then
+    echo "[INFO] Upgrade already completed, skipping..."
+else
+    echo "[INFO] Starting agent upgrade process"
+    if upgrade_agent_if_needed; then
+        # Create marker file to indicate successful upgrade
+        mkdir -p "$HOME/.byoh"
+        touch "$UPGRADE_MARKER"
+    else
+        echo "[WARN] Agent upgrade encountered issues, but continuing with installation"
+    fi
 fi
 
 echo "[INFO] Proceeding with bundle download"
@@ -270,7 +285,7 @@ for pkg in cri-tools kubernetes-cni kubectl kubelet kubeadm; do
     dpkg --install "$BUNDLE_PATH/$pkg.deb" && apt-mark hold $pkg
 done
 
-## intalling containerd
+## installing containerd
 tar -C / -xvf "$BUNDLE_PATH/containerd.tar"
 mkdir -p /etc/containerd
 containerd config default > /etc/containerd/config.toml
@@ -281,3 +296,12 @@ systemctl daemon-reload && systemctl enable containerd && systemctl start contai
 
 echo "[SUCCESS] Installation complete!"
 echo "=== Installation completed at $(date) ==="
+
+# Clean up upgrade marker if it exists
+UPGRADE_MARKER="$HOME/.byoh/upgrade_complete"
+if [ -f "$UPGRADE_MARKER" ]; then
+    echo "[INFO] Cleaning up upgrade marker"
+    rm -f "$UPGRADE_MARKER"
+    # Remove directory if empty
+    rmdir "$HOME/.byoh" 2>/dev/null || true
+fi
