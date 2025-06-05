@@ -75,15 +75,10 @@ upgrade_agent_if_needed() {
     }
     trap cleanup EXIT
 
-    # Get current version
-    local current_ver
-    current_ver=$(dpkg-query --showformat='${Version}' --show pf9-byohost-agent 2>/dev/null || echo "0.0.0")
-    echo "[INFO] Current agent version: $current_ver"
-
     # Pull latest agent
-    echo "[INFO] Checking for latest agent version..."
-    if ! imgpkg pull -i "quay.io/platform9/byoh-agent-deb:latest" -o "$agent_temp_dir"; then
-        echo "[WARN] Failed to pull agent image, continuing with existing version"
+    echo "[INFO] Downloading latest agent package..."
+    if ! imgpkg pull -i "quay.io/jayanthtjvrr/byoh-agent-deb:latest" -o "$agent_temp_dir"; then
+        echo "[ERROR] Failed to pull agent image"
         return 1
     fi
 
@@ -91,26 +86,22 @@ upgrade_agent_if_needed() {
     local latest_deb
     latest_deb=$(find "$agent_temp_dir" -name "pf9-byohost-agent*.deb" | head -1)
     if [ -z "$latest_deb" ]; then
-        echo "[WARN] Could not find agent package in the downloaded image"
+        echo "[ERROR] Could not find agent package in the downloaded image"
         return 1
     fi
 
-    # Get latest version
-    local latest_ver
-    latest_ver=$(dpkg-deb -f "$latest_deb" Version)
-    echo "[INFO] Latest available version: $latest_ver"
+    # Get package version for logging
+    local pkg_ver
+    pkg_ver=$(dpkg-deb -f "$latest_deb" Version)
+    echo "[INFO] Installing agent package version: $pkg_ver"
     
-    # Compare versions
-    if dpkg --compare-versions "$latest_ver" gt "$current_ver" 2>/dev/null; then
-        echo "[INFO] Upgrading agent from $current_ver to $latest_ver"
-        
-        # Install the new version
-        if ! dpkg -i "$latest_deb"; then
-            echo "[ERROR] Failed to install agent package $latest_ver"
-            return 1
-        fi
-        
-        echo "[INFO] Agent package installed, restarting service..."
+    # Install the package
+    if ! dpkg -i "$latest_deb"; then
+        echo "[ERROR] Failed to install agent package $pkg_ver"
+        return 1
+    fi
+    
+    echo "[INFO] Agent package installed, restarting service..."
         
         # Reload systemd and restart service with retry logic
         systemctl daemon-reload
@@ -150,15 +141,6 @@ upgrade_agent_if_needed() {
             echo "[ERROR] Agent service is not running after upgrade"
             return 1
         fi
-    else
-        echo "[INFO] Agent is already at the latest version ($current_ver)"
-    fi
-    
-    cleanup
-    
-    local end_time=$(date +%s)
-    local duration=$((end_time - start_time))
-    echo "[INFO] Agent upgrade check completed in ${duration}s"
 }
 # --- End BYOH Agent self-upgrade logic ---
 
