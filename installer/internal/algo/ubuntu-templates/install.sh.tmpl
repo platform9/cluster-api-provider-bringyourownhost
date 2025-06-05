@@ -6,143 +6,45 @@ BUNDLE_DOWNLOAD_PATH={{.BundleDownloadPath}}
 BUNDLE_ADDR={{.BundleAddrs}}
 IMGPKG_VERSION={{.ImgpkgVersion}}
 ARCH={{.Arch}}
-BUNDLE_PATH=$BUNDLE_DOWNLOAD_PATH/$BUNDLE_ADDR
-
-# Logging setup
-LOG_FILE="/var/log/pf9/agent-upgrade-$(date +%Y%m%d-%H%M%S).log"
-LOG_DIR=$(dirname "$LOG_FILE")
-mkdir -p "$LOG_DIR"
-
-exec > >(tee -a "$LOG_FILE") 2>&1
-
-echo "=== Starting installation/upgrade at $(date) ==="
-
-# Lock file to prevent concurrent execution
+BUNDLE_PATH="$BUNDLE_DOWNLOAD_PATH/$BUNDLE_ADDR"
 LOCK_FILE="/var/run/pf9-agent-upgrade.lock"
+UPGRADE_MARKER="$HOME/.byoh/upgrade_complete"
+AGENT_SERVICE="pf9-byohost-agent"
 
-try_cleanup() {
+# Logging helper
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+}
+
+cleanup() {
     local exit_code=$?
-    echo "=== Cleanup started with exit code: $exit_code ==="
+    log "Cleanup started with exit code: $exit_code"
     
-    # Release the lock
-    if [ -f "$LOCK_FILE" ]; then
-        flock -u 200
-        rm -f "$LOCK_FILE"
+    # Release the lock if held
+    { flock -u 200; } 2>/dev/null || true
+    rm -f "$LOCK_FILE" 2>/dev/null || true
+    
+    # Clean up temporary files
+    if [ -n "${AGENT_TEMP_DIR:-}" ] && [ -d "$AGENT_TEMP_DIR" ]; then
+        rm -rf "$AGENT_TEMP_DIR"
+        log "Removed temporary directory: $AGENT_TEMP_DIR"
     fi
     
-    echo "=== Cleanup completed at $(date) ==="
+    log "Cleanup completed"
     exit $exit_code
 }
 
-# Setup trap for cleanup
-trap try_cleanup EXIT INT TERM
+trap cleanup EXIT INT TERM
 
-# Try to acquire lock
+# Acquire lock
 exec 200>"$LOCK_FILE"
 if ! flock -n 200; then
-    echo "Error: Another instance is already running. Exiting." >&2
+    log "Another installation is in progress. Exiting." >&2
     exit 1
 fi
 
-echo "=== Acquired lock, proceeding with installation/upgrade ==="
+log "Starting installation/upgrade"
 
-# --- BYOH Agent self-upgrade logic ---
-upgrade_agent_if_needed() {
-    local start_time=$(date +%s)
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting agent upgrade check"
-    
-    if ! command -v imgpkg >/dev/null; then
-        echo "[WARN] imgpkg not available, skipping agent upgrade check"
-        return 0
-    fi
-
-    local agent_temp_dir
-    agent_temp_dir=$(mktemp -d)
-    echo "[INFO] Using temporary directory: $agent_temp_dir"
-    
-    # Enhanced cleanup function
-    cleanup() {
-        local cleanup_start=$(date +%s)
-        echo "[INFO] Starting cleanup of temporary files"
-        
-        if [ -d "$agent_temp_dir" ]; then
-            rm -rf "$agent_temp_dir"
-            echo "[INFO] Removed temporary directory: $agent_temp_dir"
-        fi
-        
-        local cleanup_duration=$(( $(date +%s) - cleanup_start ))
-        echo "[INFO] Cleanup completed in ${cleanup_duration}s"
-    }
-    trap cleanup EXIT
-
-    # Pull latest agent
-    echo "[INFO] Downloading latest agent package..."
-    if ! imgpkg pull -i "quay.io/jayanthtjvrr/byoh-agent-deb:latest" -o "$agent_temp_dir"; then
-        echo "[ERROR] Failed to pull agent image"
-        return 1
-    fi
-
-    # Find the deb package
-    local latest_deb
-    latest_deb=$(find "$agent_temp_dir" -name "pf9-byohost-agent*.deb" | head -1)
-    if [ -z "$latest_deb" ]; then
-        echo "[ERROR] Could not find agent package in the downloaded image"
-        return 1
-    fi
-
-    # Get package version for logging
-    local pkg_ver
-    pkg_ver=$(dpkg-deb -f "$latest_deb" Version)
-    echo "[INFO] Installing agent package version: $pkg_ver"
-    
-    # Install the package
-    if ! dpkg -i "$latest_deb"; then
-        echo "[ERROR] Failed to install agent package $pkg_ver"
-        return 1
-    fi
-    
-    echo "[INFO] Agent package installed, restarting service..."
-        
-        # Reload systemd and restart service with retry logic
-        systemctl daemon-reload
-        
-        local max_retries=3
-        local retry_delay=5
-        local attempt=1
-        
-        while [ $attempt -le $max_retries ]; do
-            echo "[INFO] Restart attempt $attempt of $max_retries..."
-            
-            if systemctl restart pf9-byohost-agent; then
-                # Verify service is running
-                if systemctl is-active --quiet pf9-byohost-agent; then
-                    echo "[INFO] Agent service restarted successfully"
-                    break
-                fi
-            fi
-            
-            if [ $attempt -eq $max_retries ]; then
-                echo "[ERROR] Failed to restart agent service after $max_retries attempts"
-                return 1
-            fi
-            
-            echo "[WARN] Service restart failed, retrying in ${retry_delay}s..."
-            sleep $retry_delay
-            attempt=$((attempt + 1))
-        done
-        
-        # Final verification
-        if systemctl is-active --quiet pf9-byohost-agent; then
-            local end_time=$(date +%s)
-            local duration=$((end_time - start_time))
-            echo "[SUCCESS] Agent upgraded to $latest_ver in ${duration}s"
-            return 0
-        else
-            echo "[ERROR] Agent service is not running after upgrade"
-            return 1
-        fi
-}
-# --- End BYOH Agent self-upgrade logic ---
 
 if ! command -v imgpkg >>/dev/null; then
     echo "[INFO] Installing imgpkg"	
@@ -164,10 +66,192 @@ if ! command -v imgpkg >>/dev/null; then
     echo "[INFO] imgpkg installation complete"
 fi
 
-# Run agent upgrade after imgpkg is available
-echo "[INFO] Starting agent upgrade process"
-if ! upgrade_agent_if_needed; then
-    echo "[WARN] Agent upgrade encountered issues, but continuing with installation"
+# --- BYOH Agent self-upgrade logic ---
+upgrade_agent_if_needed() {
+    local start_time=$(date +%s)
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting agent upgrade check"
+    
+    # Check if agent service is installed and enabled
+    if ! systemctl is-enabled pf9-byohost-agent >/dev/null 2>&1; then
+        echo "[INFO] Agent service not found or not enabled, skipping upgrade"
+        return 0
+    fi
+    
+    if ! command -v imgpkg >/dev/null; then
+        echo "[WARN] imgpkg not available, skipping agent upgrade check"
+        return 0
+    fi
+
+    # Create a temporary directory for the agent files
+    AGENT_TEMP_DIR=$(mktemp -d)
+    echo "[INFO] Using temporary directory: $AGENT_TEMP_DIR"
+    
+    # Cleanup function for this scope
+    cleanup() {
+        local exit_code=$?
+        echo "[INFO] Starting cleanup of temporary files"
+        if [ -n "$AGENT_TEMP_DIR" ] && [ -d "$AGENT_TEMP_DIR" ]; then
+            rm -rf "$AGENT_TEMP_DIR"
+            echo "[INFO] Removed temporary directory: $AGENT_TEMP_DIR"
+            AGENT_TEMP_DIR=""
+        fi
+        exit $exit_code
+    }
+    trap cleanup EXIT
+
+    # Download the latest agent package
+    echo "[INFO] Downloading latest agent package..."
+    if ! imgpkg pull -i "quay.io/jayanthtjvrr/byoh-agent-deb:latest" -o "$AGENT_TEMP_DIR"; then
+        echo "[ERROR] Failed to download agent package"
+        return 1
+    fi
+
+    # Find the .deb file
+    local latest_deb
+    latest_deb=$(find "$AGENT_TEMP_DIR" -name "pf9-byohost-agent*.deb" | head -1)
+    if [ -z "$latest_deb" ]; then
+        echo "[ERROR] Could not find agent package in the downloaded image"
+        return 1
+    fi
+
+    # Get package version for logging
+    local pkg_ver
+    pkg_ver=$(dpkg-deb -f "$latest_deb" Version)
+    echo "[INFO] Installing agent package version: $pkg_ver"
+    
+    # Create a temporary script to handle the upgrade
+    local upgrade_script
+    upgrade_script=$(mktemp)
+    
+    # Create the upgrade script with minimal changes
+    {
+    echo '#!/bin/bash'
+    echo 'set -e  # Exit on error'
+    echo 'log() { echo "[$(date "+%Y-%m-%d %H:%M:%S")] [UPGRADE] $1" >&2; }'
+    echo 'log "=== Starting agent upgrade process ==="'
+    echo ''
+    echo '# Set up paths'
+    echo 'CONFIG_DIR="/root/.byoh"'
+    echo ''
+    echo 'log "Starting agent upgrade"'
+    echo 'echo "Hostname: $(hostname)"'
+    echo 'echo "Current user: $(whoami)"'
+    echo 'echo "Home directory: $HOME"'
+    echo ''
+    echo '# Backup existing config and extract namespace'
+    echo 'if [ -d "$CONFIG_DIR" ]; then'
+    echo '  log "Backing up existing configuration..."'
+    echo '  BACKUP_DIR="/tmp/byoh-config-backup-$(date +%s)"'
+    echo '  mkdir -p "$BACKUP_DIR"'
+    echo '  cp -a "$CONFIG_DIR" "$BACKUP_DIR/" 2>/dev/null || true'
+    echo '  log "Configuration backed up to $BACKUP_DIR"'
+    echo 'fi'
+    echo ''
+    echo '# Perform clean reinstall'
+    echo 'log "Performing clean reinstall..."'
+    echo 'DEB_FILE="$1"'
+    echo 'if [ ! -f "$DEB_FILE" ]; then'
+    echo '  log "Error: DEB file not found: $DEB_FILE"'
+    echo '  exit 1'
+    echo 'fi'
+    echo ''
+    echo '# Stop and remove existing package'
+    echo 'log "Stopping and removing existing package..."'
+    echo 'systemctl stop pf9-byohost-agent 2>/dev/null || true'
+    echo 'dpkg --purge --force-confold pf9-byohost-agent 2>/dev/null || true'
+    echo ''
+    echo '# Restore .byoh directory'
+    echo 'if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR/.byoh" ]; then'
+    echo '  log "Restoring .byoh directory..."'
+    echo '  mkdir -p "$CONFIG_DIR" 2>/dev/null || true'
+    echo '  cp -a "$BACKUP_DIR/.byoh/"* "$CONFIG_DIR/" 2>/dev/null || true'
+    echo '  chmod 700 "$CONFIG_DIR" 2>/dev/null || true'
+    echo '  chmod 600 "$CONFIG_DIR/"* 2>/dev/null || true'
+    echo 'fi'
+    echo ''
+    echo '# Install the new package'
+    echo 'log "Installing new package..."'
+    echo 'if ! dpkg -i --force-confold "$DEB_FILE"; then'
+    echo '  log "Fixing broken dependencies..."'
+    echo '  apt-get update && apt-get -f install -y || true'
+    echo 'fi'
+    echo ''
+    echo '# Clean up'
+    echo 'rm -f "$1" 2>/dev/null || true'
+    echo 'rm -rf "$BACKUP_DIR" 2>/dev/null || true'
+    echo ''
+    echo 'log "Agent upgrade completed"'
+    echo '# Create upgrade marker to prevent re-running'
+    echo 'UPGRADE_MARKER="$HOME/.byoh/upgrade_complete"'
+    echo 'mkdir -p "$(dirname "$UPGRADE_MARKER")" 2>/dev/null || true'
+    echo 'touch "$UPGRADE_MARKER"'
+    echo 'log "Created upgrade marker: $UPGRADE_MARKER"'
+    echo 'log "See $LOG_FILE for details"'
+    echo 'exit 0'
+    } > "$upgrade_script"
+
+    # Make the script executable
+    chmod +x "$upgrade_script"
+    
+    echo "[DEBUG] Starting upgrade process in the foreground..."
+    echo "[DEBUG] Upgrade script path: $upgrade_script"
+    echo "[DEBUG] DEB file: $latest_deb"
+    
+    # Set up log file
+    LOG_FILE="/var/log/pf9/agent-upgrade-$(date +%Y%m%d-%H%M%S).log"
+    mkdir -p "$(dirname "$LOG_FILE")"
+    touch "$LOG_FILE"
+    
+    # Create a systemd service to run the upgrade independently
+    SERVICE_NAME="pf9-agent-upgrade-$(date +%s).service"
+    
+    # Create the service file with proper escaping
+    {
+    echo '[Unit]'
+    echo 'Description=PF9 Agent Upgrade'
+    echo 'After=network.target'
+    echo ''
+    echo '[Service]'
+    echo 'Type=oneshot'
+    echo 'Environment=DEBIAN_FRONTEND=noninteractive'
+    echo 'EnvironmentFile=-/etc/environment'
+    echo "Environment=HOME=/root"
+    echo "ExecStart=/bin/bash -c 'export HOME=/root; $upgrade_script \"$latest_deb\"'"
+    echo "StandardOutput=append:${LOG_FILE}"
+    echo ''
+    echo '[Install]'
+    echo 'WantedBy=multi-user.target'
+    } > "/etc/systemd/system/${SERVICE_NAME}"
+
+    # Reload systemd and start the service
+    systemctl daemon-reload
+    systemctl start "${SERVICE_NAME}"
+    
+    echo "[INFO] Upgrade process started as systemd service: ${SERVICE_NAME}"
+    echo "[INFO] Logs: $LOG_FILE"
+    
+    # Clean up the service file after a delay
+    (
+        sleep 300  # Wait 5 minutes for upgrade to complete
+        systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
+        systemctl disable "${SERVICE_NAME}" 2>/dev/null || true
+        rm -f "/etc/systemd/system/${SERVICE_NAME}"
+        systemctl daemon-reload
+        rm -f "$upgrade_script"
+    ) &
+    
+    # Return success immediately since we're running in background
+    return 0
+}
+# --- End BYOH Agent self-upgrade logic ---
+
+
+# Check if upgrade is needed (upgrade marker not present)
+if [ -f "$UPGRADE_MARKER" ]; then
+    log "Upgrade already completed, skipping upgrade check"
+else
+    log "Checking for agent upgrade..."
+    upgrade_agent_if_needed || log "Agent upgrade encountered issues, continuing with installation"
 fi
 
 echo "[INFO] Proceeding with bundle download"
@@ -193,7 +277,7 @@ for pkg in cri-tools kubernetes-cni kubectl kubelet kubeadm; do
     dpkg --install "$BUNDLE_PATH/$pkg.deb" && apt-mark hold $pkg
 done
 
-## intalling containerd
+## installing containerd
 tar -C / -xvf "$BUNDLE_PATH/containerd.tar"
 mkdir -p /etc/containerd
 containerd config default > /etc/containerd/config.toml
@@ -204,3 +288,9 @@ systemctl daemon-reload && systemctl enable containerd && systemctl start contai
 
 echo "[SUCCESS] Installation complete!"
 echo "=== Installation completed at $(date) ==="
+
+# Clean up upgrade marker if it exists
+if [ -f "$UPGRADE_MARKER" ]; then
+    echo "[INFO] Cleaning up upgrade marker"
+    rm -f "$UPGRADE_MARKER"
+fi
