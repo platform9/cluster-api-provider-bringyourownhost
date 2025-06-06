@@ -25,6 +25,7 @@ var (
 	tenant              string
 	clientToken         string
 	verbosity           string
+	regionName          string
 )
 
 var onboardCmd = &cobra.Command{
@@ -53,6 +54,8 @@ func init() {
 	onboardCmd.Flags().StringVarP(&tenant, "tenant", "t", "service", "Platform9 tenant")
 	onboardCmd.Flags().StringVarP(&verbosity, "verbosity", "v", "minimal", "Log verbosity level (all, important, minimal, critical, none)")
 	onboardCmd.MarkFlagsMutuallyExclusive("password", "password-interactive")
+	onboardCmd.Flags().StringVarP(&regionName, "region", "r", "", "Platform9 region where you want to onboard this host")
+	onboardCmd.MarkFlagRequired("region")
 
 	rootCmd.AddCommand(onboardCmd)
 }
@@ -125,7 +128,7 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	utils.LogDebug("Using FQDN: %s, Domain: %s, Tenant: %s", fqdn, domain, tenant)
 	utils.LogDebug("Verbosity level set to: %s", verbosity)
 
-	// 1. Get authentication token
+	// Get authentication token
 	utils.LogDebug("Getting authentication token for user %s", username)
 	authClient := client.NewAuthClient(fqdn, clientToken)
 	token, err := authClient.GetToken(username, password)
@@ -134,10 +137,10 @@ func runOnboard(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// 2. Create Kubernetes client
-	k8sClient := client.NewK8sClient(fqdn, domain, tenant, token)
+	// Create Kubernetes client
+	k8sClient := client.NewK8sClient(fqdn, domain, tenant, token, regionName)
 
-	// 3. Prepare directories
+	// Prepare directories
 	utils.LogInfo("Preparing directory structure for BYOH agent")
 	homeDir, err = os.UserHomeDir()
 	if err != nil {
@@ -150,21 +153,55 @@ func runOnboard(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// 4. Save kubeconfig
+	// Save kubeconfig
 	utils.LogInfo("Saving kubeconfig from bootstrap secret")
 	if err := k8sClient.SaveKubeConfig("byoh-bootstrap-kc"); err != nil {
 		utils.LogError("Failed to save kubeconfig: %v", err)
 		os.Exit(1)
 	}
 
-	// 5. Create packages directory for downloads
+	// Check if region where user wants to onboard to is available for this tenant or not
+	// If not available, roll back the onboarding process
+	available, regions, err := k8sClient.CheckRegionAvailability(regionName)
+	if err != nil {
+		utils.LogError("Failed to check region availability, rolling back onboarding process: %v", err)
+		if err := k8sClient.DeleteSavedKubeconfig(); err != nil {
+			utils.LogError("Failed to delete saved kubeconfig while rolling back onboarding process: %v", err)
+		}
+		os.Exit(1)
+	}
+	if !available {
+		utils.LogError("Region %s is not available for the tenant, rolling back onboarding process", regionName)
+		if len(regions) > 0 {
+			utils.LogInfo("Available regions: %v", regions)
+		}
+		if err := k8sClient.DeleteSavedKubeconfig(); err != nil {
+			utils.LogError("Failed to delete saved kubeconfig while rolling back onboarding process: %v", err)
+		}
+		os.Exit(1)
+	}
+
+	// Save region name in a temp file in byohDir
+	/*
+		Agent deb will read this file in a agent-after-install script, export the region label variable,
+		then it will be passed as a label flag to the pf9-byohost-agent binary.
+		This file will be removed as a part of agent-before-remove script.
+	*/
+	regionFile := filepath.Join(byohDir, "region")
+	regionLabel := service.PcdKaapiRegionKey + "=" + regionName
+	if err := os.WriteFile(regionFile, []byte(regionLabel), service.DefaultFilePerms); err != nil {
+		utils.LogError("Failed to save region name: %v", err)
+		os.Exit(1)
+	}
+
+	// Create packages directory for downloads
 	pkgDir := filepath.Join(byohDir, "packages")
 	if err := os.MkdirAll(pkgDir, service.DefaultDirPerms); err != nil {
 		utils.LogError("Failed to create packages directory: %v", err)
 		os.Exit(1)
 	}
 
-	// 6. Setup agent (download and install)
+	// Setup agent (download and install)
 	utils.LogInfo("Setting up BYOH agent")
 	err = service.SetupAgent(pkgDir)
 	if err != nil {

@@ -25,9 +25,11 @@ if [ -f /lib/systemd/system/pf9-byohost-agent.service ]; then
 mkdir -p /etc/pf9-byohost-agent.service.d/
 touch /etc/pf9-byohost-agent.service.d/pf9-byohost-agent.conf
 export NAMESPACE=$(grep 'namespace: *' /root/.byoh/config | awk '{print $2}')
+export REGION=$(cat /root/.byoh/region)
 
 echo "NAMESPACE=$NAMESPACE" > /etc/pf9-byohost-agent.service.d/pf9-byohost-agent.conf
 echo "BOOTSTRAP_KUBECONFIG=/etc/pf9-byohost-agent.service.d/bootstrap-kubeconfig.yaml" >> /etc/pf9-byohost-agent.service.d/pf9-byohost-agent.conf 
+echo "REGION=$REGION" >> /etc/pf9-byohost-agent.service.d/pf9-byohost-agent.conf 
 
 systemctl daemon-reload
 systemctl enable pf9-byohost-agent.service

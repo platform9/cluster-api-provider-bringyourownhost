@@ -44,6 +44,7 @@ type K8sClient struct {
 	domain      string
 	tenant      string
 	bearerToken string
+	regionName  string
 }
 
 // Client wraps the Kubernetes clientset and dynamic client.
@@ -53,13 +54,14 @@ type Client struct {
 }
 
 // NewK8sClient creates a new Kubernetes client with provided credentials
-func NewK8sClient(fqdn, domain, tenant, token string) *K8sClient {
+func NewK8sClient(fqdn, domain, tenant, token, regionName string) *K8sClient {
 	client := &K8sClient{
 		client:      &http.Client{Timeout: DefaultTimeout},
 		fqdn:        fqdn,
 		domain:      domain,
 		tenant:      tenant,
 		bearerToken: token,
+		regionName:  regionName,
 	}
 	return client
 }
@@ -99,8 +101,8 @@ func (c *K8sClient) GetSecret(secretName string) (*types.Secret, error) {
 	utils.LogInfo("Fetching secret '%s'", secretName)
 
 	namespace := c.getNamespace()
-	secretEndpoint := fmt.Sprintf("https://%s/oidc-proxy/%s/api/v1/namespaces/%s/secrets/%s",
-		c.fqdn, namespace, namespace, secretName)
+	secretEndpoint := fmt.Sprintf("https://%s/oidc-proxy/%s/%s/api/v1/namespaces/%s/secrets/%s",
+		c.fqdn, namespace, c.regionName, namespace, secretName)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", secretEndpoint, nil)
 	if err != nil {
@@ -172,6 +174,17 @@ func (c *K8sClient) SaveKubeConfig(secretName string) error {
 
 	// Success
 	utils.LogSuccess("Successfully wrote kubeconfig to %s", kubeconfigPath)
+	return nil
+}
+
+// DeleteSavedKubeconfig deletes the kubeconfig from the user's BYOH directory
+func (c *K8sClient) DeleteSavedKubeconfig() error {
+
+	if err := os.RemoveAll(service.ByohDir); err != nil {
+		return fmt.Errorf("failed to delete kubeconfig: %v", err)
+	}
+
+	utils.LogSuccess("Successfully deleted saved kubeconfig from %s", service.KubeconfigFilePath)
 	return nil
 }
 
@@ -416,4 +429,33 @@ func (client *Client) WaitForMachineRefToBeUnset(byoHost *infrastructurev1beta1.
 		utils.LogInfo("Waiting for machineRef to be unset...")
 		time.Sleep(5 * time.Second)
 	}
+}
+
+// CheckRegionAvailability checks if the region is available for the tenant
+func (c *K8sClient) CheckRegionAvailability(regionName string) (bool, []string, error) {
+	// Create a client from the kubeconfig
+	client, err := GetK8sClient(service.KubeconfigFilePath)
+	if err != nil {
+		return false, nil, fmt.Errorf("error creating Kubernetes client: %v", err)
+	}
+
+	// Get the region configmap from the management cluster from the tenant namespace
+	regionConfigMap, err := client.Clientset.CoreV1().ConfigMaps(c.getNamespace()).Get(context.TODO(), "region-config", metav1.GetOptions{})
+	if err != nil {
+		return false, nil, fmt.Errorf("error getting region configmap: %v", err)
+	}
+
+	// Check if the given region is available for the tenant
+	regionsStr, ok := regionConfigMap.Data["regions"]
+	if !ok {
+		return false, nil, fmt.Errorf("region configmap does not have regions key")
+	}
+	regions := strings.Split(regionsStr, "\n")
+	for _, region := range regions {
+		if strings.TrimSpace(region) == regionName {
+			return true, nil, nil
+		}
+	}
+
+	return false, regions, nil
 }
