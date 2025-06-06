@@ -143,8 +143,6 @@ upgrade_agent_if_needed() {
     echo 'MAX_RETRIES=3'
     echo ''
     echo 'log "=== Starting agent upgrade process ==="'
-    echo "log \"Running as: $(whoami)\""
-    echo "log \"Using DEB: $LATEST_DEB\""
     echo ""
     echo '# Backup .byoh/config if it exists'
     echo 'if [ -f "$HOME/.byoh/config" ]; then'
