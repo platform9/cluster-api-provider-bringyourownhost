@@ -5,6 +5,8 @@ package controllers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"reflect"
@@ -191,7 +193,7 @@ func (r *ByoMachineReconciler) FetchAttachedByoHost(ctx context.Context, byomach
 	logger.Info("Fetching an attached ByoHost")
 
 	selector := labels.NewSelector()
-	byohostLabels, _ := labels.NewRequirement(infrav1.AttachedByoMachineLabel, selection.Equals, []string{byomachineNamespace + "." + byomachineName})
+	byohostLabels, _ := labels.NewRequirement(infrav1.AttachedByoMachineLabel, selection.Equals, []string{generateSafeLabelValue(byomachineNamespace, byomachineName)})
 	selector = selector.Add(*byohostLabels)
 	hostsList := &infrav1.ByoHostList{}
 	err := r.Client.List(
@@ -545,7 +547,8 @@ func (r *ByoMachineReconciler) attachByoHost(ctx context.Context, machineScope *
 		hostLabels = make(map[string]string)
 	}
 	hostLabels[clusterv1.ClusterNameLabel] = machineScope.ByoMachine.Labels[clusterv1.ClusterNameLabel]
-	hostLabels[infrav1.AttachedByoMachineLabel] = machineScope.ByoMachine.Namespace + "." + machineScope.ByoMachine.Name
+	attachedByoMachineLabelValue := generateSafeLabelValue(machineScope.ByoMachine.Namespace, machineScope.ByoMachine.Name)
+	hostLabels[infrav1.AttachedByoMachineLabel] = attachedByoMachineLabelValue
 	host.Labels = hostLabels
 
 	host.Spec.BootstrapSecret = &corev1.ObjectReference{
@@ -676,4 +679,23 @@ func (r *ByoMachineReconciler) createInstallerConfig(ctx context.Context, machin
 		return err
 	}
 	return nil
+}
+
+func generateSafeLabelValue(namespace string, name string) string {
+	originalValue := namespace + "." + name
+
+	if len(originalValue) <= infrav1.MaxK8sLabelValueLength {
+		return originalValue
+	}
+
+	// Calculate SHA256 hash of the original full value
+	hasher := sha256.New()
+	hasher.Write([]byte(originalValue))
+	hashBytes := hasher.Sum(nil)
+	hashSuffix := hex.EncodeToString(hashBytes)[:infrav1.LabelHashLength]
+
+	// Truncate the originalValue to fit with the hash and separator
+	prefixToUse := originalValue[:infrav1.MaxLabelPrefixLength]
+
+	return prefixToUse + infrav1.LabelSeparator + hashSuffix
 }
