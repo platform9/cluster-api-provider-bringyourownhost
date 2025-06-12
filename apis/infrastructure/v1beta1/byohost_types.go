@@ -22,6 +22,12 @@ const (
 	BundleLookupBaseRegistryAnnotation = "byoh.infrastructure.cluster.x-k8s.io/bundle-registry"
 	// ClusterLabel label is used to mark a cluster where it is attached to
 	ClusterLabel = "kaapi.pf9.io/cluster-name"
+	// Max k8s label value length
+	MaxK8sLabelValueLength = 63
+	LabelHashLength        = 8 // Using 8 chars of SHA256 hex
+	LabelSeparator         = "-"
+	// Max length for the prefix part of the byomachine.namespace.byomachine.name combination
+	MaxLabelPrefixLength = MaxK8sLabelValueLength - LabelHashLength - len(LabelSeparator) // 54
 )
 
 // ByoHostSpec defines the desired state of ByoHost
