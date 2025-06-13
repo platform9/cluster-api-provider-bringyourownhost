@@ -137,6 +137,19 @@ func PrepareAgentDirectory(byohDir string) error {
 }
 
 var ensureRequiredPackages = func() error {
+
+	// do apt-get update before proceeding with installing required packages
+	utils.LogSuccess("Updating apt packages...Might take few seconds")
+
+	if ok, err := isAptUnlocked(); !ok {
+		return err
+	}
+
+	// do apt-get update
+	if _, err := RunWithStdout("apt-get", "update"); err != nil {
+		return fmt.Errorf("failed to update apt packages: %v", err)
+	}
+
 	utils.LogInfo("Checking for required packages...")
 
 	// Fix any broken package state first
@@ -246,4 +259,16 @@ func RunWithStdout(name string, args ...string) (string, error) {
 
 	utils.LogDebug("stdout: %s, stderr: %v", string(byt), stderr)
 	return string(byt), err
+}
+
+// isAptUnlocked checks if apt is locked
+// returns true if apt is not locked, false if apt is locked
+func isAptUnlocked() (bool, error) {
+	_, err := RunWithStdout("lsof", "/var/lib/apt/lists/lock")
+	if err != nil {
+		// lsof exits with code 1 if the file is not locked.
+		return true, nil
+	} else {
+		return false, fmt.Errorf("apt is locked %v", err)
+	}
 }
