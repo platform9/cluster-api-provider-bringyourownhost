@@ -614,7 +614,7 @@ func (r *ByoMachineReconciler) markHostForCleanup(ctx context.Context, machineSc
 	machineScope.ByoHost.Annotations[infrav1.HostCleanupAnnotation] = ""
 
 	// remove the pf9 cluster label only if not upgrading (annotation must be exactly "true" to skip removal)
-	if machineScope.ByoMachine == nil || machineScope.ByoMachine.Annotations["barista.platform9.io/upgrade-in-progress"] != "true" {
+	if machineScope.ByoMachine.Annotations["barista.platform9.io/upgrade-in-progress"] != "true" {
 		logger.Info("Removing pf9 cluster label %s from ByoHost %s", infrav1.ClusterLabel, machineScope.ByoHost.Name)
 		delete(machineScope.ByoHost.Labels, infrav1.ClusterLabel)
 	} else {
