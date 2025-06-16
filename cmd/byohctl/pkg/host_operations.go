@@ -122,6 +122,12 @@ func PerformHostOperation(operationType HostOperationType, namespace string) err
 		if !continueDeauth {
 			return fmt.Errorf("Info: De-auth cancelled by user.")
 		}
+
+		// Since this is the last machine in the cluster, annotate machine objects to exclude the node drain
+		err = client.AnnotateMachineObject(unstructuredMachineObj, namespace, "machine.cluster.x-k8s.io/exclude-node-draining", "")
+		if err != nil {
+			return fmt.Errorf("failed to annotate the last machine object to be deauth: %v", err)
+		}
 	}
 
 	// 5. Annonate the respective machine object with "cluster.x-k8s.io/delete-machine"="yes"
