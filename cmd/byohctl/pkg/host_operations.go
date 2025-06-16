@@ -130,6 +130,12 @@ func PerformHostOperation(operationType HostOperationType, namespace string) err
 		}
 	}
 
+	// Get the fresh machine object from the server to get the updated machine object
+	unstructuredMachineObj, err = client.GetUnstructuredMachineObject(namespace, machineName)
+	if err != nil {
+		return fmt.Errorf("failed to get machine object: %v", err)
+	}
+
 	// 5. Annonate the respective machine object with "cluster.x-k8s.io/delete-machine"="yes"
 	err = client.AnnotateMachineObject(unstructuredMachineObj, namespace, "cluster.x-k8s.io/delete-machine", "yes")
 	if err != nil {
@@ -152,7 +158,7 @@ func PerformHostOperation(operationType HostOperationType, namespace string) err
 		return fmt.Errorf("failed to wait for machineRef to be unset: %v", err)
 	}
 
-	utils.LogSuccess("machineRef successfully unset for the host")
+	utils.LogSuccess("MachineRef successfully unset for the host")
 
 	// If operation is decommission, delete the byohost object and run dpkg purge
 	if operationType == OperationDecommission {
