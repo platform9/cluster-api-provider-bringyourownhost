@@ -421,7 +421,7 @@ func (client *Client) WaitForMachineRefToBeUnset(byoHost *infrastructurev1beta1.
 
 		// Check if machineRef is nil or no longer references the machine
 		if byoHost.Status.MachineRef == nil {
-			utils.LogSuccess("MachineRef successfully unset")
+			utils.LogSuccess("MachineRef unset")
 			return nil
 		}
 

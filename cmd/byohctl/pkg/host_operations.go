@@ -122,6 +122,18 @@ func PerformHostOperation(operationType HostOperationType, namespace string) err
 		if !continueDeauth {
 			return fmt.Errorf("Info: De-auth cancelled by user.")
 		}
+
+		// Since this is the last machine in the cluster, annotate machine objects to exclude the node drain
+		err = client.AnnotateMachineObject(unstructuredMachineObj, namespace, "machine.cluster.x-k8s.io/exclude-node-draining", "")
+		if err != nil {
+			return fmt.Errorf("failed to annotate the last machine object to be deauth: %v", err)
+		}
+	}
+
+	// Get the fresh machine object from the server to get the updated machine object
+	unstructuredMachineObj, err = client.GetUnstructuredMachineObject(namespace, machineName)
+	if err != nil {
+		return fmt.Errorf("failed to get machine object: %v", err)
 	}
 
 	// 5. Annonate the respective machine object with "cluster.x-k8s.io/delete-machine"="yes"
@@ -146,7 +158,7 @@ func PerformHostOperation(operationType HostOperationType, namespace string) err
 		return fmt.Errorf("failed to wait for machineRef to be unset: %v", err)
 	}
 
-	utils.LogSuccess("machineRef successfully unset for the host")
+	utils.LogSuccess("MachineRef successfully unset for the host")
 
 	// If operation is decommission, delete the byohost object and run dpkg purge
 	if operationType == OperationDecommission {
