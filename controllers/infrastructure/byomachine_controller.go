@@ -613,9 +613,16 @@ func (r *ByoMachineReconciler) markHostForCleanup(ctx context.Context, machineSc
 	}
 	machineScope.ByoHost.Annotations[infrav1.HostCleanupAnnotation] = ""
 
-	// remove the pf9 cluster label
-	logger.Info("Removing pf9 cluster label %s from ByoHost %s", infrav1.ClusterLabel, machineScope.ByoHost.Name)
-	delete(machineScope.ByoHost.Labels, infrav1.ClusterLabel)
+	// Debug: Log the value and presence of the upgrade-in-progress annotation
+	upgradeInProgress, ok := machineScope.ByoMachine.Annotations["barista.platform9.io/upgrade-in-progress"]
+	logger.Info("DEBUG: upgrade-in-progress annotation check", "value", upgradeInProgress, "present", ok)
+	// Improved logic: skip label removal only if annotation exists and is set to "true"
+	if ok && upgradeInProgress == "true" {
+		logger.Info("Upgrade in progress: skipping removal of pf9 cluster label from ByoHost %s", machineScope.ByoHost.Name)
+	} else {
+		logger.Info("Removing pf9 cluster label %s from ByoHost %s", infrav1.ClusterLabel, machineScope.ByoHost.Name)
+		delete(machineScope.ByoHost.Labels, infrav1.ClusterLabel)
+	}
 
 	// Issue the patch for byohost
 	return helper.Patch(ctx, machineScope.ByoHost)
