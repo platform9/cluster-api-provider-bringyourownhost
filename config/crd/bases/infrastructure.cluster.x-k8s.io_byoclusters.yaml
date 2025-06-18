@@ -17,6 +17,14 @@ spec:
   scope: Namespaced
   versions:
     - name: v1beta1
+      additionalPrinterColumns:
+          - name: READY
+            type: string
+            jsonPath: .status.ready
+            description: Indicates if the ByoCluster is ready
+          - name: AGE
+            type: date
+            jsonPath: .metadata.creationTimestamp
       schema:
         openAPIV3Schema:
           description: ByoCluster is the Schema for the byoclusters API
