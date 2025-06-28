@@ -167,9 +167,10 @@ func (r *K8sInstallerConfigReconciler) reconcileNormal(ctx context.Context, scop
 // sets the reference in the configuration status and ready to true.
 func (r *K8sInstallerConfigReconciler) storeInstallationData(ctx context.Context, scope *k8sInstallerConfigScope, install, uninstall string) error {
 	logger := scope.Logger
-	logger.Info("creating installation secret")
+	logger.Info("creating installation and uninstallation secrets")
 
-	secret := &corev1.Secret{
+	// Create installation secret
+	installSecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "byoh-install-" + scope.Config.Name,
 			Namespace: scope.Config.Namespace,
@@ -187,30 +188,69 @@ func (r *K8sInstallerConfigReconciler) storeInstallationData(ctx context.Context
 			},
 		},
 		Data: map[string][]byte{
-			"install":   []byte(install),
+			"install": []byte(install),
+		},
+		Type: clusterv1.ClusterSecretType,
+	}
+
+	if err := r.Client.Create(ctx, installSecret); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return errors.Wrapf(err, "failed to create installation secret for K8sInstallerConfig %s/%s", scope.Config.Namespace, scope.Config.Name)
+		}
+		logger.Info("installation secret for K8sInstallerConfig already exists, updating", "secret", installSecret.Name, "K8sInstallerConfig", scope.Config.Name)
+		if err := r.Client.Update(ctx, installSecret); err != nil {
+			return errors.Wrapf(err, "failed to update installation secret for K8sInstallerConfig %s/%s", scope.Config.Namespace, scope.Config.Name)
+		}
+	}
+
+	scope.Config.Status.InstallationSecret = &corev1.ObjectReference{
+		Kind:      installSecret.Kind,
+		Namespace: installSecret.Namespace,
+		Name:      installSecret.Name,
+	}
+
+	// Create uninstallation secret
+	uninstallSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "byoh-uninstall-" + scope.Config.Name,
+			Namespace: scope.Config.Namespace,
+			Labels: map[string]string{
+				clusterv1.ClusterNameLabel: scope.Cluster.Name,
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: infrav1.GroupVersion.String(),
+					Kind:       scope.Config.Kind,
+					Name:       scope.Config.Name,
+					UID:        scope.Config.UID,
+					Controller: pointer.Bool(true),
+				},
+			},
+		},
+		Data: map[string][]byte{
 			"uninstall": []byte(uninstall),
 		},
 		Type: clusterv1.ClusterSecretType,
 	}
 
-	// as secret creation and scope.Config status patch are not atomic operations
-	// it is possible that secret creation happens but the config.Status patches are not applied
-	if err := r.Client.Create(ctx, secret); err != nil {
+	if err := r.Client.Create(ctx, uninstallSecret); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
-			return errors.Wrapf(err, "failed to create installation secret for K8sInstallerConfig %s/%s", scope.Config.Namespace, scope.Config.Name)
+			return errors.Wrapf(err, "failed to create uninstallation secret for K8sInstallerConfig %s/%s", scope.Config.Namespace, scope.Config.Name)
 		}
-		logger.Info("installation secret for K8sInstallerConfig already exists, updating", "secret", secret.Name, "K8sInstallerConfig", scope.Config.Name)
-		if err := r.Client.Update(ctx, secret); err != nil {
-			return errors.Wrapf(err, "failed to update installation secret for K8sInstallerConfig %s/%s", scope.Config.Namespace, scope.Config.Name)
+		logger.Info("uninstallation secret for K8sInstallerConfig already exists, updating", "secret", uninstallSecret.Name, "K8sInstallerConfig", scope.Config.Name)
+		if err := r.Client.Update(ctx, uninstallSecret); err != nil {
+			return errors.Wrapf(err, "failed to update uninstallation secret for K8sInstallerConfig %s/%s", scope.Config.Namespace, scope.Config.Name)
 		}
 	}
-	scope.Config.Status.InstallationSecret = &corev1.ObjectReference{
-		Kind:      secret.Kind,
-		Namespace: secret.Namespace,
-		Name:      secret.Name,
+
+	scope.Config.Status.UninstallationSecret = &corev1.ObjectReference{
+		Kind:      uninstallSecret.Kind,
+		Namespace: uninstallSecret.Namespace,
+		Name:      uninstallSecret.Name,
 	}
+
 	scope.Config.Status.Ready = true
-	logger.Info("created installation secret")
+	logger.Info("created installation and uninstallation secrets")
 	return nil
 }
 
