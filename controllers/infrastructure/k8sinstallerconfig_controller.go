@@ -221,6 +221,7 @@ func (r *K8sInstallerConfigReconciler) storeInstallationData(ctx context.Context
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: infrav1.GroupVersion.String(),
+					Kind:       scope.Config.Kind,
 					Name:       scope.Config.Name,
 					UID:        scope.Config.UID,
 					Controller: pointer.Bool(true),
