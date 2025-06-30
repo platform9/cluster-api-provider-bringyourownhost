@@ -208,7 +208,8 @@ func (r *K8sInstallerConfigReconciler) storeInstallationData(ctx context.Context
 		Namespace: installSecret.Namespace,
 		Name:      installSecret.Name,
 	}
-
+	logger.Info("installation secret created", "secret", installSecret.Name, "K8sInstallerConfig", scope.Config.Name)
+	logger.Info("creating uninstallation secret")
 	// Create uninstallation secret
 	uninstallSecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -220,7 +221,6 @@ func (r *K8sInstallerConfigReconciler) storeInstallationData(ctx context.Context
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: infrav1.GroupVersion.String(),
-					Kind:       scope.Config.Kind,
 					Name:       scope.Config.Name,
 					UID:        scope.Config.UID,
 					Controller: pointer.Bool(true),
@@ -248,6 +248,7 @@ func (r *K8sInstallerConfigReconciler) storeInstallationData(ctx context.Context
 		Namespace: uninstallSecret.Namespace,
 		Name:      uninstallSecret.Name,
 	}
+	logger.Info("uninstallation secret created", "secret", uninstallSecret.Name, "K8sInstallerConfig", scope.Config.Name)
 
 	scope.Config.Status.Ready = true
 	logger.Info("created installation and uninstallation secrets")
