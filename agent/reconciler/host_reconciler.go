@@ -151,17 +151,24 @@ func (r *HostReconciler) reconcileNormal(ctx context.Context, byoHost *infrastru
 
 func (r *HostReconciler) executeInstallerController(ctx context.Context, byoHost *infrastructurev1beta1.ByoHost) error {
 	logger := ctrl.LoggerFrom(ctx)
+	if byoHost.Spec.InstallationSecret == nil {
+		return fmt.Errorf("InstallationSecret not found in ByoHost %s", byoHost.Name)
+	}
 	secret := &corev1.Secret{}
-	err := r.Client.Get(ctx, types.NamespacedName{Name: byoHost.Spec.InstallationSecret.Name, Namespace: byoHost.Spec.InstallationSecret.Namespace}, secret)
+	err := r.Client.Get(ctx, types.NamespacedName{
+		Name:      byoHost.Spec.InstallationSecret.Name,
+		Namespace: byoHost.Spec.InstallationSecret.Namespace,
+	}, secret)
 	if err != nil {
-		logger.Error(err, "error getting install and uninstall script")
-		r.Recorder.Eventf(byoHost, corev1.EventTypeWarning, "ReadInstallationSecretFailed", "install and uninstall script %s not found", byoHost.Spec.InstallationSecret.Name)
+		logger.Error(err, "error getting install script")
+		r.Recorder.Eventf(byoHost, corev1.EventTypeWarning, "ReadInstallationSecretFailed", "install script %s not found", byoHost.Spec.InstallationSecret.Name)
 		return err
 	}
-	installScript := string(secret.Data["install"])
-	uninstallScript := string(secret.Data["uninstall"])
-
-	byoHost.Spec.UninstallationScript = &uninstallScript
+	installScriptBytes, ok := secret.Data["install"]
+	if !ok {
+		return fmt.Errorf("install script not found in secret %s", secret.Name)
+	}
+	installScript := string(installScriptBytes)
 	installScript, err = r.parseScript(ctx, installScript)
 	if err != nil {
 		return err
@@ -253,11 +260,25 @@ func (r *HostReconciler) hostCleanUp(ctx context.Context, byoHost *infrastructur
 		if r.SkipK8sInstallation {
 			logger.Info("Skipping uninstallation of k8s components")
 		} else {
-			if byoHost.Spec.UninstallationScript == nil {
-				return fmt.Errorf("UninstallationScript not found in Byohost %s", byoHost.Name)
-			}
 			logger.Info("Executing Uninstall script")
-			uninstallScript := *byoHost.Spec.UninstallationScript
+			if byoHost.Spec.UninstallationSecret == nil {
+				return fmt.Errorf("UninstallationSecret not found in Byohost %s", byoHost.Name)
+			}
+			secret := &corev1.Secret{}
+			err := r.Client.Get(ctx, types.NamespacedName{
+				Name:      byoHost.Spec.UninstallationSecret.Name,
+				Namespace: byoHost.Spec.UninstallationSecret.Namespace,
+			}, secret)
+			if err != nil {
+				logger.Error(err, "error getting uninstallation script secret")
+				r.Recorder.Eventf(byoHost, corev1.EventTypeWarning, "ReadUninstallationSecretFailed", "uninstallation secret %s not found", byoHost.Spec.UninstallationSecret.Name)
+				return err
+			}
+			uninstallScriptBytes, ok := secret.Data["uninstall"]
+			if !ok {
+				return fmt.Errorf("uninstall script not found in secret %s", secret.Name)
+			}
+			uninstallScript := string(uninstallScriptBytes)
 			uninstallScript, err = r.parseScript(ctx, uninstallScript)
 			if err != nil {
 				logger.Error(err, "error parsing Uninstallation script")
@@ -265,7 +286,7 @@ func (r *HostReconciler) hostCleanUp(ctx context.Context, byoHost *infrastructur
 			}
 			err = r.CmdRunner.RunCmd(ctx, uninstallScript)
 			if err != nil {
-				logger.Error(err, "error execting Uninstallation script")
+				logger.Error(err, "error executing Uninstallation script")
 				r.Recorder.Event(byoHost, corev1.EventTypeWarning, "UninstallScriptExecutionFailed", "uninstall script execution failed")
 				return err
 			}
@@ -288,7 +309,6 @@ func (r *HostReconciler) hostCleanUp(ctx context.Context, byoHost *infrastructur
 	}
 
 	byoHost.Spec.InstallationSecret = nil
-	byoHost.Spec.UninstallationScript = nil
 	r.removeAnnotations(ctx, byoHost)
 	conditions.MarkFalse(byoHost, infrastructurev1beta1.K8sNodeBootstrapSucceeded, infrastructurev1beta1.K8sNodeAbsentReason, clusterv1.ConditionSeverityInfo, "")
 	return nil

@@ -33,6 +33,10 @@ type K8sInstallerConfigStatus struct {
 	// InstallationSecret is an optional reference to a generated installation secret by K8sInstallerConfig controller
 	// +optional
 	InstallationSecret *corev1.ObjectReference `json:"installationSecret,omitempty"`
+
+	// UninstallationSecret is an optional reference to a generated uninstallation secret by K8sInstallerConfig controller
+	// +optional
+	UninstallationSecret *corev1.ObjectReference `json:"uninstallationSecret,omitempty"`
 }
 
 //+kubebuilder:object:root=true

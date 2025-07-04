@@ -293,6 +293,17 @@ func (r *ByoMachineReconciler) reconcileNormal(ctx context.Context, machineScope
 		}
 	}
 
+	if machineScope.ByoMachine.Spec.InstallerRef != nil && machineScope.ByoHost.Spec.UninstallationSecret == nil {
+		res, err := r.setUninstallationSecretForByoHost(ctx, machineScope)
+		if err != nil {
+			logger.Error(err, "failed to set uninstallation secret on byohost")
+			return res, err
+		}
+		if res.RequeueAfter > 0 {
+			return res, nil
+		}
+	}
+
 	logger.Info("Updating Node with ProviderID")
 	return r.updateNodeProviderID(ctx, machineScope)
 }
@@ -476,6 +487,37 @@ func (r *ByoMachineReconciler) setInstallationSecretForByoHost(ctx context.Conte
 	machineScope.ByoHost.Spec.InstallationSecret = secretRef
 	return ctrl.Result{}, helper.Patch(ctx, machineScope.ByoHost)
 }
+
+func (r *ByoMachineReconciler) setUninstallationSecretForByoHost(ctx context.Context, machineScope *byoMachineScope) (ctrl.Result, error) {
+	logger := log.FromContext(ctx).WithValues("cluster", machineScope.Cluster.Name)
+	installerConfig, ready, err := r.getInstallerConfigAndStatus(ctx, machineScope)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if !ready {
+		logger.Info("Installer config is not ready, requeuing")
+		return ctrl.Result{RequeueAfter: RequeueInstallerConfigTime}, nil
+	}
+
+	helper, err := patch.NewHelper(machineScope.ByoHost, r.Client)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	secret, found, err := unstructured.NestedFieldNoCopy(installerConfig.Object, "status", "uninstallationSecret")
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if !found {
+		return ctrl.Result{}, fmt.Errorf("uninstallation secret not set on ready installerconfig %s %s", installerConfig.GetKind(), installerConfig.GetName())
+	}
+	secretRef := &corev1.ObjectReference{}
+	if err = runtime.DefaultUnstructuredConverter.FromUnstructured(secret.(map[string]interface{}), secretRef); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to convert unstructured uninstallationSecret, %s", err.Error())
+	}
+	machineScope.ByoHost.Spec.UninstallationSecret = secretRef
+	return ctrl.Result{}, helper.Patch(ctx, machineScope.ByoHost)
+}
+
 
 func (r *ByoMachineReconciler) getInstallerConfigAndStatus(ctx context.Context, machineScope *byoMachineScope) (*unstructured.Unstructured, bool, error) {
 	installerConfig, err := r.getInstallerConfig(ctx, machineScope.ByoMachine)

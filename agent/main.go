@@ -38,7 +38,8 @@ import (
 // labelFlags is a flag that holds a map of label key values.
 // One or more key value pairs can be passed using the same flag
 // The following example sets labelFlags with two items:
-//     -label "key1=value1" -label "key2=value2"
+//
+//	-label "key1=value1" -label "key2=value2"
 type labelFlags map[string]string
 
 // String implements flag.Value interface
@@ -51,7 +52,7 @@ func (l *labelFlags) String() string {
 }
 
 // Set implements flag.Value interface
-//nolint: gomnd
+// nolint: gomnd
 func (l *labelFlags) Set(value string) error {
 	// account for comma-separated key-value pairs in a single invocation
 	if len(strings.Split(value, ",")) > 1 {
