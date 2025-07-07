@@ -1,0 +1,306 @@
+name: Go Security Scans
+
+on:
+    push:
+      branches: ["private/soc2"]
+    pull_request:
+      branches: ["private/soc2"]
+
+jobs:
+    gosec:
+        name: Static Code Analysis (gosec)
+        runs-on: ubuntu-latest
+        continue-on-error: true
+        outputs:
+            gosec-high-found: ${{ steps.check.outputs.gosec-high-found }}
+
+        steps:
+        -   name: Checkout code
+            uses: actions/checkout@v3
+
+        -   name: Set up Go
+            uses: actions/setup-go@v4
+            with:
+                go-version-file: 'go.mod'
+
+        -   name: Install gosec
+            run: |
+                go install github.com/securego/gosec/v2/cmd/gosec@latest
+                echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+                gosec -h  # Debug step: check if gosec is installed
+
+        # -   name: Run gosec
+        #     run: gosec ./...
+        -   name: Run gosec and save report
+            run: |
+                set -e
+                gosec -fmt=json -severity=medium -out=gosec-report.json ./... || echo "⚠️ Gosec exited with non-zero code but report may still be available"
+
+        -   name: Check if gosec report exists
+            run: |
+                if [ ! -f gosec-report.json ]; then
+                  echo "❌ Gosec report not found."
+                  exit 1
+                fi
+
+        -   name: Upload gosec Report
+            uses: actions/upload-artifact@v4
+            with:
+                name: gosec-report
+                path: gosec-report.json
+
+        -   name: Show Gosec Report in Logs
+            run: cat gosec-report.json
+
+        -   name: Check for High Severity Issues
+            id: check
+            run: |
+              count=$(jq '[.Issues[] | select(.severity == "HIGH" or .severity == "CRITICAL")] | length' gosec-report.json)
+              echo "gosec-high-found=$([[ $count -gt 0 ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+
+        -   name: Fail if High/Critical Vulnerabilities Found
+            if: steps.check.outputs.gosec-high-found == 'true'
+            run: |
+                echo "❌ High/Critical vulnerabilities found. Failing the job."
+                exit 1
+
+    auto-pr-gosec:
+        name: Create Pull Request if High/Critical Vulnerabilities Found
+        needs: [gosec]
+        if: needs.gosec.outputs.gosec-high-found == 'true'
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+            pull-requests: write
+        steps:
+        -   name: Checkout Code
+            uses: actions/checkout@v3
+
+        -   name: Download Gosec Report Artifact
+            uses: actions/download-artifact@v4
+            with:
+                name: gosec-report
+                path: tmp
+
+        -   name: Generate PR Body with High/Critical Gosec Results
+            run: |
+                echo "# 🚨 Gosec Vulnerability Report (High/Critical)" > tmp/pr-body.md
+                jq -r '
+                .Issues[]
+                | select(.severity == "HIGH" or .severity == "CRITICAL")
+                | "* File: \(.file)
+                    • Line: \(.line)
+                    • Rule ID: \(.rule_id)
+                    • Details: \(.details)
+                    • Confidence: \(.confidence)
+                    • Severity: \(.severity)"
+                ' tmp/gosec-report.json >> tmp/pr-body.md || echo "❌ No critical/high vulnerabilities found in report." >> tmp/pr-body.md
+        
+        -   name: Add Gosec Alert Log (Optional)
+            run: |
+                jq -r '
+                .Issues[]
+                | select(.severity == "HIGH")
+                | "* \(.rule_id) - \(.file):\(.line) (\(.severity)) - \(.details)"
+                ' tmp/gosec-report.json > .security-alert.log || true
+                git config user.name github-actions
+                git config user.email github-actions@github.com
+                git add -f .security-alert.log || true
+                git commit -m "chore: gosec security alert log" || true
+
+        -   name: Create Pull Request
+            uses: peter-evans/create-pull-request@v5
+            with:
+                commit-message: "chore: high/critical vulnerabilities detected in gosec"
+                title: "chore: Auto PR for the Gosec scan(high/critical)"
+                body-path: tmp/pr-body.md
+                branch: "auto/high-critical-gosec-security-scan"
+                base: "private/soc2"
+        
+
+    # gitleaks:
+    #     name: Secret Scan (gitleaks)
+    #     runs-on: ubuntu-latest
+
+    #     steps:
+    #     -   name: Checkout code
+    #         uses: actions/checkout@v3
+
+    #     -   name: Run Gitleaks
+    #         uses: gitleaks/gitleaks-action@v2
+    #         with:
+    #             args: detect --no-git -v
+
+    golangci:
+        name: GolangCI Lint & Auto PR
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+            pull-requests: write
+
+        steps:
+            -   name: Checkout code
+                uses: actions/checkout@v4
+
+            -   name: Set up Go
+                uses: actions/setup-go@v5
+                with:
+                    go-version: stable
+
+            -   name: Install golangci-lint
+                run: |
+                    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin latest
+
+            -   name: Run golangci-lint
+                id: golangci
+                run: |
+                    echo "🔍 Running golangci-lint..."
+                    golangci-lint run ./... > golangci_output.txt || true
+                    cat golangci_output.txt
+                    if [ -s golangci_output.txt ]; then
+                    echo "lint_issues=true" >> "$GITHUB_OUTPUT"
+                    else
+                    echo "lint_issues=false" >> "$GITHUB_OUTPUT"
+                    fi
+
+            -   name: Create PR if Lint Issues Found
+                if: ${{ steps.golangci.outputs.lint_issues == 'true' }}
+                uses: peter-evans/create-pull-request@v5
+                with:
+                    commit-message: 'chore: golangci-lint issues detected'
+                    title: 'chore: GolangCI Lint Issues Found'
+                    body: |
+                        ## ⚠️ GolangCI Lint Issues Found
+                        See `golangci_output.txt` for full details.
+                        
+                        Please address the issues found in the lint check.
+                        branch: auto/golangci-lint-issues
+                        base: main
+                        add-paths: |
+                        golangci_output.txt
+
+            -   name: Fail job if lint issues found
+                if: ${{ steps.golangci.outputs.lint_issues == 'true' }}
+                run: |
+                    echo "❌ GolangCI lint issues found — failing job."
+                    exit 1
+
+
+    dependencies-scan:
+        name: Trivy Scan
+        runs-on: ubuntu-latest
+        continue-on-error: true
+        outputs:
+            trivy-high-found: ${{ steps.check.outputs.trivy-high-found }}
+
+        steps:
+        -   name: Checkout code
+            uses: actions/checkout@v3
+
+        -   name: Install Trivy
+            run: |
+                curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+
+        -   name: Run Trivy and Save Report
+            run: |
+                trivy fs --scanners vuln --vuln-type library --format json -o trivy-report.json .
+
+        -   name: Upload Trivy Report
+            uses: actions/upload-artifact@v4
+            with:
+                name: trivy-report
+                path: trivy-report.json
+
+        -   name: Show Trivy Report in Logs
+            run: cat trivy-report.json
+
+        -   name: Check for High/Critical Vulnerabilities
+            id: check
+            run: |
+                count=$(jq '[.Results[] | select(.Vulnerabilities != null) | .Vulnerabilities[] | select(.Severity == "HIGH" or .Severity == "CRITICAL")] | length' trivy-report.json)
+                echo "trivy-high-found=$([[ $count -gt 0 ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+
+        -   name: Fail if High/Critical Vulnerabilities Found
+            if: steps.check.outputs.trivy-high-found == 'true'
+            run: |
+                echo "❌ High/Critical vulnerabilities found. Failing the job."
+                exit 1
+
+    auto-pr:
+        name: Create Pull Request if High/Critical Vulnerabilities Found
+        needs: [dependencies-scan]
+        if: needs.dependencies-scan.outputs.trivy-high-found == 'true'
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+            pull-requests: write
+        steps:
+        -   name: Checkout Code
+            uses: actions/checkout@v3
+
+        -   name: Download Trivy Report Artifact
+            uses: actions/download-artifact@v4
+            with:
+                name: trivy-report
+                path: tmp
+
+        -   name: Generate PR Body with High/Critical Trivy Results
+            run: |
+                echo "# 🚨 Trivy Vulnerability Report (High/Critical)" > tmp/pr-body.md
+                echo "" >> tmp/pr-body.md
+                echo "| Target | Package | Severity | Title | CVE | Installed | Fixed |" >> tmp/pr-body.md
+                echo "|--------|---------|----------|-------|-----|-----------|-------|" >> tmp/pr-body.md
+
+                # jq -r '
+                #     .Results[]
+                #     | select(.Vulnerabilities != null)
+                #     | .Target as $target
+                #     | .Vulnerabilities[]
+                #     | select(.Severity == "HIGH" or .Severity == "CRITICAL")
+                #     | "* Target: \($target)
+                #         • Package: \(.PkgName)
+                #         • Severity: \(.Severity)
+                #         • Title: \(.Title)
+                #         • Description: \(.Description // "N/A")
+                #         • Installed Version: \(.InstalledVersion)
+                #         • Fixed Version: \(.FixedVersion // "N/A")
+                #         • CWE: \(.CweIDs | join(", ") // "N/A")
+                #         • CVE: \(.VulnerabilityID)
+                #         • References: \(.PrimaryURL // "N/A")
+                #     "
+                # ' tmp/trivy-report.json >> tmp/pr-body.md || echo "❌ No critical/high vulnerabilities found in report." >> tmp/pr-body.md
+                jq -r '
+                .Results[]
+                | select(.Vulnerabilities != null)
+                | .Target as $target
+                | .Vulnerabilities[]
+                | select(.Severity == "HIGH" or .Severity == "CRITICAL")
+                | "| \($target) | \(.PkgName) | \(.Severity) | \(.Title | gsub("[\\r\\n\\|]"; " ")) | \(.VulnerabilityID) | \(.InstalledVersion) | \(.FixedVersion // "N/A") |"
+                ' tmp/trivy-report.json >> tmp/pr-body.md
+
+                if ! grep -q '| ' tmp/pr-body.md; then
+                echo "✅ No critical/high vulnerabilities found in report." >> tmp/pr-body.md
+                fi
+        
+        -   name: Add Trivy Alert Log (Optional)
+            run: |
+                jq -r '
+                    .Results[]
+                    | select(.Vulnerabilities != null)
+                    | .Vulnerabilities[]
+                    | select(.Severity == "HIGH" or .Severity == "CRITICAL")
+                    | "* \(.VulnerabilityID) - \(.PkgName) (\(.Severity))"
+                ' tmp/trivy-report.json > .security-alert.log || true
+                git config user.name github-actions
+                git config user.email github-actions@github.com
+                git add -f .security-alert.log || true
+                git commit -m "chore: trivy security alert log" || true
+
+        -   name: Create Pull Request
+            uses: peter-evans/create-pull-request@v5
+            with:
+                commit-message: "chore: high/critical vulnerabilities detected 🚨"
+                title: "chore: Auto PR for the Trivy scan(high/critical)"
+                body-path: tmp/pr-body.md
+                branch: "auto/high-critical-trivy-security-scan"
+                base: "private/soc2"
