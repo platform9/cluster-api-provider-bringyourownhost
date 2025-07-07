@@ -1,5 +1,3 @@
-# golangci.com configuration
-# https://github.com/golangci/golangci/wiki/Configuration
 version: 1
 run:
   skip-dirs:
