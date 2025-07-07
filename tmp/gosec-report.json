@@ -1,0 +1,366 @@
+{
+	"Golang errors": {
+		"/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/client/auth.go": [
+			{
+				"line": 12,
+				"column": 2,
+				"error": "could not import github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/types (invalid package name: \"\")"
+			},
+			{
+				"line": 13,
+				"column": 2,
+				"error": "could not import github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils (invalid package name: \"\")"
+			}
+		],
+		"/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/client/k8s.go": [
+			{
+				"line": 16,
+				"column": 2,
+				"error": "could not import github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/service (invalid package name: \"\")"
+			}
+		],
+		"/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/cmd/deauthorise.go": [
+			{
+				"line": 7,
+				"column": 2,
+				"error": "could not import github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/client (invalid package name: \"\")"
+			},
+			{
+				"line": 8,
+				"column": 2,
+				"error": "could not import github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/pkg (invalid package name: \"\")"
+			},
+			{
+				"line": 9,
+				"column": 2,
+				"error": "could not import github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/service (invalid package name: \"\")"
+			},
+			{
+				"line": 10,
+				"column": 2,
+				"error": "could not import github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils (invalid package name: \"\")"
+			}
+		],
+		"/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/cmd/onboard.go": [
+			{
+				"line": 16,
+				"column": 2,
+				"error": "could not import golang.org/x/term (invalid package name: \"\")"
+			}
+		],
+		"/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/cmd/version.go": [
+			{
+				"line": 6,
+				"column": 2,
+				"error": "could not import github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/version (invalid package name: \"\")"
+			}
+		],
+		"/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/main.go": [
+			{
+				"line": 7,
+				"column": 2,
+				"error": "could not import github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/cmd (invalid package name: \"\")"
+			},
+			{
+				"line": 8,
+				"column": 2,
+				"error": "could not import github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils (invalid package name: \"\")"
+			},
+			{
+				"line": 9,
+				"column": 2,
+				"error": "could not import github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/version (invalid package name: \"\")"
+			}
+		],
+		"/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/pkg/host_operations.go": [
+			{
+				"line": 7,
+				"column": 2,
+				"error": "could not import github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/client (invalid package name: \"\")"
+			},
+			{
+				"line": 8,
+				"column": 2,
+				"error": "could not import github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/service (invalid package name: \"\")"
+			},
+			{
+				"line": 9,
+				"column": 2,
+				"error": "could not import github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils (invalid package name: \"\")"
+			}
+		],
+		"/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/service/agent.go": [
+			{
+				"line": 13,
+				"column": 2,
+				"error": "could not import github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils (invalid package name: \"\")"
+			}
+		],
+		"/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/test/e2e/docker_helper.go": [
+			{
+				"line": 179,
+				"column": 71,
+				"error": "undefined: types.ContainerListOptions"
+			},
+			{
+				"line": 263,
+				"column": 68,
+				"error": "undefined: types.ContainerStartOptions"
+			},
+			{
+				"line": 272,
+				"column": 19,
+				"error": "undefined: types.ContainerListOptions"
+			}
+		]
+	},
+	"Issues": [
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion int -\u003e int32",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/controllers/infrastructure/byocluster_controller.go",
+			"code": "174: \tif byoCluster.Spec.ControlPlaneEndpoint.Port == 0 {\n175: \t\tbyoCluster.Spec.ControlPlaneEndpoint.Port = int32(DefaultAPIEndpointPort)\n176: \t}\n",
+			"line": "175",
+			"column": "52",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/service/agent.go",
+			"code": "237: \t// Purge the package\n238: \tcmd := exec.Command(dpkgPath, \"--purge\", ByohAgentServiceName)\n239: \toutput, err := cmd.CombinedOutput()\n",
+			"line": "238",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/service/agent.go",
+			"code": "221: \t// First, try a clean installation\n222: \tcmd := exec.Command(dpkgPath, \"-i\", debFilePath)\n223: \toutput, err := cmd.CombinedOutput()\n",
+			"line": "222",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/service/agent.go",
+			"code": "195: \tvar outputBuffer bytes.Buffer\n196: \tpullCmd := exec.Command(imgpkgPath, \"pull\", \"-i\", ByohAgentDebPackageURL, \"-o\", tempDir)\n197: \tpullCmd.Stdout = \u0026outputBuffer\n",
+			"line": "196",
+			"column": "13",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/service/agent.go",
+			"code": "177: \t\tutils.LogInfo(\"Installing %s...\", pkg.Name)\n178: \t\toutput, err := exec.Command(pkg.InstallCommand, pkg.InstallArgs...).CombinedOutput()\n179: \t\tif err != nil {\n",
+			"line": "178",
+			"column": "18",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/test/e2e/e2e_debug_helper.go",
+			"code": "102: func WriteShellScript(shellFileName string, shellFileContent []string) {\n103: \tf, err := os.OpenFile(shellFileName, os.O_APPEND|os.O_WRONLY|os.O_CREATE, DefaultFileMode)\n104: \tif err != nil {\n",
+			"line": "103",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/test/e2e/e2e_debug_helper.go",
+			"code": "76: func ShowFileContent(fileName string) {\n77: \tcontent, err := os.ReadFile(fileName)\n78: \tif err != nil {\n",
+			"line": "77",
+			"column": "18",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/test/e2e/e2e_debug_helper.go",
+			"code": "29: \tbuf := bufio.NewReader(output.Reader)\n30: \tf, err := os.OpenFile(outputFile, os.O_CREATE|os.O_WRONLY, DefaultFileMode)\n31: \tif err != nil {\n",
+			"line": "30",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/utils/logger.go",
+			"code": "54: \tvar err error\n55: \tdebugLogFile, err = os.OpenFile(debugLogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)\n56: \tif err != nil {\n",
+			"line": "55",
+			"column": "22",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/client/k8s.go",
+			"code": "71: \t// Read the kubeconfig file and get the namespace\n72: \tdata, err := os.ReadFile(kubeconfigPath)\n73: \tif err != nil {\n",
+			"line": "72",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/agent/cloudinit/file_writer.go",
+			"code": "60: \n61: \tf, err := os.OpenFile(file.Path, flag, initPermission)\n62: \tif err != nil {\n",
+			"line": "61",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G302",
+			"details": "Expect file permissions to be 0600 or less",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/utils/logger.go",
+			"code": "54: \tvar err error\n55: \tdebugLogFile, err = os.OpenFile(debugLogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)\n56: \tif err != nil {\n",
+			"line": "55",
+			"column": "22",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G302",
+			"details": "Expect file permissions to be 0600 or less",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/service/agent.go",
+			"code": "56: \n57: \t\t\tif err := os.Chmod(ImgPkgPath, 0755); err != nil {\n58: \t\t\t\treturn fmt.Errorf(\"failed to make file executable: %v\", err)\n",
+			"line": "57",
+			"column": "14",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/utils/logger.go",
+			"code": "44: \t// Create log directory if it doesn't exist\n45: \tif err := os.MkdirAll(logDir, 0755); err != nil {\n46: \t\treturn fmt.Errorf(\"failed to create log directory: %v\", err)\n",
+			"line": "45",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/test/e2e/docker_helper.go",
+			"code": "191: \t\tkubeconfig = re.ReplaceAll(kubeconfig, []byte(\"server: https://127.0.0.1:\"+r.Port))\n192: \t\tExpect(os.WriteFile(TempKubeconfigPath, kubeconfig, 0644)).NotTo(HaveOccurred()) //nolint: gosec,gomnd\n193: \n",
+			"line": "192",
+			"column": "10",
+			"nosec": false,
+			"suppressions": null
+		}
+	],
+	"Stats": {
+		"files": 69,
+		"lines": 9060,
+		"nosec": 0,
+		"found": 15
+	},
+	"GosecVersion": "dev"
+}
