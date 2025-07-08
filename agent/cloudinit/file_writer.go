@@ -68,7 +68,7 @@ func (w FileWriter) WriteToFile(file *Files) error {
 		return err
 	}
 
-	if len(file.Permissions) > 0 {
+	if file.Permissions != "" {
 		var fileMode uint64
 		base := 8
 		bitSize := 32
@@ -83,7 +83,7 @@ func (w FileWriter) WriteToFile(file *Files) error {
 		}
 	}
 
-	if len(file.Owner) > 0 {
+	if file.Owner != "" {
 		owner := strings.Split(file.Owner, ":")
 		base := 10
 		bitSize := 32

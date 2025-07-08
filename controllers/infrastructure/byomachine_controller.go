@@ -458,20 +458,28 @@ func (r *ByoMachineReconciler) setPausedConditionForByoHost(ctx context.Context,
 	return helper.Patch(ctx, machineScope.ByoHost)
 }
 
-func (r *ByoMachineReconciler) setInstallationSecretForByoHost(ctx context.Context, machineScope *byoMachineScope) (ctrl.Result, error) {
+func (r *ByoMachineReconciler) getInstallerConfigAndHelper(ctx context.Context, machineScope *byoMachineScope) (*unstructured.Unstructured, *patch.Helper, ctrl.Result, error) {
 	logger := log.FromContext(ctx).WithValues("cluster", machineScope.Cluster.Name)
 	installerConfig, ready, err := r.getInstallerConfigAndStatus(ctx, machineScope)
 	if err != nil {
-		return ctrl.Result{}, err
+		return installerConfig, nil, ctrl.Result{}, err
 	}
 	if !ready {
 		logger.Info("Installer config is not ready, requeuing")
-		return ctrl.Result{RequeueAfter: RequeueInstallerConfigTime}, nil
+		return installerConfig, nil, ctrl.Result{RequeueAfter: RequeueInstallerConfigTime}, nil
 	}
 
 	helper, err := patch.NewHelper(machineScope.ByoHost, r.Client)
 	if err != nil {
-		return ctrl.Result{}, err
+		return installerConfig, nil, ctrl.Result{}, err
+	}
+	return installerConfig, helper, ctrl.Result{}, err
+}
+
+func (r *ByoMachineReconciler) setInstallationSecretForByoHost(ctx context.Context, machineScope *byoMachineScope) (ctrl.Result, error) {
+	installerConfig, helper, result, err := r.getInstallerConfigAndHelper(ctx, machineScope)
+	if (err != nil || result != ctrl.Result{}) {
+		return result, err
 	}
 	secret, found, err := unstructured.NestedFieldNoCopy(installerConfig.Object, "status", "installationSecret")
 	if err != nil {
@@ -489,19 +497,9 @@ func (r *ByoMachineReconciler) setInstallationSecretForByoHost(ctx context.Conte
 }
 
 func (r *ByoMachineReconciler) setUninstallationSecretForByoHost(ctx context.Context, machineScope *byoMachineScope) (ctrl.Result, error) {
-	logger := log.FromContext(ctx).WithValues("cluster", machineScope.Cluster.Name)
-	installerConfig, ready, err := r.getInstallerConfigAndStatus(ctx, machineScope)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	if !ready {
-		logger.Info("Installer config is not ready, requeuing")
-		return ctrl.Result{RequeueAfter: RequeueInstallerConfigTime}, nil
-	}
-
-	helper, err := patch.NewHelper(machineScope.ByoHost, r.Client)
-	if err != nil {
-		return ctrl.Result{}, err
+	installerConfig, helper, result, err := r.getInstallerConfigAndHelper(ctx, machineScope)
+	if (err != nil || result != ctrl.Result{}) {
+		return result, err
 	}
 	secret, found, err := unstructured.NestedFieldNoCopy(installerConfig.Object, "status", "uninstallationSecret")
 	if err != nil {
@@ -517,7 +515,6 @@ func (r *ByoMachineReconciler) setUninstallationSecretForByoHost(ctx context.Con
 	machineScope.ByoHost.Spec.UninstallationSecret = secretRef
 	return ctrl.Result{}, helper.Patch(ctx, machineScope.ByoHost)
 }
-
 
 func (r *ByoMachineReconciler) getInstallerConfigAndStatus(ctx context.Context, machineScope *byoMachineScope) (*unstructured.Unstructured, bool, error) {
 	installerConfig, err := r.getInstallerConfig(ctx, machineScope.ByoMachine)
@@ -730,7 +727,7 @@ func (r *ByoMachineReconciler) createInstallerConfig(ctx context.Context, machin
 	return nil
 }
 
-func generateSafeLabelValue(namespace string, name string) string {
+func generateSafeLabelValue(namespace, name string) string {
 	originalValue := namespace + "." + name
 
 	if len(originalValue) <= infrav1.MaxK8sLabelValueLength {
