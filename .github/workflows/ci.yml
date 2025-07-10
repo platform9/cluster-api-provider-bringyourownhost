@@ -22,7 +22,7 @@ on:
 
 jobs:
   build-agent:
-      runs-on: ubuntu-20.04
+      runs-on: ubuntu-22.04
       steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -36,7 +36,7 @@ jobs:
         run: make host-agent-binaries
 
   test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
     - name: Check Docker Version
       run: docker --version

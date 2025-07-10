@@ -392,7 +392,7 @@ runCmd:
 						// assert events
 						events := eventutils.CollectEvents(recorder.Events)
 						Expect(events).Should(ConsistOf([]string{
-							"Warning ReadInstallationSecretFailed install and uninstall script non-existent not found",
+							"Warning ReadInstallationSecretFailed install script non-existent not found",
 						}))
 
 					})
