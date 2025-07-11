@@ -16,7 +16,7 @@ if [[ -n "${TRACE}" ]]; then
 fi
 
 k8s_version=1.25.0
-goarch=amd64
+goarch="$(go version | awk '{print $NF}' | egrep -o '[^/]+$')"
 goos="unknown"
 
 if [[ "${OSTYPE}" == "linux"* ]]; then

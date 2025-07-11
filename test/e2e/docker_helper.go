@@ -189,7 +189,7 @@ func (r *ByoHostRunner) copyKubeconfig(config cpConfig, listopt types.ContainerL
 
 		re := regexp.MustCompile("server:.*")
 		kubeconfig = re.ReplaceAll(kubeconfig, []byte("server: https://127.0.0.1:"+r.Port))
-		Expect(os.WriteFile(TempKubeconfigPath, kubeconfig, 0644)).NotTo(HaveOccurred()) //nolint: gosec,gomnd
+		Expect(os.WriteFile(TempKubeconfigPath, kubeconfig, 0644)).NotTo(HaveOccurred()) //nolint: gosec,mnd
 
 		// If the --bootstrap-kubeconfig is not provided, the tests will use
 		// kubeconfig placed in ~/.byoh/config
@@ -221,7 +221,7 @@ func (r *ByoHostRunner) copyKubeconfig(config cpConfig, listopt types.ContainerL
 
 			config.sourcePath = TempKubeconfigPath
 			// SplitAfterN used to remove the unwanted special characters in the homeDir
-			config.destPath = strings.SplitAfterN(strings.TrimSpace(homeDir)+"/.byoh/config", "/", 2)[1] //nolint: gomnd
+			config.destPath = strings.SplitAfterN(strings.TrimSpace(homeDir)+"/.byoh/config", "/", 2)[1] //nolint: mnd
 		} else {
 			config.sourcePath = TempKubeconfigPath
 			config.destPath = r.CommandArgs["--bootstrap-kubeconfig"]
