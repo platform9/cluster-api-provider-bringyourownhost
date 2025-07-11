@@ -88,7 +88,7 @@ type ByoHostStatus struct {
 
 	// Connected defines if the heartbeat is successfully received from the agent.
 	// +optional
-	Connected bool `json:"connected,omitempty"`
+	Connected bool `json:"connected"`
 
 	// LastHeartbeatCheckTime is the last time the controller checked for heartbeat.
 	// +optional
