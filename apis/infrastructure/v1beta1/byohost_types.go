@@ -80,6 +80,15 @@ type ByoHostStatus struct {
 	// network interfaces.
 	// +optional
 	Network []NetworkStatus `json:"network,omitempty"`
+
+	// LastHeartbeatTime is the last time the agent sent a heartbeat.
+	// This is used by the controller to determine if the host is still active.
+	// +optional
+	LastHeartbeatTime *metav1.Time `json:"lastHeartbeatTime,omitempty"`
+
+	// Connected defines if the heartbeat is successfully received from the agent.
+	// +optional
+	Connected bool `json:"connected,omitempty"`
 }
 
 //+kubebuilder:object:root=true
