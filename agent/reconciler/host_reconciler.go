@@ -13,6 +13,7 @@ import (
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/registration"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/common"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
@@ -22,6 +23,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
@@ -56,6 +58,7 @@ func (r *HostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctr
 		logger.Error(err, "error getting ByoHost")
 		return ctrl.Result{}, err
 	}
+
 	helper, _ := patch.NewHelper(byoHost, r.Client)
 	defer func() {
 		err = helper.Patch(ctx, byoHost)
@@ -64,6 +67,10 @@ func (r *HostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctr
 			reterr = err
 		}
 	}()
+
+	// Update the ByoHost LastHeartbeatTime
+	now := metav1.Now()
+	byoHost.Status.LastHeartbeatTime = &now
 
 	// Check for host cleanup annotation
 	hostAnnotations := byoHost.GetAnnotations()
@@ -216,6 +223,7 @@ func (r *HostReconciler) SetupWithManager(ctx context.Context, mgr manager.Manag
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&infrastructurev1beta1.ByoHost{}).
 		WithEventFilter(predicates.ResourceNotPaused(ctrl.LoggerFrom(ctx))).
+		WithEventFilter(predicate.ResourceVersionChangedPredicate{}).
 		Complete(r)
 }
 

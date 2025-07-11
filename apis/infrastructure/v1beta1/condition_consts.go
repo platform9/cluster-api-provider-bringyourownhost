@@ -85,3 +85,15 @@ const (
 	// or the resource is marked with Paused annotation
 	ClusterOrResourcePausedReason = "ClusterOrResourcePaused"
 )
+
+// AgentConnectedCondition is a condition that indicates whether the agent
+// on the host is connected and sending heartbeats.
+const (
+	AgentConnectedCondition clusterv1.ConditionType = "AgentConnected"
+
+	// HeartbeatReceivedReason is used when a heartbeat is received within the timeout.
+	HeartbeatReceivedReason string = "HeartbeatReceived"
+
+	// HeartbeatTimeoutReason is used when a heartbeat is not received within the timeout.
+	HeartbeatTimeoutReason string = "HeartbeatTimeout"
+)

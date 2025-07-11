@@ -16,3 +16,5 @@ spec:
           requests:
             cpu: "{{ .Values.resources.requests.cpu }}"
             memory: "{{ .Values.resources.requests.memory }}"
+        args:
+          - "--byohostagent-heartbeat-timeout={{ .Values.byohostAgentHeartbeatTimeout | default \"120s\" }}"
