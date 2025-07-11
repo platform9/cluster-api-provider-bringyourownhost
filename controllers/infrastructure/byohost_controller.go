@@ -8,6 +8,7 @@ import (
 	"time"
 
 	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
@@ -73,6 +74,9 @@ func (r *ByoHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ 
 		conditions.MarkFalse(byoHost, infrastructurev1beta1.AgentConnectedCondition, infrastructurev1beta1.HeartbeatTimeoutReason, clusterv1.ConditionSeverityWarning, "Heartbeat timeout detected")
 	}
 
+	// Update the ByoHost LastHeartbeatCheckTime
+	now := metav1.Now()
+	byoHost.Status.LastHeartbeatCheckTime = &now
 	err := retry.RetryOnConflict(DefaultRetry, func() error {
 		return r.Client.Status().Update(ctx, byoHost)
 	})

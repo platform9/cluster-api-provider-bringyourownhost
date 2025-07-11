@@ -89,6 +89,10 @@ type ByoHostStatus struct {
 	// Connected defines if the heartbeat is successfully received from the agent.
 	// +optional
 	Connected bool `json:"connected,omitempty"`
+
+	// LastHeartbeatCheckTime is the last time the controller checked for heartbeat.
+	// +optional
+	LastHeartbeatCheckTime *metav1.Time `json:"lastHeartbeatCheckTime,omitempty"`
 }
 
 //+kubebuilder:object:root=true
