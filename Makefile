@@ -130,7 +130,7 @@ cluster-templates-v1beta1: kustomize ## Generate cluster templates for v1beta1
 test: $(GINKGO) generate fmt vet manifests test-coverage ## Run unit tests
 
 test-coverage: prepare-byoh-docker-host-image ## Run test-coverage
-	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; $(GINKGO) --randomize-all -r --cover --coverprofile=cover.out --output-dir=. --skip-package=test .
+	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; $(GINKGO) --randomize-all -r --cover --coverprofile=cover.out --output-dir=. --skip-package=test --skip-package=agent .
 
 agent-test: prepare-byoh-docker-host-image ## Run agent tests
 	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; $(GINKGO) --randomize-all -r $(HOST_AGENT_DIR) --coverprofile cover.out
