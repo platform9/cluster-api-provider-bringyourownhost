@@ -23,6 +23,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
@@ -58,10 +59,6 @@ func (r *HostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctr
 		return ctrl.Result{}, err
 	}
 
-	// Update the ByoHost LastHeartbeatTime
-	now := metav1.Now()
-	byoHost.Status.LastHeartbeatTime = &now
-
 	helper, _ := patch.NewHelper(byoHost, r.Client)
 	defer func() {
 		err = helper.Patch(ctx, byoHost)
@@ -70,6 +67,10 @@ func (r *HostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctr
 			reterr = err
 		}
 	}()
+
+	// Update the ByoHost LastHeartbeatTime
+	now := metav1.Now()
+	byoHost.Status.LastHeartbeatTime = &now
 
 	// Check for host cleanup annotation
 	hostAnnotations := byoHost.GetAnnotations()
@@ -222,6 +223,7 @@ func (r *HostReconciler) SetupWithManager(ctx context.Context, mgr manager.Manag
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&infrastructurev1beta1.ByoHost{}).
 		WithEventFilter(predicates.ResourceNotPaused(ctrl.LoggerFrom(ctx))).
+		WithEventFilter(predicate.ResourceVersionChangedPredicate{}).
 		Complete(r)
 }
 

@@ -253,29 +253,15 @@ spec:
                   type: object
                 lastHeartbeatTime:
                   description: LastHeartbeatTime is the last time the agent sent a heartbeat.
-                  properties:
-                    time:
-                      description: |-
-                        Time is a wrapper around time.Time which supports correct
-                        marshaling to YAML and JSON.  Wrappers are provided for many
-                        of the factory methods that the time package offers.
-                      format: date-time
-                      type: string
-                  type: object
+                  format: date-time
+                  type: string
                 connected:
                   description: Connected defines if the heartbeat is successfully received from the agent.
                   type: boolean
                 lastHeartbeatCheckTime:
                   description: LastHeartbeatCheckTime is the last time the controller checked for heartbeat.
-                  properties:
-                    time:
-                      description: |-
-                        Time is a wrapper around time.Time which supports correct
-                        marshaling to YAML and JSON.  Wrappers are provided for many
-                        of the factory methods that the time package offers.
-                      format: date-time
-                      type: string
-                  type: object
+                  format: date-time
+                  type: string
                 machineRef:
                   description: |-
                     MachineRef is an optional reference to a Cluster API Machine
