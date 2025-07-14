@@ -89,7 +89,7 @@ func TestOnboardFlags(t *testing.T) {
 	if clientToken != "custom-token" {
 		t.Errorf("Expected client-token 'custom-token', got '%s'", clientToken)
 	}
-	
+
 	if verbosity != "debug" {
 		t.Errorf("Expected verbosity 'debug', got '%s'", verbosity)
 	}
@@ -127,7 +127,7 @@ func TestMutexFlags(t *testing.T) {
 }
 
 func TestRequiredFlags(t *testing.T) {
-	requiredFlags := []string{"username", "fqdn", "tenant", "client-token"}
+	requiredFlags := []string{"username", "fqdn", "client-token"}
 
 	for _, flagName := range requiredFlags {
 		t.Run("missing "+flagName, func(t *testing.T) {
@@ -167,6 +167,13 @@ func TestRequiredFlags(t *testing.T) {
 			if !strings.Contains(outputStr, "required") && !strings.Contains(outputStr, flagName) {
 				t.Errorf("Expected error message about required flag %s, got: %s", flagName, outputStr)
 			}
+
+			// If tenant is not provided, it should default to 'service'
+			if flagName == "tenant" {
+				if tenant != "service" {
+					t.Errorf("Expected default tenant 'service', got '%s'", tenant)
+				}
+			}
 		})
 	}
 }
@@ -190,7 +197,7 @@ func createTestCommand() *cobra.Command {
 	testCmd.Flags().BoolVarP(&passwordInteractive, "interactive", "i", false, "Prompt for password interactively")
 	testCmd.Flags().StringVarP(&fqdn, "fqdn", "f", "", "Platform9 FQDN")
 	testCmd.Flags().StringVarP(&domain, "domain", "d", "default", "Domain name")
-	testCmd.Flags().StringVarP(&tenant, "tenant", "t", "", "Tenant name")
+	testCmd.Flags().StringVarP(&tenant, "tenant", "t", "service", "Tenant name")
 	testCmd.Flags().StringVarP(&clientToken, "client-token", "c", "", "Client token for authentication")
 	testCmd.Flags().StringVarP(&verbosity, "verbosity", "v", "minimal", "Log verbosity level")
 
@@ -201,7 +208,6 @@ func createTestCommand() *cobra.Command {
 	testCmd.MarkFlagRequired("username")
 	testCmd.MarkFlagRequired("fqdn")
 	testCmd.MarkFlagRequired("client-token")
-	testCmd.MarkFlagRequired("tenant")
 
 	return testCmd
 }
