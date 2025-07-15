@@ -164,8 +164,8 @@ func (r *HostReconciler) executeInstallerController(ctx context.Context, byoHost
 		r.Recorder.Eventf(byoHost, corev1.EventTypeWarning, "ReadInstallationSecretFailed", "install script %s not found", byoHost.Spec.InstallationSecret.Name)
 		return err
 	}
-	installScriptBytes, ok := secret.Data["install"]
-	if !ok {
+	installScriptBytes, installOk := secret.Data["install"]
+	if !installOk {
 		return fmt.Errorf("install script not found in secret %s", secret.Name)
 	}
 	installScript := string(installScriptBytes)
@@ -309,6 +309,7 @@ func (r *HostReconciler) hostCleanUp(ctx context.Context, byoHost *infrastructur
 	}
 
 	byoHost.Spec.InstallationSecret = nil
+	byoHost.Spec.UninstallationSecret = nil
 	r.removeAnnotations(ctx, byoHost)
 	conditions.MarkFalse(byoHost, infrastructurev1beta1.K8sNodeBootstrapSucceeded, infrastructurev1beta1.K8sNodeAbsentReason, clusterv1.ConditionSeverityInfo, "")
 	return nil

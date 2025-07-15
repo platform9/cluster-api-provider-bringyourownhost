@@ -29,16 +29,17 @@ import (
 var _ = Describe("Byohost Agent Tests", func() {
 
 	var (
-		ctx                = context.TODO()
-		ns                 = "default"
-		hostName           = "test-host"
-		byoHost            *infrastructurev1beta1.ByoHost
-		byoMachine         *infrastructurev1beta1.ByoMachine
-		byoHostLookupKey   types.NamespacedName
-		bootstrapSecret    *corev1.Secret
-		installationSecret *corev1.Secret
-		recorder           *record.FakeRecorder
-		uninstallScript    string
+		ctx                  = context.TODO()
+		ns                   = "default"
+		hostName             = "test-host"
+		byoHost              *infrastructurev1beta1.ByoHost
+		byoMachine           *infrastructurev1beta1.ByoMachine
+		byoHostLookupKey     types.NamespacedName
+		bootstrapSecret      *corev1.Secret
+		installationSecret   *corev1.Secret
+		uninstallationSecret *corev1.Secret // <-- add this
+		recorder             *record.FakeRecorder
+		uninstallScript      string
 	)
 
 	BeforeEach(func() {
@@ -240,7 +241,7 @@ runCmd:
 					// assert events
 					events := eventutils.CollectEvents(recorder.Events)
 					Expect(events).Should(ConsistOf([]string{
-						fmt.Sprintf("Warning ReadInstallationSecretFailed install and uninstall script %s not found", byoHost.Spec.InstallationSecret.Name),
+						fmt.Sprintf("Warning ReadInstallationSecretFailed install script %s not found", byoHost.Spec.InstallationSecret.Name),
 					}))
 				})
 
@@ -392,14 +393,14 @@ runCmd:
 						// assert events
 						events := eventutils.CollectEvents(recorder.Events)
 						Expect(events).Should(ConsistOf([]string{
-							"Warning ReadInstallationSecretFailed install and uninstall script non-existent not found",
+							"Warning ReadInstallationSecretFailed install script non-existent not found",
 						}))
 
 					})
 
 					It("should set uninstall script in byohost spec", func() {
 						uninstallSecretName := "byoh-uninstall-" + byoHost.Name
-						uninstallSecret := &corev1.Secret{
+						uninstallationSecret = &corev1.Secret{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      uninstallSecretName,
 								Namespace: ns,
@@ -408,7 +409,7 @@ runCmd:
 								"uninstall": []byte(uninstallScript),
 							},
 						}
-						Expect(k8sClient.Create(ctx, uninstallSecret)).NotTo(HaveOccurred())
+						Expect(k8sClient.Create(ctx, uninstallationSecret)).NotTo(HaveOccurred())
 
 						byoHost.Spec.UninstallationSecret = &corev1.ObjectReference{
 							Kind:      "Secret",
@@ -540,7 +541,7 @@ runCmd:
 
 			It("should reset the node and set the Reason to K8sNodeAbsentReason", func() {
 				uninstallSecretName := "byoh-uninstall-" + byoHost.Name
-				uninstallSecret := &corev1.Secret{
+				uninstallationSecret = &corev1.Secret{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      uninstallSecretName,
 						Namespace: ns,
@@ -549,7 +550,7 @@ runCmd:
 						"uninstall": []byte(uninstallScript),
 					},
 				}
-				Expect(k8sClient.Create(ctx, uninstallSecret)).NotTo(HaveOccurred())
+				Expect(k8sClient.Create(ctx, uninstallationSecret)).NotTo(HaveOccurred())
 
 				byoHost.Spec.UninstallationSecret = &corev1.ObjectReference{
 					Kind:      "Secret",
@@ -611,7 +612,7 @@ runCmd:
 				fakeCommandRunner.RunCmdReturnsOnCall(1, errors.New("failed to execute uninstall script"))
 				uninstallScript = `testcommand`
 				uninstallSecretName := "byoh-uninstall-" + byoHost.Name
-				uninstallSecret := &corev1.Secret{
+				uninstallationSecret = &corev1.Secret{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      uninstallSecretName,
 						Namespace: ns,
@@ -620,7 +621,7 @@ runCmd:
 						"uninstall": []byte(uninstallScript),
 					},
 				}
-				Expect(k8sClient.Create(ctx, uninstallSecret)).NotTo(HaveOccurred())
+				Expect(k8sClient.Create(ctx, uninstallationSecret)).NotTo(HaveOccurred())
 				byoHost.Spec.UninstallationSecret = &corev1.ObjectReference{
 					Kind:      "Secret",
 					Namespace: ns,
@@ -644,7 +645,7 @@ runCmd:
 
 			It("should set K8sComponentsInstallationSucceeded to false if uninstall succeeds", func() {
 				uninstallSecretName := "byoh-uninstall-" + byoHost.Name
-				uninstallSecret := &corev1.Secret{
+				uninstallationSecret = &corev1.Secret{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      uninstallSecretName,
 						Namespace: ns,
@@ -653,7 +654,7 @@ runCmd:
 						"uninstall": []byte(uninstallScript),
 					},
 				}
-				Expect(k8sClient.Create(ctx, uninstallSecret)).NotTo(HaveOccurred())
+				Expect(k8sClient.Create(ctx, uninstallationSecret)).NotTo(HaveOccurred())
 				byoHost.Spec.UninstallationSecret = &corev1.ObjectReference{
 					Kind:      "Secret",
 					Namespace: ns,
@@ -682,7 +683,7 @@ runCmd:
 
 			It("It should reset byoHost.Spec.InstallationSecret if uninstall succeeds", func() {
 				uninstallSecretName := "byoh-uninstall-" + byoHost.Name
-				uninstallSecret := &corev1.Secret{
+				uninstallationSecret = &corev1.Secret{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      uninstallSecretName,
 						Namespace: ns,
@@ -691,7 +692,7 @@ runCmd:
 						"uninstall": []byte(uninstallScript),
 					},
 				}
-				Expect(k8sClient.Create(ctx, uninstallSecret)).NotTo(HaveOccurred())
+				Expect(k8sClient.Create(ctx, uninstallationSecret)).NotTo(HaveOccurred())
 				byoHost.Spec.UninstallationSecret = &corev1.ObjectReference{
 					Kind:      "Secret",
 					Namespace: ns,
@@ -712,7 +713,7 @@ runCmd:
 
 			It("It should reset byoHost.Spec.UninstallationSecret if uninstall succeeds", func() {
 				uninstallSecretName := "byoh-uninstall-" + byoHost.Name
-				uninstallSecret := &corev1.Secret{
+				uninstallationSecret = &corev1.Secret{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      uninstallSecretName,
 						Namespace: ns,
@@ -721,7 +722,7 @@ runCmd:
 						"uninstall": []byte(uninstallScript),
 					},
 				}
-				Expect(k8sClient.Create(ctx, uninstallSecret)).NotTo(HaveOccurred())
+				Expect(k8sClient.Create(ctx, uninstallationSecret)).NotTo(HaveOccurred())
 				byoHost.Spec.UninstallationSecret = &corev1.ObjectReference{
 					Kind:      "Secret",
 					Namespace: ns,
@@ -786,6 +787,30 @@ runCmd:
 				Expect(events).Should(ConsistOf([]string{
 					"Warning ResetK8sNodeFailed k8s Node Reset failed",
 				}))
+			})
+
+			It("should return error if the uninstallation secret does not contain the 'uninstall' key", func() {
+				uninstallSecretName := "byoh-uninstall-" + byoHost.Name
+				uninstallationSecret = &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      uninstallSecretName,
+						Namespace: ns,
+					},
+					Data: map[string][]byte{}, // no "uninstall" key
+				}
+				Expect(k8sClient.Create(ctx, uninstallationSecret)).NotTo(HaveOccurred())
+				byoHost.Spec.UninstallationSecret = &corev1.ObjectReference{
+					Kind:      "Secret",
+					Namespace: ns,
+					Name:      uninstallSecretName,
+				}
+				Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
+
+				result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
+					NamespacedName: byoHostLookupKey,
+				})
+				Expect(result).To(Equal(controllerruntime.Result{}))
+				Expect(reconcilerErr).To(MatchError(ContainSubstring("uninstall script not found in secret")))
 			})
 		})
 
