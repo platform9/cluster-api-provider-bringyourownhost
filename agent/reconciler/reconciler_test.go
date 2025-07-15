@@ -606,6 +606,11 @@ runCmd:
 				})
 				Expect(result).To(Equal(controllerruntime.Result{}))
 				Expect(reconcilerErr).To(MatchError("UninstallationSecret not found in Byohost " + byoHost.Name))
+
+				events := eventutils.CollectEvents(recorder.Events)
+				Expect(events).Should(ContainElement(
+					fmt.Sprintf("Warning ReadUninstallationSecretFailed uninstallation secret %s not found", "<nil>"),
+				))
 			})
 
 			It("should return error if uninstall script execution failed", func() {
@@ -811,6 +816,12 @@ runCmd:
 				})
 				Expect(result).To(Equal(controllerruntime.Result{}))
 				Expect(reconcilerErr).To(MatchError(ContainSubstring("uninstall script not found in secret")))
+
+				events := eventutils.CollectEvents(recorder.Events)
+				
+				Expect(events).NotTo(ContainElement(
+					fmt.Sprintf("Warning ReadUninstallationSecretFailed uninstallation secret %s not found", uninstallSecretName),
+				))
 			})
 		})
 
