@@ -192,22 +192,20 @@ func createTestCommand() *cobra.Command {
 	}
 
 	// Add the same flags as onboardCmd
-	testCmd.Flags().StringVarP(&username, "username", "u", "", "Username for authentication")
-	testCmd.Flags().StringVarP(&password, "password", "p", "", "Password for authentication")
-	testCmd.Flags().BoolVarP(&passwordInteractive, "interactive", "i", false, "Prompt for password interactively")
-	testCmd.Flags().StringVarP(&fqdn, "fqdn", "f", "", "Platform9 FQDN")
-	testCmd.Flags().StringVarP(&domain, "domain", "d", "default", "Domain name")
-	testCmd.Flags().StringVarP(&tenant, "tenant", "t", "service", "Tenant name")
-	testCmd.Flags().StringVarP(&clientToken, "client-token", "c", "", "Client token for authentication")
-	testCmd.Flags().StringVarP(&verbosity, "verbosity", "v", "minimal", "Log verbosity level")
-
-	// Mark mutual exclusivity
-	testCmd.MarkFlagsMutuallyExclusive("password", "interactive")
-
-	// Mark required flags
+	testCmd.Flags().StringVarP(&fqdn, "url", "u", "", "Platform9 FQDN")
+	testCmd.MarkFlagRequired("url")
+	testCmd.Flags().StringVarP(&username, "username", "e", "", "Platform9 username")
 	testCmd.MarkFlagRequired("username")
-	testCmd.MarkFlagRequired("fqdn")
+	testCmd.Flags().StringVarP(&password, "password", "p", "", "Platform9 password")
+	testCmd.Flags().BoolVar(&passwordInteractive, "password-interactive", false, "Enter password interactively")
+	testCmd.Flags().StringVarP(&clientToken, "client-token", "c", "", "Client token for authentication")
 	testCmd.MarkFlagRequired("client-token")
+	testCmd.Flags().StringVarP(&domain, "domain", "d", "default", "Platform9 domain")
+	testCmd.Flags().StringVarP(&tenant, "tenant", "t", "service", "Platform9 tenant")
+	testCmd.Flags().StringVarP(&verbosity, "verbosity", "v", "minimal", "Log verbosity level (all, important, minimal, critical, none)")
+	testCmd.MarkFlagsMutuallyExclusive("password", "password-interactive")
+	testCmd.Flags().StringVarP(&regionName, "region", "r", "", "Platform9 region where you want to onboard this host")
+	testCmd.MarkFlagRequired("region")
 
 	return testCmd
 }
