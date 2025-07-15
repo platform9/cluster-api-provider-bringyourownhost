@@ -49,11 +49,12 @@ func TestOnboardFlags(t *testing.T) {
 	args := []string{
 		"--username", "test@example.com",
 		"--password", "test-password",
-		"--fqdn", "test.platform9.com",
+		"--url", "test.platform9.com",
 		"--domain", "custom-domain",
 		"--tenant", "custom-tenant",
 		"--client-token", "custom-token",
 		"--verbosity", "debug",
+		"--region", "test-region",
 	}
 
 	testCmd.SetArgs(args)
@@ -103,10 +104,11 @@ func TestMutexFlags(t *testing.T) {
 	args := []string{
 		"--username", "testuser",
 		"--password", "testpass",
-		"--interactive",
-		"--fqdn", "test.example.com",
+		"--password-interactive",
+		"--url", "test.example.com",
 		"--tenant", "test-tenant",
 		"--client-token", "test-token",
+		"--region", "test-region",
 	}
 
 	testCmd.SetArgs(args)
@@ -127,7 +129,7 @@ func TestMutexFlags(t *testing.T) {
 }
 
 func TestRequiredFlags(t *testing.T) {
-	requiredFlags := []string{"username", "fqdn", "client-token"}
+	requiredFlags := []string{"username", "url", "client-token", "region"}
 
 	for _, flagName := range requiredFlags {
 		t.Run("missing "+flagName, func(t *testing.T) {
@@ -139,8 +141,8 @@ func TestRequiredFlags(t *testing.T) {
 			if flagName != "username" {
 				args = append(args, "--username", "testuser")
 			}
-			if flagName != "fqdn" {
-				args = append(args, "--fqdn", "test.example.com")
+			if flagName != "url" {
+				args = append(args, "--url", "test.example.com")
 			}
 			if flagName != "tenant" {
 				args = append(args, "--tenant", "testtenant")
@@ -148,7 +150,9 @@ func TestRequiredFlags(t *testing.T) {
 			if flagName != "client-token" {
 				args = append(args, "--client-token", "testtoken")
 			}
-
+			if flagName != "region" {
+				args = append(args, "--region", "test-region")
+			}
 			// Add either password or interactive
 			args = append(args, "--password", "testpass")
 
@@ -167,14 +171,28 @@ func TestRequiredFlags(t *testing.T) {
 			if !strings.Contains(outputStr, "required") && !strings.Contains(outputStr, flagName) {
 				t.Errorf("Expected error message about required flag %s, got: %s", flagName, outputStr)
 			}
-
-			// If tenant is not provided, it should default to 'service'
-			if flagName == "tenant" {
-				if tenant != "service" {
-					t.Errorf("Expected default tenant 'service', got '%s'", tenant)
-				}
-			}
 		})
+	}
+}
+
+func TestDefaultTenantValue(t *testing.T) {
+	// Reset global tenant variable
+	tenant = ""
+	testCmd := createTestCommand()
+	args := []string{
+		"--username", "testuser",
+		"--url", "test.example.com",
+		"--client-token", "testtoken",
+		"--region", "test-region",
+		"--password", "testpass",
+		// no --tenant flag
+	}
+	testCmd.SetArgs(args)
+	if err := testCmd.Execute(); err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	if tenant != "service" {
+		t.Errorf("Expected default tenant 'service', got '%s'", tenant)
 	}
 }
 
