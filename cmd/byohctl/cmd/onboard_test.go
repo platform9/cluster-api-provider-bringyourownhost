@@ -19,6 +19,7 @@ func TestOnboardFlags(t *testing.T) {
 	origTenant := tenant
 	origClientToken := clientToken
 	origVerbosity := verbosity
+	origRegionName := regionName
 
 	defer func() {
 		// Restore original values
@@ -30,6 +31,7 @@ func TestOnboardFlags(t *testing.T) {
 		tenant = origTenant
 		clientToken = origClientToken
 		verbosity = origVerbosity
+		regionName = origRegionName
 	}()
 
 	// Reset global flags
@@ -41,7 +43,7 @@ func TestOnboardFlags(t *testing.T) {
 	tenant = ""
 	clientToken = ""
 	verbosity = ""
-
+	regionName = ""
 	// Create a new test command with the same flag setup
 	testCmd := createTestCommand()
 
@@ -93,6 +95,10 @@ func TestOnboardFlags(t *testing.T) {
 
 	if verbosity != "debug" {
 		t.Errorf("Expected verbosity 'debug', got '%s'", verbosity)
+	}
+
+	if regionName != "test-region" {
+		t.Errorf("Expected region 'test-region', got '%s'", regionName)
 	}
 }
 
@@ -210,20 +216,11 @@ func createTestCommand() *cobra.Command {
 	}
 
 	// Add the same flags as onboardCmd
-	testCmd.Flags().StringVarP(&fqdn, "url", "u", "", "Platform9 FQDN")
-	testCmd.MarkFlagRequired("url")
-	testCmd.Flags().StringVarP(&username, "username", "e", "", "Platform9 username")
-	testCmd.MarkFlagRequired("username")
-	testCmd.Flags().StringVarP(&password, "password", "p", "", "Platform9 password")
-	testCmd.Flags().BoolVar(&passwordInteractive, "password-interactive", false, "Enter password interactively")
-	testCmd.Flags().StringVarP(&clientToken, "client-token", "c", "", "Client token for authentication")
-	testCmd.MarkFlagRequired("client-token")
-	testCmd.Flags().StringVarP(&domain, "domain", "d", "default", "Platform9 domain")
-	testCmd.Flags().StringVarP(&tenant, "tenant", "t", "service", "Platform9 tenant")
-	testCmd.Flags().StringVarP(&verbosity, "verbosity", "v", "minimal", "Log verbosity level (all, important, minimal, critical, none)")
-	testCmd.MarkFlagsMutuallyExclusive("password", "password-interactive")
-	testCmd.Flags().StringVarP(&regionName, "region", "r", "", "Platform9 region where you want to onboard this host")
-	testCmd.MarkFlagRequired("region")
+	AddOnboardFlags(
+		testCmd,
+		&fqdn, &username, &password, &passwordInteractive,
+		&clientToken, &domain, &tenant, &verbosity, &regionName,
+	)
 
 	return testCmd
 }
