@@ -37,7 +37,7 @@ var _ = Describe("Byohost Agent Tests", func() {
 		byoHostLookupKey     types.NamespacedName
 		bootstrapSecret      *corev1.Secret
 		installationSecret   *corev1.Secret
-		uninstallationSecret *corev1.Secret // <-- add this
+		uninstallationSecret *corev1.Secret
 		recorder             *record.FakeRecorder
 		uninstallScript      string
 	)
@@ -248,11 +248,11 @@ runCmd:
 				Context("When installation secret is ready", func() {
 					BeforeEach(func() {
 						installScript := `echo "install"`
-						uninstallScript = `echo "uninstall"`
+						// uninstallScript = `echo "uninstall"`
 
 						installationSecret = builder.Secret(ns, "test-secret3").
 							WithKeyData("install", installScript).
-							WithKeyData("uninstall", uninstallScript).
+							// WithKeyData("uninstall", uninstallScript).
 							Build()
 						Expect(k8sClient.Create(ctx, installationSecret)).NotTo(HaveOccurred())
 
@@ -801,7 +801,7 @@ runCmd:
 						Name:      uninstallSecretName,
 						Namespace: ns,
 					},
-					Data: map[string][]byte{}, // no "uninstall" key
+					Data: map[string][]byte{},
 				}
 				Expect(k8sClient.Create(ctx, uninstallationSecret)).NotTo(HaveOccurred())
 				byoHost.Spec.UninstallationSecret = &corev1.ObjectReference{
