@@ -14,6 +14,7 @@ import (
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+	"gopkg.in/yaml.v2"
 )
 
 var (
@@ -26,6 +27,7 @@ var (
 	clientToken         string
 	verbosity           string
 	regionName          string
+	configFile          string
 )
 
 var onboardCmd = &cobra.Command{
@@ -83,7 +85,68 @@ func isUbuntuSystem() bool {
 	return strings.Contains(string(data), "Ubuntu")
 }
 
+type OnboardConfig struct {
+	URL         string `yaml:"url"`
+	Username    string `yaml:"username"`
+	Password    string `yaml:"password"`
+	ClientToken string `yaml:"client-token"`
+	Domain      string `yaml:"domain"`
+	Tenant      string `yaml:"tenant"`
+	Verbosity   string `yaml:"verbosity"`
+	Region      string `yaml:"region"`
+}
+
+func LoadOnboardConfig(path string) (*OnboardConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var cfg OnboardConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+// Helper to merge config values with CLI flags
+func mergeConfigWithFlags(cfg *OnboardConfig) {
+	if fqdn == "" {
+		fqdn = cfg.URL
+	}
+	if username == "" {
+		username = cfg.Username
+	}
+	if password == "" {
+		password = cfg.Password
+	}
+	if clientToken == "" {
+		clientToken = cfg.ClientToken
+	}
+	if domain == "default" && cfg.Domain != "" {
+		domain = cfg.Domain
+	}
+	if tenant == "service" && cfg.Tenant != "" {
+		tenant = cfg.Tenant
+	}
+	if verbosity == "minimal" && cfg.Verbosity != "" {
+		verbosity = cfg.Verbosity
+	}
+	if regionName == "" {
+		regionName = cfg.Region
+	}
+}
+
 func runOnboard(cmd *cobra.Command, args []string) {
+	// If config file is provided, load it and use values as defaults for unset flags
+	if configFile != "" {
+		cfg, err := LoadOnboardConfig(configFile)
+		if err != nil {
+			fmt.Printf("Error loading config file: %v\n", err)
+			os.Exit(1)
+		}
+		mergeConfigWithFlags(cfg)
+	}
+
 	// Check if running on Ubuntu system
 	if !isUbuntuSystem() {
 		fmt.Println("Error: This command requires an Ubuntu system")
