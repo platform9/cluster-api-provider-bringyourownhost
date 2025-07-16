@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"os"
+
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -202,6 +204,168 @@ func TestDefaultTenantValue(t *testing.T) {
 	}
 }
 
+// Helper to create a temp config file
+func createTempConfigFile(t *testing.T, content string) string {
+	tmpfile, err := os.CreateTemp("", "onboard-config-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp config file: %v", err)
+	}
+	if _, err := tmpfile.Write([]byte(content)); err != nil {
+		t.Fatalf("Failed to write to temp config file: %v", err)
+	}
+	tmpfile.Close()
+	t.Cleanup(func() { os.Remove(tmpfile.Name()) })
+	return tmpfile.Name()
+}
+
+// Helper to reset global flags
+func resetOnboardGlobals() {
+	username = ""
+	password = ""
+	passwordInteractive = false
+	fqdn = ""
+	domain = ""
+	tenant = ""
+	clientToken = ""
+	verbosity = ""
+	regionName = ""
+	configFile = ""
+}
+
+func TestConfigFilePrecedence(t *testing.T) {
+	const configYAML = `
+url: "config.platform9.com"
+username: "configuser"
+password: "configpass"
+client-token: "config-token"
+domain: "config-domain"
+tenant: "config-tenant"
+verbosity: "important"
+region: "config-region"
+`
+	tests := []struct {
+		name string
+		args []string
+		want map[string]string
+	}{
+		{
+			name: "Config file only",
+			args: []string{"--config", "TMPFILE", "--password", ""},
+			want: map[string]string{
+				"fqdn":        "config.platform9.com",
+				"username":    "configuser",
+				"password":    "configpass",
+				"clientToken": "config-token",
+				"domain":      "config-domain",
+				"tenant":      "config-tenant",
+				"verbosity":   "important",
+				"regionName":  "config-region",
+			},
+		},
+		{
+			name: "CLI overrides config",
+			args: []string{
+				"--config", "TMPFILE",
+				"--username", "cliuser",
+				"--url", "cli.platform9.com",
+				"--client-token", "cli-token",
+				"--region", "cli-region",
+				"--password", "clipass",
+				"--domain", "cli-domain",
+				"--tenant", "cli-tenant",
+				"--verbosity", "debug",
+			},
+			want: map[string]string{
+				"fqdn":        "cli.platform9.com",
+				"username":    "cliuser",
+				"password":    "clipass",
+				"clientToken": "cli-token",
+				"domain":      "cli-domain",
+				"tenant":      "cli-tenant",
+				"verbosity":   "debug",
+				"regionName":  "cli-region",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetOnboardGlobals()
+			tmpfile := createTempConfigFile(t, configYAML)
+			var args []string
+			for _, arg := range tt.args {
+				if arg == "TMPFILE" {
+					args = append(args, tmpfile)
+				} else {
+					args = append(args, arg)
+				}
+			}
+			testCmd := createTestCommand()
+			testCmd.SetArgs(args)
+			if err := testCmd.Execute(); err != nil {
+				t.Fatalf("Expected no error, got: %v", err)
+			}
+			// Check expected values
+			for k, v := range tt.want {
+				var got string
+				switch k {
+				case "fqdn":
+					got = fqdn
+				case "username":
+					got = username
+				case "password":
+					got = password
+				case "clientToken":
+					got = clientToken
+				case "domain":
+					got = domain
+				case "tenant":
+					got = tenant
+				case "verbosity":
+					got = verbosity
+				case "regionName":
+					got = regionName
+				}
+				if got != v {
+					t.Errorf("Expected %s = '%s', got '%s'", k, v, got)
+				}
+			}
+		})
+	}
+}
+
+func TestConfigFileAndCLIDefaultFallback(t *testing.T) {
+	// No CLI or config, should use default for domain, tenant, verbosity
+	resetOnboardGlobals()
+	username = "testuser"
+	fqdn = "test.platform9.com"
+	clientToken = "testtoken"
+	regionName = "test-region"
+	password = "testpass"
+
+	testCmd := createTestCommand()
+	args := []string{
+		"--username", username,
+		"--url", fqdn,
+		"--client-token", clientToken,
+		"--region", regionName,
+		"--password", password,
+	}
+	testCmd.SetArgs(args)
+	if err := testCmd.Execute(); err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	if domain != "default" {
+		t.Errorf("Expected default domain, got '%s'", domain)
+	}
+	if tenant != "service" {
+		t.Errorf("Expected default tenant, got '%s'", tenant)
+	}
+	if verbosity != "minimal" {
+		t.Errorf("Expected default verbosity, got '%s'", verbosity)
+	}
+}
+
 // Helper function to create a test command with the same flag setup as onboardCmd
 func createTestCommand() *cobra.Command {
 	// Create a new command for testing
@@ -219,7 +383,7 @@ func createTestCommand() *cobra.Command {
 	AddOnboardFlags(
 		testCmd,
 		&fqdn, &username, &password, &passwordInteractive,
-		&clientToken, &domain, &tenant, &verbosity, &regionName,
+		&clientToken, &domain, &tenant, &verbosity, &regionName, &configFile,
 	)
 
 	return testCmd
