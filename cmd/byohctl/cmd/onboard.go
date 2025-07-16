@@ -42,22 +42,33 @@ This command will:
 }
 
 func init() {
-	onboardCmd.Flags().StringVarP(&fqdn, "url", "u", "", "Platform9 FQDN")
-	onboardCmd.MarkFlagRequired("url")
-	onboardCmd.Flags().StringVarP(&username, "username", "e", "", "Platform9 username")
-	onboardCmd.MarkFlagRequired("username")
-	onboardCmd.Flags().StringVarP(&password, "password", "p", "", "Platform9 password")
-	onboardCmd.Flags().BoolVar(&passwordInteractive, "password-interactive", false, "Enter password interactively")
-	onboardCmd.Flags().StringVarP(&clientToken, "client-token", "c", "", "Client token for authentication")
-	onboardCmd.MarkFlagRequired("client-token")
-	onboardCmd.Flags().StringVarP(&domain, "domain", "d", "default", "Platform9 domain")
-	onboardCmd.Flags().StringVarP(&tenant, "tenant", "t", "service", "Platform9 tenant")
-	onboardCmd.Flags().StringVarP(&verbosity, "verbosity", "v", "minimal", "Log verbosity level (all, important, minimal, critical, none)")
-	onboardCmd.MarkFlagsMutuallyExclusive("password", "password-interactive")
-	onboardCmd.Flags().StringVarP(&regionName, "region", "r", "", "Platform9 region where you want to onboard this host")
-	onboardCmd.MarkFlagRequired("region")
-
+	AddOnboardFlags(
+		onboardCmd,
+		&fqdn, &username, &password, &passwordInteractive,
+		&clientToken, &domain, &tenant, &verbosity, &regionName,
+	)
 	rootCmd.AddCommand(onboardCmd)
+}
+
+// AddOnboardFlags adds all flags for the onboard command to the given cobra.Command.
+func AddOnboardFlags(cmd *cobra.Command,
+	fqdn *string, username *string, password *string, passwordInteractive *bool,
+	clientToken *string, domain *string, tenant *string, verbosity *string, regionName *string,
+) {
+	cmd.Flags().StringVarP(fqdn, "url", "u", "", "Platform9 FQDN")
+	cmd.MarkFlagRequired("url")
+	cmd.Flags().StringVarP(username, "username", "e", "", "Platform9 username")
+	cmd.MarkFlagRequired("username")
+	cmd.Flags().StringVarP(password, "password", "p", "", "Platform9 password")
+	cmd.Flags().BoolVar(passwordInteractive, "password-interactive", false, "Enter password interactively")
+	cmd.Flags().StringVarP(clientToken, "client-token", "c", "", "Client token for authentication")
+	cmd.MarkFlagRequired("client-token")
+	cmd.Flags().StringVarP(domain, "domain", "d", "default", "Platform9 domain")
+	cmd.Flags().StringVarP(tenant, "tenant", "t", "service", "Platform9 tenant")
+	cmd.Flags().StringVarP(verbosity, "verbosity", "v", "minimal", "Log verbosity level (all, important, minimal, critical, none)")
+	cmd.MarkFlagsMutuallyExclusive("password", "password-interactive")
+	cmd.Flags().StringVarP(regionName, "region", "r", "", "Platform9 region where you want to onboard this host")
+	cmd.MarkFlagRequired("region")
 }
 
 // Check if running on Ubuntu
