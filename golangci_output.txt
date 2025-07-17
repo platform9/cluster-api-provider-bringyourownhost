@@ -1,0 +1,150 @@
+common/bootstraptoken/token.go:31:11: tokenSecret declared and not used (typecheck)
+	tokenID, tokenSecret, err := GetTokenIDSecretFromBootstrapToken(tokenStr)
+	         ^
+common/bootstraptoken/token.go:59:2: tokenID declared and not used (typecheck)
+	tokenID, tokenSecret, err := GetTokenIDSecretFromBootstrapToken(tokenStr)
+	^
+controllers/infrastructure/byomachine_controller.go:21:2: could not import k8s.io/apimachinery/pkg/selection (-: could not load export data: internal error in importing "k8s.io/apimachinery/pkg/selection" (unsupported version: 2); please report an issue) (typecheck)
+	"k8s.io/apimachinery/pkg/selection"
+	^
+controllers/infrastructure/k8sinstallerconfig_controller.go:258:14: r.Status undefined (type *K8sInstallerConfigReconciler has no field or method Status) (typecheck)
+	if err := r.Status().Update(ctx, scope.Config); err != nil {
+	            ^
+agent/reconciler/host_reconciler.go:16:2: could not import k8s.io/apimachinery/pkg/types (-: could not load export data: internal error in importing "k8s.io/apimachinery/pkg/types" (unsupported version: 2); please report an issue) (typecheck)
+	"k8s.io/apimachinery/pkg/types"
+	^
+agent/host_agent_test.go:32:2: could not import k8s.io/apimachinery/pkg/types (-: could not load export data: internal error in importing "k8s.io/apimachinery/pkg/types" (unsupported version: 2); please report an issue) (typecheck)
+	"k8s.io/apimachinery/pkg/types"
+	^
+agent/help_flag_test.go:16:9: undefined: Describe (typecheck)
+var _ = Describe("Help flag for host agent", func() {
+        ^
+agent/host_agent_suite_test.go:68:9: undefined: BeforeSuite (typecheck)
+var _ = BeforeSuite(func() {
+        ^
+agent/host_agent_suite_test.go:112:9: undefined: AfterSuite (typecheck)
+var _ = AfterSuite(func() {
+        ^
+agent/host_agent_test.go:39:9: undefined: Describe (typecheck)
+var _ = Describe("Agent", func() {
+        ^
+agent/host_agent_test.go:813:9: undefined: Describe (typecheck)
+var _ = Describe("Agent Unit Tests", func() {
+        ^
+agent/main.go:195:39: missing type in composite literal (typecheck)
+				&infrastructurev1beta1.ByoHost{}: {
+				                                  ^
+agent/help_flag_test.go:17:2: undefined: Context (typecheck)
+	Context("When the help flag is provided", func() {
+	^
+agent/help_flag_test.go:34:3: undefined: It (typecheck)
+		It("should output the expected option", func() {
+		^
+agent/help_flag_test.go:36:41: undefined: GinkgoWriter (typecheck)
+			session, err := gexec.Start(command, GinkgoWriter, GinkgoWriter)
+			                                     ^
+agent/help_flag_test.go:37:4: undefined: Expect (typecheck)
+			Expect(err).NotTo(HaveOccurred())
+			^
+agent/help_flag_test.go:38:4: undefined: Eventually (typecheck)
+			Eventually(session, "5s").Should(gexec.Exit())
+			^
+agent/help_flag_test.go:49:5: undefined: Expect (typecheck)
+				Expect(strings.TrimSpace(line)).To(BeElementOf(expectedOptions))
+				^
+agent/host_agent_suite_test.go:56:2: undefined: RegisterFailHandler (typecheck)
+	RegisterFailHandler(Fail)
+	^
+agent/host_agent_suite_test.go:57:2: undefined: RunSpecs (typecheck)
+	RunSpecs(t, "Agent Suite")
+	^
+agent/host_agent_suite_test.go:69:37: undefined: GinkgoWriter (typecheck)
+	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
+	                                   ^
+agent/host_agent_suite_test.go:81:2: undefined: Expect (typecheck)
+	Expect(err).NotTo(HaveOccurred())
+	^
+agent/host_agent_test.go:41:2: undefined: Context (typecheck)
+	Context("When the host is unable to register with the API server", func() {
+	^
+agent/host_agent_test.go:51:3: undefined: BeforeEach (typecheck)
+		BeforeEach(func() {
+		^
+agent/host_agent_test.go:65:3: undefined: AfterEach (typecheck)
+		AfterEach(func() {
+		^
+agent/host_agent_test.go:69:3: undefined: It (typecheck)
+		It("should not error out if the host already exists", func() {
+		^
+agent/host_agent_test.go:98:4: undefined: Consistently (typecheck)
+			Consistently(func() (done bool) {
+			^
+agent/host_agent_test.go:107:14: undefined: BeFalse (typecheck)
+			}).Should(BeFalse())
+			          ^
+agent/host_agent_test.go:111:2: undefined: Context (typecheck)
+	Context("When the host agent is able to connect to API Server", func() {
+	^
+agent/host_agent_test.go:123:3: undefined: BeforeEach (typecheck)
+		BeforeEach(func() {
+		^
+agent/host_agent_test.go:142:4: undefined: Eventually (typecheck)
+			Eventually(func() bool {
+			^
+agent/host_agent_test.go:151:18: undefined: BeTrue (typecheck)
+			}, 60).Should(BeTrue())
+			              ^
+agent/host_agent_test.go:154:3: undefined: AfterEach (typecheck)
+		AfterEach(func() {
+		^
+agent/host_agent_test.go:158:3: undefined: It (typecheck)
+		It("should register the BYOHost with the management cluster", func() {
+		^
+agent/host_agent_test.go:161:4: undefined: Eventually (typecheck)
+			Eventually(func() *infrastructurev1beta1.ByoHost {
+			^
+agent/host_agent_test.go:167:17: undefined: BeNil (typecheck)
+			}).ShouldNot(BeNil())
+			             ^
+agent/host_agent_test.go:179:14: undefined: Equal (typecheck)
+			}).Should(Equal(map[string]string{"site": "apac"}))
+			          ^
+agent/host_agent_test.go:192:4: undefined: Consistently (typecheck)
+			Consistently(func() (done bool) {
+			^
+agent/host_agent_test.go:201:29: undefined: BeTrue (typecheck)
+			}, time.Second*2).Should(BeTrue())
+			                         ^
+agent/host_agent_test.go:242:14: undefined: BeTrue (typecheck)
+			}).Should(BeTrue())
+			          ^
+agent/host_agent_test.go:259:4: undefined: Consistently (typecheck)
+			Consistently(func() (done bool) {
+			^
+agent/host_agent_test.go:276:4: undefined: BeforeEach (typecheck)
+			BeforeEach(func() {
+			^
+agent/host_agent_test.go:284:15: undefined: BeNil (typecheck)
+				}).Should(BeNil())
+				          ^
+agent/host_agent_test.go:341:20: undefined: Equal (typecheck)
+				}, 100).Should(Equal(corev1.ConditionTrue)) // installing K8s components is a lengthy operation, setting the timeout to 100s
+				               ^
+agent/host_agent_test.go:373:3: undefined: AfterEach (typecheck)
+		AfterEach(func() {
+		^
+agent/host_agent_test.go:543:3: undefined: JustAfterEach (typecheck)
+		JustAfterEach(func() {
+		^
+agent/host_agent_test.go:544:7: undefined: CurrentGinkgoTestDescription (typecheck)
+			if CurrentGinkgoTestDescription().Failed {
+			   ^
+agent/host_agent_test.go:636:14: undefined: BeNil (typecheck)
+			}).Should(BeNil())
+			          ^
+agent/host_agent_test.go:659:21: undefined: Equal (typecheck)
+			}, 10, 1).Should(Equal(fmt.Sprintf(registration.ByohCSRNameFormat, hostName)))
+			                 ^
+agent/cloudinit/cloudinit_suite_test.go:14:2: undefined: RegisterFailHandler (typecheck)
+	RegisterFailHandler(Fail)
+	^
