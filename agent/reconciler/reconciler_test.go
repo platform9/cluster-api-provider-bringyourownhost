@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 )
 
@@ -397,6 +398,24 @@ runCmd:
 					})
 
 					It("should set uninstall script in byohost spec", func() {
+						uninstallSecretName := "byoh-uninstall-" + byoHost.Name
+						uninstallSecret := &corev1.Secret{
+							ObjectMeta: metav1.ObjectMeta{
+								Name:      uninstallSecretName,
+								Namespace: ns,
+							},
+							Data: map[string][]byte{
+								"uninstall": []byte(uninstallScript),
+							},
+						}
+						Expect(k8sClient.Create(ctx, uninstallSecret)).NotTo(HaveOccurred())
+
+						byoHost.Spec.UninstallationSecret = &corev1.ObjectReference{
+							Kind:      "Secret",
+							Namespace: ns,
+							Name:      uninstallSecretName,
+						}
+
 						result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 							NamespacedName: byoHostLookupKey,
 						})
@@ -406,8 +425,8 @@ runCmd:
 						updatedByoHost := &infrastructurev1beta1.ByoHost{}
 						err := k8sClient.Get(ctx, byoHostLookupKey, updatedByoHost)
 						Expect(err).ToNot(HaveOccurred())
-						Expect(updatedByoHost.Spec.UninstallationScript).NotTo(BeNil())
-						Expect(*updatedByoHost.Spec.UninstallationScript).To(Equal(uninstallScript))
+						Expect(updatedByoHost.Spec.UninstallationSecret).NotTo(BeNil())
+						Expect(updatedByoHost.Spec.UninstallationSecret.Name).To(Equal(uninstallSecretName))
 					})
 
 					It("should set K8sComponentsInstallationSucceeded to true if Install succeeds", func() {
@@ -520,8 +539,23 @@ runCmd:
 			})
 
 			It("should reset the node and set the Reason to K8sNodeAbsentReason", func() {
+				uninstallSecretName := "byoh-uninstall-" + byoHost.Name
+				uninstallSecret := &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      uninstallSecretName,
+						Namespace: ns,
+					},
+					Data: map[string][]byte{
+						"uninstall": []byte(uninstallScript),
+					},
+				}
+				Expect(k8sClient.Create(ctx, uninstallSecret)).NotTo(HaveOccurred())
 
-				byoHost.Spec.UninstallationScript = &uninstallScript
+				byoHost.Spec.UninstallationSecret = &corev1.ObjectReference{
+					Kind:      "Secret",
+					Namespace: ns,
+					Name:      uninstallSecretName,
+				}
 				Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
 
 				result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
@@ -544,6 +578,8 @@ runCmd:
 				Expect(updatedByoHost.Annotations).NotTo(HaveKey(infrastructurev1beta1.EndPointIPAnnotation))
 				Expect(updatedByoHost.Annotations).NotTo(HaveKey(infrastructurev1beta1.K8sVersionAnnotation))
 				Expect(updatedByoHost.Annotations).NotTo(HaveKey(infrastructurev1beta1.BundleLookupBaseRegistryAnnotation))
+				Expect(updatedByoHost.Spec.UninstallationSecret).NotTo(BeNil())
+				Expect(updatedByoHost.Spec.UninstallationSecret.Name).To(Equal(uninstallSecretName))
 
 				k8sNodeBootstrapSucceeded := conditions.Get(updatedByoHost, infrastructurev1beta1.K8sNodeBootstrapSucceeded)
 				Expect(*k8sNodeBootstrapSucceeded).To(conditions.MatchCondition(clusterv1.Condition{
@@ -560,21 +596,36 @@ runCmd:
 				}))
 			})
 
-			It("should return an error if we fail to load the uninstallation script", func() {
-				byoHost.Spec.UninstallationScript = nil
+			It("should return an error if we fail to load the uninstallation secret", func() {
+				byoHost.Spec.UninstallationSecret = nil
 				Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
 
 				result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 					NamespacedName: byoHostLookupKey,
 				})
 				Expect(result).To(Equal(controllerruntime.Result{}))
-				Expect(reconcilerErr).To(MatchError("UninstallationScript not found in Byohost " + byoHost.Name))
+				Expect(reconcilerErr).To(MatchError("UninstallationSecret not found in Byohost " + byoHost.Name))
 			})
 
-			It("should return error if uninstall script execution failed ", func() {
+			It("should return error if uninstall script execution failed", func() {
 				fakeCommandRunner.RunCmdReturnsOnCall(1, errors.New("failed to execute uninstall script"))
 				uninstallScript = `testcommand`
-				byoHost.Spec.UninstallationScript = &uninstallScript
+				uninstallSecretName := "byoh-uninstall-" + byoHost.Name
+				uninstallSecret := &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      uninstallSecretName,
+						Namespace: ns,
+					},
+					Data: map[string][]byte{
+						"uninstall": []byte(uninstallScript),
+					},
+				}
+				Expect(k8sClient.Create(ctx, uninstallSecret)).NotTo(HaveOccurred())
+				byoHost.Spec.UninstallationSecret = &corev1.ObjectReference{
+					Kind:      "Secret",
+					Namespace: ns,
+					Name:      uninstallSecretName,
+				}
 				Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
 
 				result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
@@ -592,7 +643,22 @@ runCmd:
 			})
 
 			It("should set K8sComponentsInstallationSucceeded to false if uninstall succeeds", func() {
-				byoHost.Spec.UninstallationScript = &uninstallScript
+				uninstallSecretName := "byoh-uninstall-" + byoHost.Name
+				uninstallSecret := &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      uninstallSecretName,
+						Namespace: ns,
+					},
+					Data: map[string][]byte{
+						"uninstall": []byte(uninstallScript),
+					},
+				}
+				Expect(k8sClient.Create(ctx, uninstallSecret)).NotTo(HaveOccurred())
+				byoHost.Spec.UninstallationSecret = &corev1.ObjectReference{
+					Kind:      "Secret",
+					Namespace: ns,
+					Name:      uninstallSecretName,
+				}
 				Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
 
 				result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
@@ -615,7 +681,22 @@ runCmd:
 			})
 
 			It("It should reset byoHost.Spec.InstallationSecret if uninstall succeeds", func() {
-				byoHost.Spec.UninstallationScript = &uninstallScript
+				uninstallSecretName := "byoh-uninstall-" + byoHost.Name
+				uninstallSecret := &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      uninstallSecretName,
+						Namespace: ns,
+					},
+					Data: map[string][]byte{
+						"uninstall": []byte(uninstallScript),
+					},
+				}
+				Expect(k8sClient.Create(ctx, uninstallSecret)).NotTo(HaveOccurred())
+				byoHost.Spec.UninstallationSecret = &corev1.ObjectReference{
+					Kind:      "Secret",
+					Namespace: ns,
+					Name:      uninstallSecretName,
+				}
 				Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
 				result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 					NamespacedName: byoHostLookupKey,
@@ -629,8 +710,23 @@ runCmd:
 				Expect(updatedByoHost.Spec.InstallationSecret).To(BeNil())
 			})
 
-			It("It should reset byoHost.Spec.UninstallationScript if uninstall succeeds", func() {
-				byoHost.Spec.UninstallationScript = &uninstallScript
+			It("It should reset byoHost.Spec.UninstallationSecret if uninstall succeeds", func() {
+				uninstallSecretName := "byoh-uninstall-" + byoHost.Name
+				uninstallSecret := &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      uninstallSecretName,
+						Namespace: ns,
+					},
+					Data: map[string][]byte{
+						"uninstall": []byte(uninstallScript),
+					},
+				}
+				Expect(k8sClient.Create(ctx, uninstallSecret)).NotTo(HaveOccurred())
+				byoHost.Spec.UninstallationSecret = &corev1.ObjectReference{
+					Kind:      "Secret",
+					Namespace: ns,
+					Name:      uninstallSecretName,
+				}
 				Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
 
 				result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
@@ -642,7 +738,7 @@ runCmd:
 				updatedByoHost := &infrastructurev1beta1.ByoHost{}
 				err := k8sClient.Get(ctx, byoHostLookupKey, updatedByoHost)
 				Expect(err).ToNot(HaveOccurred())
-				Expect(updatedByoHost.Spec.UninstallationScript).To(BeNil())
+				Expect(updatedByoHost.Spec.UninstallationSecret).To(BeNil())
 			})
 
 			It("should skip uninstallation if skip-installation flag is set", func() {
