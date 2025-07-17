@@ -63,19 +63,19 @@ func AddOnboardFlags(cmd *cobra.Command,
 	clientToken *string, domain *string, tenant *string, verbosity *string, regionName *string, configFile *string,
 ) {
 	cmd.Flags().StringVarP(fqdn, "url", "u", "", "Platform9 FQDN")
-	cmd.MarkFlagRequired("url")
+	// cmd.MarkFlagRequired("url")
 	cmd.Flags().StringVarP(username, "username", "e", "", "Platform9 username")
-	cmd.MarkFlagRequired("username")
+	// cmd.MarkFlagRequired("username")
 	cmd.Flags().StringVarP(password, "password", "p", "", "Platform9 password")
 	cmd.Flags().BoolVar(passwordInteractive, "password-interactive", false, "Enter password interactively")
 	cmd.Flags().StringVarP(clientToken, "client-token", "c", "", "Client token for authentication")
-	cmd.MarkFlagRequired("client-token")
+	// cmd.MarkFlagRequired("client-token")
 	cmd.Flags().StringVarP(domain, "domain", "d", "default", "Platform9 domain")
 	cmd.Flags().StringVarP(tenant, "tenant", "t", "service", "Platform9 tenant")
 	cmd.Flags().StringVarP(verbosity, "verbosity", "v", "minimal", "Log verbosity level (all, important, minimal, critical, none)")
 	cmd.MarkFlagsMutuallyExclusive("password", "password-interactive")
 	cmd.Flags().StringVarP(regionName, "region", "r", "", "Platform9 region where you want to onboard this host")
-	cmd.MarkFlagRequired("region")
+	// cmd.MarkFlagRequired("region")
 	cmd.Flags().StringVarP(configFile, "config", "f", "", "Path to onboarding config YAML file")
 }
 
@@ -155,16 +155,16 @@ func runOnboard(cmd *cobra.Command, args []string) {
 
 	missing := []string{}
 	if fqdn == "" {
-		missing = append(missing, "--url")
+		missing = append(missing, "--url (or config file 'url")
 	}
 	if username == "" {
-		missing = append(missing, "--username")
+        missing = append(missing, "--username (or config file 'username')")
 	}
 	if clientToken == "" {
-		missing = append(missing, "--client-token")
+        missing = append(missing, "--client-token (or config file 'client-token')")
 	}
 	if regionName == "" {
-		missing = append(missing, "--region")
+        missing = append(missing, "--region (or config file 'region')")
 	}
 	if len(missing) > 0 {
 		fmt.Printf("Error: missing required flags: %s\n", strings.Join(missing, ", "))
@@ -173,8 +173,6 @@ func runOnboard(cmd *cobra.Command, args []string) {
 
 	utils.LogDebug("Final onboarding values: url=%s, username=%s, domain=%s, tenant=%s, region=%s, verbosity=%s",
 		fqdn, username, domain, tenant, regionName, verbosity)
-
-	// Step 8: (Unit tests for config/flag precedence should be added/updated in onboard_test.go)
 
 	// Check if running on Ubuntu system
 	if !isUbuntuSystem() {

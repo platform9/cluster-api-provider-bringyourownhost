@@ -174,9 +174,8 @@ func TestRequiredFlags(t *testing.T) {
 				t.Errorf("Expected error when missing required flag %s, but got nil", flagName)
 			}
 
-			// Check if the error message contains information about the required flag
 			outputStr := output.String()
-			if !strings.Contains(outputStr, "required") && !strings.Contains(outputStr, flagName) {
+			if !strings.Contains(outputStr, "Error: missing required values") || !strings.Contains(outputStr, flagName) {
 				t.Errorf("Expected error message about required flag %s, got: %s", flagName, outputStr)
 			}
 		})
