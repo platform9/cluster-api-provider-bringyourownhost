@@ -13,7 +13,7 @@ const (
 	DefaultFilePerms = 0644
 
 	// ByohAgentDebPackageURL is the URL to download the agent package
-	ByohAgentDebPackageURL = "quay.io/platform9/byoh-agent-deb:0.1.200"
+	ByohAgentDebPackageURL = "quay.io/platform9/byoh-agent-deb:0.1.276"
 	// ByohAgentDebPackageFilename is the filename of the agent package
 	ByohAgentDebPackageFilename = "pf9-byohost-agent.deb"
 	// ByohAgentServiceName is the name of the agent service

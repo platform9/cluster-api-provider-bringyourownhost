@@ -251,6 +251,17 @@ spec:
                       description: The Operating System reported by the host.
                       type: string
                   type: object
+                lastHeartbeatTime:
+                  description: LastHeartbeatTime is the last time the agent sent a heartbeat.
+                  format: date-time
+                  type: string
+                connected:
+                  description: Connected defines if the heartbeat is successfully received from the agent.
+                  type: boolean
+                lastHeartbeatCheckTime:
+                  description: LastHeartbeatCheckTime is the last time the controller checked for heartbeat.
+                  format: date-time
+                  type: string
                 machineRef:
                   description: |-
                     MachineRef is an optional reference to a Cluster API Machine

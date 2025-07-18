@@ -7,6 +7,7 @@ import (
 	"context"
 	"flag"
 	"os"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -34,11 +35,12 @@ import (
 )
 
 var (
-	scheme               = runtime.NewScheme()
-	setupLog             = ctrl.Log.WithName("setup")
-	metricsAddr          string
-	enableLeaderElection bool
-	probeAddr            string
+	scheme                       = runtime.NewScheme()
+	setupLog                     = ctrl.Log.WithName("setup")
+	metricsAddr                  string
+	enableLeaderElection         bool
+	probeAddr                    string
+	byohostAgentHeartbeatTimeout time.Duration
 )
 
 func init() {
@@ -59,6 +61,7 @@ func setFlags() {
 	flag.BoolVar(&enableLeaderElection, "enable-leader-election", false,
 		"Enable leader election for controller manager. Enabling this will ensure there is only one active controller manager.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+	flag.DurationVar(&byohostAgentHeartbeatTimeout, "byohostagent-heartbeat-timeout", 120*time.Second, "The duration after which the agent is considered to be disconnected.")
 	flag.Parse()
 }
 
@@ -109,6 +112,9 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "ByoMachine")
 		os.Exit(1)
 	}
+
+	byohcontrollers.HeartbeatTimeoutPeriod = byohostAgentHeartbeatTimeout
+
 	if err = (&byohcontrollers.ByoHostReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
