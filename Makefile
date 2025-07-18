@@ -98,7 +98,7 @@ GOLANGCI_LINT = $(shell pwd)/bin/golangci-lint
 lint: golangci-lint
 	${GOLANGCI_LINT} run
 golangci-lint:
-	[ -e ${GOLANGCI_LINT} ] || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(shell pwd)/bin v1.50.0
+	[ -e ${GOLANGCI_LINT} ] || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(shell pwd)/bin v1.64.8
 
 ##@ Build
 
@@ -130,7 +130,7 @@ cluster-templates-v1beta1: kustomize ## Generate cluster templates for v1beta1
 test: $(GINKGO) generate fmt vet manifests test-coverage ## Run unit tests
 
 test-coverage: prepare-byoh-docker-host-image ## Run test-coverage
-	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; $(GINKGO) --randomize-all -r --cover --coverprofile=cover.out --output-dir=. --skip-package=test .
+	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; $(GINKGO) --randomize-all -r --cover --coverprofile=cover.out --output-dir=. --skip-package=test --skip-package=agent .
 
 agent-test: prepare-byoh-docker-host-image ## Run agent tests
 	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; $(GINKGO) --randomize-all -r $(HOST_AGENT_DIR) --coverprofile cover.out

@@ -304,7 +304,7 @@ var _ = Describe("Agent", func() {
 					Name:      fakeBootstrapSecret.Name,
 				}
 
-				fakeInstallationSecret := builder.Secret(ns.Name, fakeInstallationSecret).WithData("echo install-k8s").Build()
+				fakeInstallationSecret := builder.Secret(ns.Name, fakeInstallationSecret).WithData("echo install-k8s").WithKeyData("install", "echo install-k8s").Build()
 				err = k8sClient.Create(ctx, fakeInstallationSecret)
 				Expect(err).ToNot(HaveOccurred())
 
