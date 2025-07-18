@@ -7,7 +7,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"html/template"
+	"text/template"
 	"strings"
 )
 
