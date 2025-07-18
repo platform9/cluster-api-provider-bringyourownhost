@@ -156,16 +156,16 @@ func (r *K8sInstallerConfigReconciler) reconcileNormal(ctx context.Context, scop
 	}
 
 	// creating installation secret
-	if err := r.storeInstallationData(ctx, scope, installerObj.Install(), installerObj.Uninstall()); err != nil {
+	if err := r.storeInstallationAndUninstallationData(ctx, scope, installerObj.Install(), installerObj.Uninstall()); err != nil {
 		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, nil
 }
 
-// storeInstallationData creates a new secret with the install and unstall data passed in as input,
+// storeInstallationAndUninstallationData creates a new secret with the install and unstall data passed in as input,
 // sets the reference in the configuration status and ready to true.
-func (r *K8sInstallerConfigReconciler) storeInstallationData(ctx context.Context, scope *k8sInstallerConfigScope, install, uninstall string) error {
+func (r *K8sInstallerConfigReconciler) storeInstallationAndUninstallationData(ctx context.Context, scope *k8sInstallerConfigScope, install, uninstall string) error {
 	logger := scope.Logger
 	logger.Info("creating installation and uninstallation secrets")
 
