@@ -8,8 +8,14 @@ import (
 )
 
 const (
-	// systemdCgroupConfig is the command to enable systemd cgroup in containerd for Ubuntu 22.04
-	systemdCgroupConfig = "sed -i s/SystemdCgroup\\ =\\ false/SystemdCgroup\\ =\\ true/ /etc/containerd/config.toml"
+	// systemdCgroupConfig is the command to enable systemd cgroup and ensure CRI plugin is enabled in containerd for Ubuntu 22.04
+	systemdCgroupConfig = `sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+# Ensure CRI plugin is enabled
+sed -i 's/disabled_plugins = \["cri"\]/disabled_plugins = []/' /etc/containerd/config.toml
+# Ensure CRI plugin section exists and is properly configured
+if ! grep -q "\[plugins.\"io.containerd.grpc.v1.cri\"\]" /etc/containerd/config.toml; then
+  echo '[plugins."io.containerd.grpc.v1.cri"]' >> /etc/containerd/config.toml
+fi`
 )
 
 // Ubuntu22_04Installer represent the installer implementation for ubuntu22.04.* os distribution
