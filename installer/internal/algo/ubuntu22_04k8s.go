@@ -8,27 +8,19 @@ import (
 )
 
 const (
-	// systemdCgroupConfig is the command to enable systemd cgroup and ensure CRI plugin is enabled in containerd for Ubuntu 22.04
-	systemdCgroupConfig = `# Configure containerd for Ubuntu 22.04
-cat > /tmp/containerd_fix.sh << 'CONTAINERD_EOF'
-#!/bin/bash
-# Enable systemd cgroup
+	// systemdCgroupConfig contains containerd configuration fixes for Ubuntu 22.04.
+	// 1. Enable systemd cgroup.
+	// 2. Remove "cri" from disabled_plugins list so that the CRI plugin is enabled.
+	// 3. Add a basic CRI plugin configuration block if it is missing.
+	systemdCgroupConfig = `# Enable systemd cgroup in containerd
 sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
-# Remove any disabled_plugins line containing cri
-sed -i '/disabled_plugins.*cri/d' /etc/containerd/config.toml
-# Add empty disabled_plugins if not present
-if ! grep -q disabled_plugins /etc/containerd/config.toml; then
-  sed -i '/version = 2/a disabled_plugins = []' /etc/containerd/config.toml
-fi
-# Add CRI plugin section if not present
-if ! grep -q 'plugins.*io.containerd.grpc.v1.cri' /etc/containerd/config.toml; then
-  echo >> /etc/containerd/config.toml
-  echo '[plugins."io.containerd.grpc.v1.cri"]' >> /etc/containerd/config.toml
-fi
-CONTAINERD_EOF
-chmod +x /tmp/containerd_fix.sh
-/tmp/containerd_fix.sh
-rm -f /tmp/containerd_fix.sh`
+# Remove cri from disabled_plugins list if present
+sed -i '/disabled_plugins/s/"cri",*//g' /etc/containerd/config.toml
+# Add CRI plugin configuration block if not present
+grep -q '\[plugins."io.containerd.grpc.v1.cri"\]' /etc/containerd/config.toml || cat <<'EOF' >> /etc/containerd/config.toml
+[plugins."io.containerd.grpc.v1.cri"]
+  sandbox_image = "registry.k8s.io/pause:3.9"
+EOF`
 )
 
 // Ubuntu22_04Installer represent the installer implementation for ubuntu22.04.* os distribution
