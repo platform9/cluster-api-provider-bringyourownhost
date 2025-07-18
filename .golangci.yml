@@ -5,10 +5,6 @@ service:
 
 run:
   timeout: 10m
-  skip-dirs:
-    - ".*fakes/"
-  skip-files:
-    - ".*dummy.go"
 
 linters:
   disable-all: true
@@ -137,6 +133,10 @@ linters-settings:
     excludes:
       - G115 
 issues:
+  exclude-dirs:
+    - ".*fakes/"
+  exclude-files:
+    - ".*dummy.go"
   exclude-rules:
     # Exclude some linters from running on tests files.
     - path: _test\.go
