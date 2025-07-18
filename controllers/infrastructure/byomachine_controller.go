@@ -473,7 +473,7 @@ func (r *ByoMachineReconciler) getInstallerConfigAndHelper(ctx context.Context, 
 	if err != nil {
 		return installerConfig, nil, ctrl.Result{}, err
 	}
-	return installerConfig, helper, ctrl.Result{}, err
+	return installerConfig, helper, ctrl.Result{}, nil
 }
 
 func (r *ByoMachineReconciler) setInstallationSecretForByoHost(ctx context.Context, machineScope *byoMachineScope) (ctrl.Result, error) {
