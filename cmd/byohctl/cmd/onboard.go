@@ -63,19 +63,15 @@ func AddOnboardFlags(cmd *cobra.Command,
 	clientToken *string, domain *string, tenant *string, verbosity *string, regionName *string, configFile *string,
 ) {
 	cmd.Flags().StringVarP(fqdn, "url", "u", "", "Platform9 FQDN")
-	// cmd.MarkFlagRequired("url")
 	cmd.Flags().StringVarP(username, "username", "e", "", "Platform9 username")
-	// cmd.MarkFlagRequired("username")
 	cmd.Flags().StringVarP(password, "password", "p", "", "Platform9 password")
 	cmd.Flags().BoolVar(passwordInteractive, "password-interactive", false, "Enter password interactively")
 	cmd.Flags().StringVarP(clientToken, "client-token", "c", "", "Client token for authentication")
-	// cmd.MarkFlagRequired("client-token")
 	cmd.Flags().StringVarP(domain, "domain", "d", "default", "Platform9 domain")
 	cmd.Flags().StringVarP(tenant, "tenant", "t", "service", "Platform9 tenant")
 	cmd.Flags().StringVarP(verbosity, "verbosity", "v", "minimal", "Log verbosity level (all, important, minimal, critical, none)")
 	cmd.MarkFlagsMutuallyExclusive("password", "password-interactive")
 	cmd.Flags().StringVarP(regionName, "region", "r", "", "Platform9 region where you want to onboard this host")
-	// cmd.MarkFlagRequired("region")
 	cmd.Flags().StringVarP(configFile, "config", "f", "", "Path to onboarding config YAML file")
 }
 
