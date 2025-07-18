@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"go/build"
 	"os"
 	"path/filepath"
@@ -138,6 +139,15 @@ func writeKubeConfig() {
 
 	_, err = getKubeConfig().Write(kubeConfigData)
 	Expect(err).NotTo(HaveOccurred())
+
+	// Debug: print file size and contents
+	stat, err := getKubeConfig().Stat()
+	Expect(err).NotTo(HaveOccurred())
+	fmt.Printf("Kubeconfig written to: %s (size: %d bytes)\n", getKubeConfig().Name(), stat.Size())
+
+	contents, err := os.ReadFile(getKubeConfig().Name())
+	Expect(err).NotTo(HaveOccurred())
+	fmt.Println("Kubeconfig contents:\n", string(contents))
 }
 
 func setupTestInfra(ctx context.Context, hostname, kubeconfig string, namespace *corev1.Namespace) *e2e.ByoHostRunner {
