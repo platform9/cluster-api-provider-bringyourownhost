@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"encoding/base64"
+
 	dockertypes "github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	dClient "github.com/docker/docker/client"
@@ -25,6 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -140,7 +143,7 @@ func writeKubeConfig() {
 	_, err = getKubeConfig().Write(kubeConfigData)
 	Expect(err).NotTo(HaveOccurred())
 
-	// Debug: print file size and contents
+	// Debug: print file size and contents after writing
 	stat, err := getKubeConfig().Stat()
 	Expect(err).NotTo(HaveOccurred())
 	fmt.Printf("Kubeconfig written to: %s (size: %d bytes)\n", getKubeConfig().Name(), stat.Size())
@@ -148,6 +151,21 @@ func writeKubeConfig() {
 	contents, err := os.ReadFile(getKubeConfig().Name())
 	Expect(err).NotTo(HaveOccurred())
 	fmt.Println("Kubeconfig contents:\n", string(contents))
+
+	// Print decoded PEM data for cert and key
+	configObj, err := clientcmd.LoadFromFile(getKubeConfig().Name())
+	Expect(err).NotTo(HaveOccurred())
+	userObj := configObj.AuthInfos["envtest"]
+	printDecodedPEM := func(field string, data []byte) {
+		decoded, err := base64.StdEncoding.DecodeString(string(data))
+		if err != nil {
+			fmt.Printf("Failed to decode %s: %v\n", field, err)
+			return
+		}
+		fmt.Printf("%s:\n%s\n", field, string(decoded))
+	}
+	printDecodedPEM("client-certificate-data", userObj.ClientCertificateData)
+	printDecodedPEM("client-key-data", userObj.ClientKeyData)
 }
 
 func setupTestInfra(ctx context.Context, hostname, kubeconfig string, namespace *corev1.Namespace) *e2e.ByoHostRunner {
