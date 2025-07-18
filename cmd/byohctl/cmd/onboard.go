@@ -14,6 +14,7 @@ import (
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+	"gopkg.in/yaml.v2"
 )
 
 var (
@@ -26,6 +27,7 @@ var (
 	clientToken         string
 	verbosity           string
 	regionName          string
+	configFile          string
 )
 
 var onboardCmd = &cobra.Command{
@@ -35,9 +37,14 @@ var onboardCmd = &cobra.Command{
 This command will:
 1. Authenticate with Platform9
 2. Get required configuration
-3. Setup the host for management`,
+3. Setup the host for management
+
+You can provide input values via CLI flags or a YAML config file using --config/-f, or a combination of both..
+CLI flags take precedence over config file values.`,
 	Example: `  byohctl onboard -u your-fqdn.platform9.com -e admin@platform9.com -c client-token
-  byohctl onboard -u your-fqdn.platform9.com -e admin@platform9.com -c client-token -d custom-domain -t custom-tenant`,
+  byohctl onboard -u your-fqdn.platform9.com -e admin@platform9.com -c client-token -d custom-domain -t custom-tenant
+  byohctl onboard --config onboard-config.yaml
+  byohctl onboard --config onboard-config.yaml --username overrideuser`,
 	Run: runOnboard,
 }
 
@@ -45,7 +52,7 @@ func init() {
 	AddOnboardFlags(
 		onboardCmd,
 		&fqdn, &username, &password, &passwordInteractive,
-		&clientToken, &domain, &tenant, &verbosity, &regionName,
+		&clientToken, &domain, &tenant, &verbosity, &regionName, &configFile,
 	)
 	rootCmd.AddCommand(onboardCmd)
 }
@@ -53,22 +60,19 @@ func init() {
 // AddOnboardFlags adds all flags for the onboard command to the given cobra.Command.
 func AddOnboardFlags(cmd *cobra.Command,
 	fqdn *string, username *string, password *string, passwordInteractive *bool,
-	clientToken *string, domain *string, tenant *string, verbosity *string, regionName *string,
+	clientToken *string, domain *string, tenant *string, verbosity *string, regionName *string, configFile *string,
 ) {
 	cmd.Flags().StringVarP(fqdn, "url", "u", "", "Platform9 FQDN")
-	cmd.MarkFlagRequired("url")
 	cmd.Flags().StringVarP(username, "username", "e", "", "Platform9 username")
-	cmd.MarkFlagRequired("username")
 	cmd.Flags().StringVarP(password, "password", "p", "", "Platform9 password")
 	cmd.Flags().BoolVar(passwordInteractive, "password-interactive", false, "Enter password interactively")
 	cmd.Flags().StringVarP(clientToken, "client-token", "c", "", "Client token for authentication")
-	cmd.MarkFlagRequired("client-token")
 	cmd.Flags().StringVarP(domain, "domain", "d", "default", "Platform9 domain")
 	cmd.Flags().StringVarP(tenant, "tenant", "t", "service", "Platform9 tenant")
 	cmd.Flags().StringVarP(verbosity, "verbosity", "v", "minimal", "Log verbosity level (all, important, minimal, critical, none)")
 	cmd.MarkFlagsMutuallyExclusive("password", "password-interactive")
 	cmd.Flags().StringVarP(regionName, "region", "r", "", "Platform9 region where you want to onboard this host")
-	cmd.MarkFlagRequired("region")
+	cmd.Flags().StringVarP(configFile, "config", "f", "", "Path to onboarding config YAML file")
 }
 
 // Check if running on Ubuntu
@@ -83,7 +87,89 @@ func isUbuntuSystem() bool {
 	return strings.Contains(string(data), "Ubuntu")
 }
 
+type OnboardConfig struct {
+	URL         string `yaml:"url"`
+	Username    string `yaml:"username"`
+	Password    string `yaml:"password"`
+	ClientToken string `yaml:"client-token"`
+	Domain      string `yaml:"domain"`
+	Tenant      string `yaml:"tenant"`
+	Verbosity   string `yaml:"verbosity"`
+	Region      string `yaml:"region"`
+}
+
+func LoadOnboardConfig(path string) (*OnboardConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var cfg OnboardConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+// Helper to merge config values with CLI flags
+func mergeConfigWithFlags(cfg *OnboardConfig) {
+	if fqdn == "" {
+		fqdn = cfg.URL
+	}
+	if username == "" {
+		username = cfg.Username
+	}
+	if password == "" {
+		password = cfg.Password
+	}
+	if clientToken == "" {
+		clientToken = cfg.ClientToken
+	}
+	if domain == "default" && cfg.Domain != "" {
+		domain = cfg.Domain
+	}
+	if tenant == "service" && cfg.Tenant != "" {
+		tenant = cfg.Tenant
+	}
+	if verbosity == "minimal" && cfg.Verbosity != "" {
+		verbosity = cfg.Verbosity
+	}
+	if regionName == "" {
+		regionName = cfg.Region
+	}
+}
+
 func runOnboard(cmd *cobra.Command, args []string) {
+	// If config file is provided, load it and use values as defaults for unset flags
+	if configFile != "" {
+		cfg, err := LoadOnboardConfig(configFile)
+		if err != nil {
+			fmt.Printf("Error loading config file: %v\n", err)
+			os.Exit(1)
+		}
+		mergeConfigWithFlags(cfg)
+	}
+
+	missing := []string{}
+	if fqdn == "" {
+		missing = append(missing, "--url (or config file 'url")
+	}
+	if username == "" {
+        missing = append(missing, "--username (or config file 'username')")
+	}
+	if clientToken == "" {
+        missing = append(missing, "--client-token (or config file 'client-token')")
+	}
+	if regionName == "" {
+        missing = append(missing, "--region (or config file 'region')")
+	}
+	if len(missing) > 0 {
+		fmt.Printf("Error: missing required flags: %s\n", strings.Join(missing, ", "))
+		os.Exit(1)
+	}
+
+	utils.LogDebug("Final onboarding values: url=%s, username=%s, domain=%s, tenant=%s, region=%s, verbosity=%s",
+		fqdn, username, domain, tenant, regionName, verbosity)
+
 	// Check if running on Ubuntu system
 	if !isUbuntuSystem() {
 		fmt.Println("Error: This command requires an Ubuntu system")
