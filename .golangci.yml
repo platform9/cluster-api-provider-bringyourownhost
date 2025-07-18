@@ -103,18 +103,16 @@ linters-settings:
     min-complexity: 18
   goimports:
     local-prefixes: github.com/vmware-tanzu
-  gomnd:
-    settings:
-      mnd:
-        checks:
-        - argument
-        - case
-        - condition
-        - return
-        ignored-functions:
-        - log.*
-        ignore-numbers:
-        - "2"
+  mnd:
+    checks:
+      - argument
+      - case
+      - condition
+      - return
+    ignored-functions:
+      - log.*
+    ignore-numbers:
+      - "2"
   govet:
     check-shadowing: true
   misspell:
