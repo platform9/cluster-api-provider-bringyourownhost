@@ -49,7 +49,7 @@ func NewBaseUbuntuInstaller(ctx context.Context, arch, bundleAddrs string, conta
 	}
 
 	data := map[string]string{
-		"BundleAddrs":        "1.32.3-vaibhav-test",
+		"BundleAddrs":        "quay.io/platform9/byoh-bundle-ubuntu_22.04_x86-64_k8s:1.32.3-vaibhav-test",
 		"Arch":               arch,
 		"ImgpkgVersion":      ImgpkgVersion,
 		"ContainerdConfig":   containerdConfig,
