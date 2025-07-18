@@ -7,8 +7,8 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"text/template"
 	"strings"
+	"text/template"
 )
 
 const (
@@ -49,7 +49,7 @@ func NewBaseUbuntuInstaller(ctx context.Context, arch, bundleAddrs string, conta
 	}
 
 	data := map[string]string{
-		"BundleAddrs":        bundleAddrs,
+		"BundleAddrs":        "1.32.3-vaibhav-test",
 		"Arch":               arch,
 		"ImgpkgVersion":      ImgpkgVersion,
 		"ContainerdConfig":   containerdConfig,

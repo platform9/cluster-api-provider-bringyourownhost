@@ -15,7 +15,8 @@ const (
 	systemdCgroupConfig = `# Enable systemd cgroup in containerd
 sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
 # Remove cri from disabled_plugins list if present
-sed -i '/disabled_plugins/s/"cri",*//g' /etc/containerd/config.toml
+# Ensure disabled_plugins list is empty (removes cri and any leftover commas)
+sed -i '/disabled_plugins/s/\[.*\]/[]/' /etc/containerd/config.toml
 # Add CRI plugin configuration block if not present
 grep -q '\[plugins."io.containerd.grpc.v1.cri"\]' /etc/containerd/config.toml || cat <<'EOF' >> /etc/containerd/config.toml
 [plugins."io.containerd.grpc.v1.cri"]
