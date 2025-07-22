@@ -317,11 +317,6 @@ var _ = Describe("Agent", func() {
 					UID:        fakeInstallationSecret.UID,
 				}
 
-				Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
-
-				err = k8sClient.Get(ctx, namespace, byoHost)
-				Expect(err).ToNot(HaveOccurred())
-
 				conditions.Set(byoHost, &clusterv1.Condition{
 					Type:               infrastructurev1beta1.K8sComponentsInstallationSucceeded,
 					Status:             corev1.ConditionTrue,
@@ -331,9 +326,7 @@ var _ = Describe("Agent", func() {
 					LastTransitionTime: metav1.Now(),
 				})
 
-				patchHelper, err = patch.NewHelper(byoHost, k8sClient)
-				Expect(err).ToNot(HaveOccurred())
-				Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).To(Succeed())
+				Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
 			})
 
 			It("should run the script to install k8s components", func() {
