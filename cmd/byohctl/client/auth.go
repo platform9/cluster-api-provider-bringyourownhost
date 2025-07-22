@@ -1,6 +1,7 @@
 package client
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,16 +15,14 @@ import (
 )
 
 type AuthClient struct {
-	client      *http.Client
-	fqdn        string
-	clientToken string
+	client *http.Client
+	fqdn   string
 }
 
-func NewAuthClient(fqdn, clientToken string) *AuthClient {
+func NewAuthClient(fqdn string) *AuthClient {
 	return &AuthClient{
-		client:      &http.Client{Timeout: 30 * time.Second},
-		fqdn:        fqdn,
-		clientToken: clientToken,
+		client: &http.Client{Timeout: 30 * time.Second},
+		fqdn:   fqdn,
 	}
 }
 
@@ -34,12 +33,11 @@ func (c *AuthClient) GetToken(username, password string) (string, error) {
 	utils.LogDebug("Getting authentication token for user %s", username)
 	tokenEndpoint := fmt.Sprintf("https://%s/dex/token", c.fqdn)
 	formData := url.Values{
-		"grant_type":    {"password"},
-		"client_id":     {"kubernetes"},
-		"client_secret": {c.clientToken},
-		"username":      {username},
-		"password":      {password},
-		"scope":         {"openid offline_access groups federated:id email"},
+		"grant_type": {"password"},
+		"client_id":  {"platform9-ui"},
+		"username":   {username},
+		"password":   {password},
+		"scope":      {"openid offline_access groups federated:id email"},
 	}
 
 	req, err := http.NewRequest("POST", tokenEndpoint, strings.NewReader(formData.Encode()))
@@ -48,6 +46,7 @@ func (c *AuthClient) GetToken(username, password string) (string, error) {
 	}
 
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Add("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("platform9-ui:")))
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return "", utils.LogErrorf("failed to authenticate: %v", err)
