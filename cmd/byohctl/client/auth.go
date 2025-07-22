@@ -34,7 +34,7 @@ func (c *AuthClient) GetToken(username, password string) (string, error) {
 	tokenEndpoint := fmt.Sprintf("https://%s/dex/token", c.fqdn)
 	formData := url.Values{
 		"grant_type": {"password"},
-		"client_id":  {"pcd"},
+		"client_id":  {"platform9-ui"},
 		"username":   {username},
 		"password":   {password},
 		"scope":      {"openid offline_access groups federated:id email"},
