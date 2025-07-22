@@ -15,16 +15,14 @@ import (
 )
 
 type AuthClient struct {
-	client      *http.Client
-	fqdn        string
-	clientToken string
+	client *http.Client
+	fqdn   string
 }
 
-func NewAuthClient(fqdn, clientToken string) *AuthClient {
+func NewAuthClient(fqdn string) *AuthClient {
 	return &AuthClient{
-		client:      &http.Client{Timeout: 30 * time.Second},
-		fqdn:        fqdn,
-		clientToken: clientToken,
+		client: &http.Client{Timeout: 30 * time.Second},
+		fqdn:   fqdn,
 	}
 }
 
