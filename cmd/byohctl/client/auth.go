@@ -46,7 +46,7 @@ func (c *AuthClient) GetToken(username, password string) (string, error) {
 	}
 
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Add("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("pcd:")))
+	req.Header.Add("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("platform9-ui:")))
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return "", utils.LogErrorf("failed to authenticate: %v", err)
