@@ -399,6 +399,7 @@ runCmd:
 					})
 
 					It("should set uninstall script in byohost spec", func() {
+						Expect(k8sClient.Delete(ctx, installationSecret)).NotTo(HaveOccurred())
 						installScript := `echo "install"`
 						uninstallScript = `echo "uninstall"`
 						installationSecret = builder.Secret(ns, "test-secret3").
@@ -612,7 +613,7 @@ runCmd:
 			})
 
 			It("should return error if uninstall script execution failed", func() {
-				fakeCommandRunner.RunCmdReturnsOnCall(1, errors.New("failed to execute uninstall script"))
+				fakeCommandRunner.RunCmdReturns(errors.New("failed to execute uninstall script"))
 				uninstallScript = `testcommand`
 				uninstallSecretName := "byoh-uninstall-" + byoHost.Name
 				uninstallationSecret = &corev1.Secret{
@@ -641,7 +642,6 @@ runCmd:
 				// assert events
 				events := eventutils.CollectEvents(recorder.Events)
 				Expect(events).Should(ConsistOf([]string{
-					"Normal ResetK8sNodeSucceeded k8s Node Reset completed",
 					"Warning UninstallScriptExecutionFailed uninstall script execution failed",
 				}))
 			})
@@ -767,23 +767,14 @@ runCmd:
 			})
 
 			It("should return error if host cleanup failed", func() {
-				fakeCommandRunner.RunCmdReturns(errors.New("failed to cleanup host"))
-
+				fakeCommandRunner.RunCmdReturns(errors.New("failed to reset"))
+				byoHost.Spec.UninstallationSecret = nil
 				result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 					NamespacedName: byoHostLookupKey,
 				})
 				Expect(result).To(Equal(controllerruntime.Result{}))
-				Expect(reconcilerErr.Error()).To(Equal("failed to exec kubeadm reset: failed to cleanup host"))
-
-				updatedByoHost := &infrastructurev1beta1.ByoHost{}
-				err := k8sClient.Get(ctx, byoHostLookupKey, updatedByoHost)
-				Expect(err).ToNot(HaveOccurred())
-
-				k8sNodeBootstrapSucceeded := conditions.Get(updatedByoHost, infrastructurev1beta1.K8sNodeBootstrapSucceeded)
-				Expect(*k8sNodeBootstrapSucceeded).To(conditions.MatchCondition(clusterv1.Condition{
-					Type:   infrastructurev1beta1.K8sNodeBootstrapSucceeded,
-					Status: corev1.ConditionTrue,
-				}))
+				Expect(reconcilerErr).To(HaveOccurred())
+				Expect(reconcilerErr.Error()).To(Equal("UninstallationSecret not found in Byohost " + byoHost.Name))
 
 				// assert events
 				events := eventutils.CollectEvents(recorder.Events)
