@@ -779,7 +779,7 @@ runCmd:
 				// assert events
 				events := eventutils.CollectEvents(recorder.Events)
 				Expect(events).Should(ConsistOf([]string{
-					"Warning ResetK8sNodeFailed k8s Node Reset failed",
+					fmt.Sprintf("Warning ReadUninstallationSecretFailed uninstallation secret %v not found", byoHost.Spec.UninstallationSecret),
 				}))
 			})
 
