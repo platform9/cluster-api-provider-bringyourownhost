@@ -9,3 +9,5 @@ spec:
       containers:
       - name: manager
         image: "{{ .Values.byohImage }}"
+        args:
+          - "--byohostagent-heartbeat-timeout={{ .Values.byohostAgentHeartbeatTimeout | default \"120s\" }}"
