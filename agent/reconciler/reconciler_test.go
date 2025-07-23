@@ -399,23 +399,20 @@ runCmd:
 					})
 
 					It("should set uninstall script in byohost spec", func() {
-						uninstallSecretName := "byoh-uninstall-" + byoHost.Name
-						uninstallationSecret = &corev1.Secret{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      uninstallSecretName,
-								Namespace: ns,
-							},
-							Data: map[string][]byte{
-								"uninstall": []byte(uninstallScript),
-							},
-						}
-						Expect(k8sClient.Create(ctx, uninstallationSecret)).NotTo(HaveOccurred())
+						installScript := `echo "install"`
+						uninstallScript = `echo "uninstall"`
+						installationSecret = builder.Secret(ns, "test-secret3").
+							WithKeyData("install", installScript).
+							WithKeyData("uninstall", uninstallScript).
+							Build()
+						Expect(k8sClient.Create(ctx, installationSecret)).NotTo(HaveOccurred())
 
-						byoHost.Spec.UninstallationSecret = &corev1.ObjectReference{
+						byoHost.Spec.InstallationSecret = &corev1.ObjectReference{
 							Kind:      "Secret",
-							Namespace: ns,
-							Name:      uninstallSecretName,
+							Namespace: installationSecret.Namespace,
+							Name:      installationSecret.Name,
 						}
+						Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
 
 						result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 							NamespacedName: byoHostLookupKey,
@@ -427,7 +424,7 @@ runCmd:
 						err := k8sClient.Get(ctx, byoHostLookupKey, updatedByoHost)
 						Expect(err).ToNot(HaveOccurred())
 						Expect(updatedByoHost.Spec.UninstallationSecret).NotTo(BeNil())
-						Expect(updatedByoHost.Spec.UninstallationSecret.Name).To(Equal(uninstallSecretName))
+						Expect(updatedByoHost.Spec.UninstallationSecret.Name).To(Equal("byoh-uninstall-" + byoHost.Name))
 					})
 
 					It("should set K8sComponentsInstallationSucceeded to true if Install succeeds", func() {
@@ -567,7 +564,9 @@ runCmd:
 
 				// assert kubeadm reset & uninstall script is called
 				Expect(fakeCommandRunner.RunCmdCallCount()).To(Equal(2))
-				_, resetCommand := fakeCommandRunner.RunCmdArgsForCall(0)
+				_, uninstallCommand := fakeCommandRunner.RunCmdArgsForCall(0)
+				Expect(uninstallCommand).To(Equal(uninstallScript))
+				_, resetCommand := fakeCommandRunner.RunCmdArgsForCall(1)
 				Expect(resetCommand).To(Equal(reconciler.KubeadmResetCommand))
 				updatedByoHost := &infrastructurev1beta1.ByoHost{}
 				err := k8sClient.Get(ctx, byoHostLookupKey, updatedByoHost)
@@ -579,8 +578,7 @@ runCmd:
 				Expect(updatedByoHost.Annotations).NotTo(HaveKey(infrastructurev1beta1.EndPointIPAnnotation))
 				Expect(updatedByoHost.Annotations).NotTo(HaveKey(infrastructurev1beta1.K8sVersionAnnotation))
 				Expect(updatedByoHost.Annotations).NotTo(HaveKey(infrastructurev1beta1.BundleLookupBaseRegistryAnnotation))
-				Expect(updatedByoHost.Spec.UninstallationSecret).NotTo(BeNil())
-				Expect(updatedByoHost.Spec.UninstallationSecret.Name).To(Equal(uninstallSecretName))
+				Expect(updatedByoHost.Spec.UninstallationSecret).To(BeNil())
 
 				k8sNodeBootstrapSucceeded := conditions.Get(updatedByoHost, infrastructurev1beta1.K8sNodeBootstrapSucceeded)
 				Expect(*k8sNodeBootstrapSucceeded).To(conditions.MatchCondition(clusterv1.Condition{
@@ -609,7 +607,7 @@ runCmd:
 
 				events := eventutils.CollectEvents(recorder.Events)
 				Expect(events).Should(ContainElement(
-					fmt.Sprintf("Warning ReadUninstallationSecretFailed uninstallation secret %s not found", "<nil>"),
+					fmt.Sprintf("Warning ReadUninstallationSecretFailed uninstallation secret %v not found", byoHost.Spec.UninstallationSecret),
 				))
 			})
 
