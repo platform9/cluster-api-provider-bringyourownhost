@@ -23,6 +23,10 @@ import (
 type ByoHostReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+	// HeartbeatTimeoutPeriod defines the duration after which the agent is
+	// considered to be disconnected.  Its value can be overridden at start-up
+	// via the --byohostagent-heartbeat-timeout flag in main.go.
+	HeartbeatTimeoutPeriod time.Duration
 }
 
 // DefaultRetry is the recommended retry for a conflict where multiple clients ( byomachine in this case )
@@ -38,11 +42,6 @@ const (
 	// ByohHostReconcilePeriod is the duration to wait before requeueing the ByoHost.
 	ByohHostReconcilePeriod = 60 * time.Second
 )
-
-// HeartbeatTimeoutPeriod defines the duration after which the agent is
-// considered to be disconnected.  Its value can be overridden at start-up
-// via the --byohostagent-heartbeat-timeout flag in main.go.
-var HeartbeatTimeoutPeriod = 120 * time.Second
 
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=byohosts,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=byohosts/status,verbs=get;update;patch
@@ -66,12 +65,12 @@ func (r *ByoHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ 
 	}
 
 	// Check if last heartbeat timeout is within the HeartbeatTimeoutPeriod
-	if byoHost.Status.LastHeartbeatTime != nil && time.Since(byoHost.Status.LastHeartbeatTime.Time) < HeartbeatTimeoutPeriod {
+	if byoHost.Status.LastHeartbeatTime != nil && time.Since(byoHost.Status.LastHeartbeatTime.Time) < r.HeartbeatTimeoutPeriod {
 		logger.Info("Heartbeat within timeout period")
 		byoHost.Status.Connected = true
 		conditions.MarkTrue(byoHost, infrastructurev1beta1.AgentConnectedCondition)
 	} else {
-		logger.Info("Heartbeat timeout detected", "HeartbeatTimeoutPeriod", HeartbeatTimeoutPeriod)
+		logger.Info("Heartbeat timeout detected", "HeartbeatTimeoutPeriod", r.HeartbeatTimeoutPeriod)
 		byoHost.Status.Connected = false
 		conditions.MarkFalse(byoHost, infrastructurev1beta1.AgentConnectedCondition, infrastructurev1beta1.HeartbeatTimeoutReason, clusterv1.ConditionSeverityWarning, "Heartbeat timeout detected")
 	}

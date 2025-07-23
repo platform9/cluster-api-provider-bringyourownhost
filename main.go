@@ -113,11 +113,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	byohcontrollers.HeartbeatTimeoutPeriod = byohostAgentHeartbeatTimeout
-
 	if err = (&byohcontrollers.ByoHostReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:                 mgr.GetClient(),
+		Scheme:                 mgr.GetScheme(),
+		HeartbeatTimeoutPeriod: byohostAgentHeartbeatTimeout,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ByoHost")
 		os.Exit(1)
