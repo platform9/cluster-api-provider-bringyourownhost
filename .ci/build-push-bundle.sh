@@ -11,6 +11,8 @@ export BUNDLE_VERSION=${BUNDLE_VERSION:-v1.32.2}
 export ARCH=${ARCH:-amd64}
 export CRITOOL_VERSION=${CRITOOL_VERSION:-1.32.0-1.1}
 export UBUNTU_VERSION=${UBUNTU_VERSION:-"22.04"} # Default to 22.04, can be overridden
+export OS=${OS:-linux}
+export CNI_VERSION=${CNI_VERSION:-1.3.0}
 
 #alias shasum="sha512sum"
 echo "installing imgpkg"
