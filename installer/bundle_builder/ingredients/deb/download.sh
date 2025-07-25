@@ -7,11 +7,11 @@ set -e
 
 echo "Starting BYOH bundle ingredient download..."
 
-:"${ARCH:?ARCH must be set}"
-:"${OS:?OS must be set}"
-:"${CONTAINERD_VERSION:?CONTAINERD_VERSION must be set}"
-:"${KUBERNETES_VERSION:?KUBERNETES_VERSION must be set}"
-:"${CRITOOL_VERSION:?CRITOOL_VERSION must be set}"
+: "${ARCH:?ARCH must be set}"
+: "${OS:?OS must be set}"
+: "${CONTAINERD_VERSION:?CONTAINERD_VERSION must be set}"
+: "${KUBERNETES_VERSION:?KUBERNETES_VERSION must be set}"
+: "${CRITOOL_VERSION:?CRITOOL_VERSION must be set}"
 : "${CNI_VERSION:?CNI_VERSION must be set}"
 
 K8S_VERSION="v${KUBERNETES_VERSION%%-*}"
