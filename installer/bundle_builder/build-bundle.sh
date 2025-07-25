@@ -16,23 +16,24 @@ ls -l $INGREDIENTS_PATH
 
 cd /bundle
 echo Strip version to well-known names
-# Mandatory
-cp $INGREDIENTS_PATH/*containerd* containerd.tar
-cp $INGREDIENTS_PATH/*kubeadm*.deb ./kubeadm.deb
-cp $INGREDIENTS_PATH/*kubelet*.deb ./kubelet.deb
-cp $INGREDIENTS_PATH/*kubectl*.deb ./kubectl.deb
-# Optional
-cp  $INGREDIENTS_PATH/*cri-tools*.deb cri-tools.deb > /dev/null | true
-cp  $INGREDIENTS_PATH/*kubernetes-cni*.deb kubernetes-cni.deb > /dev/null | true
+
+cp "$INGREDIENTS_PATH"/kubeadm .
+cp "$INGREDIENTS_PATH"/kubelet .
+cp "$INGREDIENTS_PATH"/kubectl .
+
+cp "$INGREDIENTS_PATH"/cri-containerd-cni-*.tar.gz containerd.tar.gz
+cp "$INGREDIENTS_PATH"/crictl-*.tar.gz crictl.tar.gz
+cp "$INGREDIENTS_PATH"/cni-plugins-*.tgz cni-plugins.tgz
+
 
 echo Configuration $CONFIG_PATH
 ls -l $CONFIG_PATH
 
 echo Add configuration under well-known name
-(cd $CONFIG_PATH && tar -cvf conf.tar *)
-cp $CONFIG_PATH/conf.tar .
+(cd "$CONFIG_PATH" && tar -cvf conf.tar .)
+cp "$CONFIG_PATH"/conf.tar .
 
-echo Creating bundle tar
+echo "Creating BYOH bundle tar..."
 tar -cvf /bundle/bundle.tar *
 
-echo Done
+echo "Done"

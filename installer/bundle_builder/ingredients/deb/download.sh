@@ -5,29 +5,46 @@
 
 set -e
 
-echo  Update the apt package index and install packages needed to use the Kubernetes apt repository
- apt-get update
- apt-get install -y apt-transport-https ca-certificates curl
+echo "Starting BYOH bundle ingredient download..."
 
-echo Download containerd
-curl -LOJR https://github.com/containerd/containerd/releases/download/v${CONTAINERD_VERSION}/cri-containerd-cni-${CONTAINERD_VERSION}-linux-amd64.tar.gz 
+: "${ARCH:?ARCH must be set}"
+: "${OS:?OS must be set}"
+: "${CONTAINERD_VERSION:?CONTAINERD_VERSION must be set}"
+: "${KUBERNETES_VERSION:?KUBERNETES_VERSION must be set}"
+: "${CRITOOL_VERSION:?CRITOOL_VERSION must be set}"
+: "${CNI_VERSION:?CNI_VERSION must be set}"
 
-echo Download the Google Cloud public signing key
- curl -fsSLo /usr/share/keyrings/kubernetes-archive-keyring.gpg https://dl.k8s.io/apt/doc/apt-key.gpg
+K8S_VERSION="v${KUBERNETES_VERSION%%-*}"
+CRICTL_VERSION="v${CRITOOL_VERSION}"
+CNI_VERSION="v${CNI_VERSION}"
 
-echo Add the Kubernetes apt repository
+mkdir -p /ingredients
 
-echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/${KUBERNETES_MAJOR_VERSION}/deb/ /" |  tee /etc/apt/sources.list.d/kubernetes.list
+echo "Downloading containerd..."
+curl -LO "https://github.com/containerd/containerd/releases/download/v${CONTAINERD_VERSION}/cri-containerd-cni-${CONTAINERD_VERSION}-${OS}-${ARCH}.tar.gz"
+mv "cri-containerd-cni-${CONTAINERD_VERSION}-${OS}-${ARCH}.tar.gz" /ingredients/
 
-mkdir -p /etc/apt/keyrings
-curl -fsSL https://pkgs.k8s.io/core:/stable:/${KUBERNETES_MAJOR_VERSION}/deb/Release.key |  gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+echo "Downloading crictl..."
+curl -LO "https://github.com/kubernetes-sigs/cri-tools/releases/download/${CRICTL_VERSION}/crictl-${CRICTL_VERSION}-${OS}-${ARCH}.tar.gz"
+mv "crictl-${CRICTL_VERSION}-${OS}-${ARCH}.tar.gz" /ingredients/
 
-echo Update apt package index, install kubelet, kubeadm and kubectl
-apt-get update
-chown -Rv _apt:root /bundle/
-chown -R _apt:root /ingredients
-mv cri-containerd-cni-${CONTAINERD_VERSION}-linux-amd64.tar.gz /ingredients/ 
-cd /ingredients 
-apt-get download {kubelet,kubeadm,kubectl}:$ARCH=$KUBERNETES_VERSION
-apt-get download kubernetes-cni:$ARCH
-apt-get download cri-tools:$ARCH=$CRITOOL_VERSION
+echo "Downloading kubeadm..."
+curl -LO "https://dl.k8s.io/release/${K8S_VERSION}/bin/${OS}/${ARCH}/kubeadm"
+chmod +x kubeadm
+mv kubeadm /ingredients/
+
+echo "Downloading kubelet..."
+curl -LO "https://dl.k8s.io/release/${K8S_VERSION}/bin/${OS}/${ARCH}/kubelet"
+chmod +x kubelet
+mv kubelet /ingredients/
+
+echo "Downloading kubectl..."
+curl -LO "https://dl.k8s.io/release/${K8S_VERSION}/bin/${OS}/${ARCH}/kubectl"
+chmod +x kubectl
+mv kubectl /ingredients/
+
+echo "Downloading CNI plugins..."
+curl -LO "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-${OS}-${ARCH}-${CNI_VERSION}.tgz"
+mv "cni-plugins-${OS}-${ARCH}-${CNI_VERSION}.tgz" /ingredients/
+
+echo "All ingredients downloaded and stored in /ingredients"
