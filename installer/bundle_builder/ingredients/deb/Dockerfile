@@ -15,6 +15,7 @@ FROM $BASE_IMAGE as build
 ENV CONTAINERD_VERSION=1.6.26
 ENV KUBERNETES_VERSION=1.26.6-00
 ENV ARCH=amd64
+ENV OS=linux
 
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends sudo
