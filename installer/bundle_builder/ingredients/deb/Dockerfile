@@ -16,6 +16,7 @@ ENV CONTAINERD_VERSION=1.6.26
 ENV KUBERNETES_VERSION=1.26.6-00
 ENV ARCH=amd64
 ENV OS=linux
+ENV CNI_VERSION=1.3.0
 
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends sudo

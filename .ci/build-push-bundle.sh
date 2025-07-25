@@ -27,7 +27,7 @@ docker build -t byoh-bundle .
 docker rm -f byoh-bundle-container
 
 echo "executing docker image"
-docker run -e CRITOOL_VERSION -e BUILD_ONLY -e CONTAINERD_VERSION -e KUBERNETES_VERSION -e KUBERNETES_MAJOR_VERSION -e ARCH -e UBUNTU_VERSION --name byoh-bundle-container -i byoh-bundle /bin/bash
+docker run -e CRITOOL_VERSION -e BUILD_ONLY -e CONTAINERD_VERSION -e KUBERNETES_VERSION -e KUBERNETES_MAJOR_VERSION -e ARCH -e UBUNTU_VERSION -e OS -e CNI_VERSION --name byoh-bundle-container -i byoh-bundle /bin/bash
 
 echo "creating bundle dir to push k8s packages"
 mkdir -p ./bundle
