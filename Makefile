@@ -309,11 +309,26 @@ $(COMMON_SRC_ROOT): build-host-agent-binary
 $(DEB_SRC_ROOT): | $(COMMON_SRC_ROOT)
 	cp -a  $(COMMON_SRC_ROOT) $(DEB_SRC_ROOT)
 
-$(PF9_BYOHOST_DEB_FILE): $(DEB_SRC_ROOT)
+BUNDLE_FILE ?= ./bundle/bundle.tar
+DEPS_DIR = $(BUILD_DIR)/deps
+
+.PHONY: bundle-deps
+bundle-deps:
+	@echo "Bundling dependencies from $(BUNDLE_FILE)"
+	mkdir -p $(DEPS_DIR)
+	tar -xvf $(BUNDLE_FILE) -C $(DEPS_DIR) \
+		--wildcards --no-anchored '*socat*.deb' '*ethtool*.deb' '*ebtables*.deb' '*conntrack*.deb'
+	@if [ -z "$$(ls -A $(DEPS_DIR))" ]; then \
+		echo "Error: No dependency .deb files found in $(BUNDLE_FILE). Please build the bundle first."; \
+		exit 1; \
+	fi
+	for pkg in $(DEPS_DIR)/*.deb; do dpkg -x $$pkg $(DEB_SRC_ROOT); done
+	rm -rf $(DEPS_DIR)
+
+$(PF9_BYOHOST_DEB_FILE): $(DEB_SRC_ROOT) bundle-deps
 	fpm -t deb -s dir -n pf9-byohost-agent \
 	 --description "Platform9 Bring Your Own Host deb package" \
 	 --license "Commercial" --architecture all --url "http://www.platform9.net" --vendor Platform9 \
-	 -d socat -d ethtool -d ebtables -d conntrack \
 	 --after-install $(AGENT_SRC_DIR)/scripts/pf9-byohost-agent-after-install.sh \
 	 --before-remove $(AGENT_SRC_DIR)/scripts/pf9-byohost-agent-before-remove.sh \
 	 --after-remove $(AGENT_SRC_DIR)/scripts/pf9-byohost-agent-after-remove.sh \

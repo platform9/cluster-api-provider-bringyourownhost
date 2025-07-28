@@ -31,3 +31,13 @@ cd /ingredients
 apt-get download {kubelet,kubeadm,kubectl}:$ARCH=$KUBERNETES_VERSION
 apt-get download kubernetes-cni:$ARCH
 apt-get download cri-tools:$ARCH=$CRITOOL_VERSION
+
+SOCAT_URL="https://archive.ubuntu.com/ubuntu/pool/main/s/socat/socat_1.7.3.3-2_amd64.deb"
+ETHTOOL_URL="https://archive.ubuntu.com/ubuntu/pool/main/e/ethtool/ethtool_5.4-1_amd64.deb"
+EBTABLES_URL="https://archive.ubuntu.com/ubuntu/pool/main/e/ebtables/ebtables_2.0.10.4-3.4ubuntu1_amd64.deb"
+CONNTRACK_URL="https://archive.ubuntu.com/ubuntu/pool/main/c/conntrack-tools/conntrack_1.4.5-2_amd64.deb"
+
+curl -L -o socat.deb ${SOCAT_URL}
+curl -L -o ethtool.deb ${ETHTOOL_URL}
+curl -L -o ebtables.deb ${EBTABLES_URL}
+curl -L -o conntrack.deb ${CONNTRACK_URL}
