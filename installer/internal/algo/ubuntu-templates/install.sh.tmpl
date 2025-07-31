@@ -53,7 +53,10 @@ mkdir -p /etc/containerd
 containerd config default > /etc/containerd/config.toml
 {{.ContainerdConfig}}
 
+# remove cri as a disabled plugins from containerd config
+sed -i 's/^disabled_plugins = \["cri"\]/disabled_plugins = \[\]/' /etc/containerd/config.toml
+
 ## starting containerd service
-systemctl daemon-reload && systemctl enable containerd && systemctl start containerd
+systemctl daemon-reload && systemctl enable containerd && systemctl restart containerd
 
 echo "Installation complete!"
