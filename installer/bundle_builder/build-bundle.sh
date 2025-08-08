@@ -25,6 +25,12 @@ cp $INGREDIENTS_PATH/*kubectl*.deb ./kubectl.deb
 cp  $INGREDIENTS_PATH/*cri-tools*.deb cri-tools.deb > /dev/null | true
 cp  $INGREDIENTS_PATH/*kubernetes-cni*.deb kubernetes-cni.deb > /dev/null | true
 
+
+cp $INGREDIENTS_PATH/socat*.deb .
+cp $INGREDIENTS_PATH/ethtool*.deb .
+cp $INGREDIENTS_PATH/ebtables*.deb .
+cp $INGREDIENTS_PATH/conntrack*.deb .
+
 echo Configuration $CONFIG_PATH
 ls -l $CONFIG_PATH
 
