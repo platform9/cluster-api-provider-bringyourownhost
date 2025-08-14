@@ -6,6 +6,7 @@ package cloudinit
 import (
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"os/user"
 	"strconv"
@@ -111,6 +112,10 @@ func (w FileWriter) WriteToFile(file *Files) error {
 		gid, err := strconv.ParseUint(userInfo.Gid, base, bitSize)
 		if err != nil {
 			return errors.Wrap(err, fmt.Sprintf("Error convert gid %s", userInfo.Gid))
+		}
+
+		if uid > math.MaxInt64 || gid > math.MaxInt64 {
+			return fmt.Errorf("uid or gid value too large for int: uid=%d, gid=%d", uid, gid)
 		}
 
 		err = f.Chown(int(uid), int(gid))
