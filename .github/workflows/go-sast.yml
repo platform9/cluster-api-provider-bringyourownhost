@@ -16,53 +16,52 @@ jobs:
 
         steps:
         -   name: Checkout code
-            uses: actions/checkout@v3
+            uses: actions/checkout@v4
 
         -   name: Set up Go
-            uses: actions/setup-go@v4
+            uses: actions/setup-go@v5
             with:
-                go-version-file: go.mod
-                check-latest: true
+              go-version-file: 'go.mod' # Match exact version in go.mod
+              check-latest: true
 
-        -   name: Download dependencies
+        -   name: Download Go modules
             run: |
                 go mod tidy
                 go mod download
 
         -   name: Install gosec
             run: |
-                go install github.com/securego/gosec/v2/cmd/gosec@v2.21.0
+                go install github.com/securego/gosec/v2/cmd/gosec@latest
                 echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
-                gosec -h  # Debug step: check if gosec is installed
+                gosec --version
 
         -   name: Run gosec and save report
             run: |
-                set -e
                 gosec -fmt=json -severity=medium -out=gosec-report.json ./... || echo "⚠️ Gosec exited with non-zero code but report may still be available"
 
         -   name: Check if gosec report exists
             run: |
                 if [ ! -f gosec-report.json ]; then
-                  echo "❌ Gosec report not found."
-                  exit 1
+                    echo "❌ Gosec report not found."
+                    exit 1
                 fi
 
-        -   name: Upload gosec Report
+        -   name: Upload gosec report
             uses: actions/upload-artifact@v4
             with:
                 name: gosec-report
                 path: gosec-report.json
 
-        -   name: Show Gosec Report in Logs
+        -   name: Show gosec report in logs
             run: cat gosec-report.json
 
-        -   name: Check for High Severity Issues
+        -   name: Check for High/Critical issues
             id: check
             run: |
               count=$(jq '[.Issues[] | select(.severity == "HIGH" or .severity == "CRITICAL")] | length' gosec-report.json)
               echo "gosec-high-found=$([[ $count -gt 0 ]] && echo true || echo false)" >> $GITHUB_OUTPUT
 
-        -   name: Fail if High/Critical Vulnerabilities Found
+        -   name: Fail if High/Critical vulnerabilities found
             if: steps.check.outputs.gosec-high-found == 'true'
             run: |
                 echo "❌ High/Critical vulnerabilities found. Failing the job."
