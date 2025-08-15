@@ -39,7 +39,7 @@ func (s *BaseUbuntuInstaller) Uninstall() string {
 }
 
 // NewBaseUbuntuInstaller creates a new base Ubuntu installer
-func NewBaseUbuntuInstaller(ctx context.Context, arch, bundleAddrs string, containerdConfig string) (*BaseUbuntuInstaller, error) {
+func NewBaseUbuntuInstaller(ctx context.Context, arch, bundleAddrs, containerdConfig string) (*BaseUbuntuInstaller, error) {
 	// Validate embedded templates
 	if commonUbuntuInstallTemplate == "" {
 		return nil, fmt.Errorf("install template is empty - template file may be missing")

@@ -170,6 +170,16 @@ func (r *K8sInstallerConfigReconciler) storeInstallationData(ctx context.Context
 	logger.Info("creating installation and uninstallation secrets")
 
 	// Create installation secret
+	ownerReference := []metav1.OwnerReference{
+		{
+			APIVersion: infrav1.GroupVersion.String(),
+			Kind:       scope.Config.Kind,
+			Name:       scope.Config.Name,
+			UID:        scope.Config.UID,
+			Controller: pointer.Bool(true),
+		},
+	}
+
 	installSecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "byoh-install-" + scope.Config.Name,
@@ -177,15 +187,7 @@ func (r *K8sInstallerConfigReconciler) storeInstallationData(ctx context.Context
 			Labels: map[string]string{
 				clusterv1.ClusterNameLabel: scope.Cluster.Name,
 			},
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion: infrav1.GroupVersion.String(),
-					Kind:       scope.Config.Kind,
-					Name:       scope.Config.Name,
-					UID:        scope.Config.UID,
-					Controller: pointer.Bool(true),
-				},
-			},
+			OwnerReferences: ownerReference,
 		},
 		Data: map[string][]byte{
 			"install": []byte(install),
@@ -218,15 +220,7 @@ func (r *K8sInstallerConfigReconciler) storeInstallationData(ctx context.Context
 			Labels: map[string]string{
 				clusterv1.ClusterNameLabel: scope.Cluster.Name,
 			},
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion: infrav1.GroupVersion.String(),
-					Kind:       scope.Config.Kind,
-					Name:       scope.Config.Name,
-					UID:        scope.Config.UID,
-					Controller: pointer.Bool(true),
-				},
-			},
+			OwnerReferences: ownerReference,
 		},
 		Data: map[string][]byte{
 			"uninstall": []byte(uninstall),
@@ -254,7 +248,7 @@ func (r *K8sInstallerConfigReconciler) storeInstallationData(ctx context.Context
 	scope.Config.Status.Ready = true
 	logger.Info("created installation and uninstallation secrets")
 
-	// ✅ Persist the status update
+	// Persist the status update
 	if err := r.Status().Update(ctx, scope.Config); err != nil {
 		return errors.Wrapf(err, "failed to update K8sInstallerConfig status with installation/uninstallation secret references")
 	}

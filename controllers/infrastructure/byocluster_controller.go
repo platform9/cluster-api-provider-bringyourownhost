@@ -5,6 +5,8 @@ package controllers
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"reflect"
 	"time"
 
@@ -172,6 +174,9 @@ func (r ByoClusterReconciler) reconcileNormal(ctx context.Context, byoCluster *i
 	controllerutil.AddFinalizer(byoCluster, infrav1.ClusterFinalizer)
 
 	if byoCluster.Spec.ControlPlaneEndpoint.Port == 0 {
+		if DefaultAPIEndpointPort > math.MaxInt32 {
+			return reconcile.Result{}, fmt.Errorf("default API endpoint port value too large: %d", DefaultAPIEndpointPort)
+		}
 		byoCluster.Spec.ControlPlaneEndpoint.Port = int32(DefaultAPIEndpointPort)
 	}
 

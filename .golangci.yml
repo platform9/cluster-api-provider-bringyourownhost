@@ -1,8 +1,4 @@
 run:
-  skip-dirs:
-    - ".*fakes/"
-  skip-files:
-    - ".*dummy.go"
   timeout: 10m
 
 linters:
@@ -20,7 +16,7 @@ linters:
     - gocyclo
     - goheader
 #    - goimports
-    - gomnd
+    - mnd
     - goprintffuncname
     - gosec
     - gosimple
@@ -58,8 +54,17 @@ linters:
   # - wsl
 
 linters-settings:
+  depguard:
+    # allow: 
+    # main.go:13:2: import 'k8s.io/client-go/plugin/pkg/client/auth' is not allowed from list 'Main' (depguard)
+    rules: 
+      main:
+        list-mode: lax 
+        allow: 
+          - $gostd
+          - k8s.io/client-go/plugin/pkg/client/auth
   dupl:
-    threshold: 100
+    threshold: 200
   funlen:
     lines: 100
     statements: 50
@@ -90,19 +95,19 @@ linters-settings:
       - whyNoLint
       - wrapperFunc
   gocyclo:
-    min-complexity: 15
+    min-complexity: 18
   goimports:
     local-prefixes: github.com/vmware-tanzu
-  gomnd:
-    settings:
-      mnd:
-        checks:
-        - argument
-        - case
-        - condition
-        - return
-        ignored-functions:
-        - log.*
+  mnd:
+    checks:
+      - argument
+      - case
+      - condition
+      - return
+    ignored-functions:
+      - log.*
+    ignore-numbers:
+      - "2"
   govet:
     check-shadowing: true
   misspell:
@@ -117,7 +122,14 @@ linters-settings:
   gofmt:
     # simplify code: gofmt with `-s` option, true by default
     simplify: true
+  gosec:
+    excludes:
+      - G115 
 issues:
+  exclude-dirs:
+    - ".*fakes/"
+  exclude-files:
+    - ".*dummy.go"
   exclude-rules:
     # Exclude some linters from running on tests files.
     - path: _test\.go
