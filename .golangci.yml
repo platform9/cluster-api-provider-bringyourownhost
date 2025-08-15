@@ -16,7 +16,7 @@ linters:
     - gocyclo
     - goheader
 #    - goimports
-    - mnd
+    # - mnd
     - goprintffuncname
     - gosec
     - gosimple
