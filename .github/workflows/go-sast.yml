@@ -21,19 +21,19 @@ jobs:
         -   name: Set up Go
             uses: actions/setup-go@v4
             with:
-                go-version: '1.24'
+                go-version-file: go.mod
                 check-latest: true
+
+        -   name: Download dependencies
+            run: |
+                go mod tidy
+                go mod download
 
         -   name: Install gosec
             run: |
                 go install github.com/securego/gosec/v2/cmd/gosec@v2.21.0
                 echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
                 gosec -h  # Debug step: check if gosec is installed
-
-        -   name: Download dependencies
-            run: |
-                go mod tidy
-                go mod download
 
         -   name: Run gosec and save report
             run: |
