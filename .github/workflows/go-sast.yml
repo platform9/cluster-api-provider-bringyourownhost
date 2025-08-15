@@ -21,7 +21,7 @@ jobs:
         -   name: Set up Go
             uses: actions/setup-go@v4
             with:
-                go-version: '1.21'
+                go-version-file: 'go.mod'
 
         -   name: Install gosec
             run: |
@@ -116,20 +116,6 @@ jobs:
                 body-path: tmp/pr-body.md
                 branch: "auto/high-critical-gosec-security-scan"
                 base: "private/soc2"
-        
-
-    # gitleaks:
-    #     name: Secret Scan (gitleaks)
-    #     runs-on: ubuntu-latest
-
-    #     steps:
-    #     -   name: Checkout code
-    #         uses: actions/checkout@v3
-
-    #     -   name: Run Gitleaks
-    #         uses: gitleaks/gitleaks-action@v2
-    #         with:
-    #             args: detect --no-git -v
 
     golangci:
         name: GolangCI Lint & Auto PR
