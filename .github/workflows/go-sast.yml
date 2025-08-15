@@ -30,8 +30,11 @@ jobs:
                 echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
                 gosec -h  # Debug step: check if gosec is installed
 
-        # -   name: Run gosec
-        #     run: gosec ./...
+        -   name: Download dependencies
+            run: |
+                go mod tidy
+                go mod download
+
         -   name: Run gosec and save report
             run: |
                 set -e
