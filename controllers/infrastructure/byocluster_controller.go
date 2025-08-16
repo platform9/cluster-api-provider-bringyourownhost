@@ -32,7 +32,7 @@ import (
 
 var (
 	// DefaultAPIEndpointPort default port for the API endpoint
-	DefaultAPIEndpointPort    = 6443
+	DefaultAPIEndpointPort int32 = 6443
 	clusterControlledType     = &infrav1.ByoCluster{}
 	clusterControlledTypeName = reflect.TypeOf(clusterControlledType).Elem().Name()
 	clusterControlledTypeGVK  = infrav1.GroupVersion.WithKind(clusterControlledTypeName)
@@ -177,7 +177,7 @@ func (r ByoClusterReconciler) reconcileNormal(ctx context.Context, byoCluster *i
 		if DefaultAPIEndpointPort > math.MaxInt32 {
 			return reconcile.Result{}, fmt.Errorf("default API endpoint port value too large: %d", DefaultAPIEndpointPort)
 		}
-		byoCluster.Spec.ControlPlaneEndpoint.Port = int32(DefaultAPIEndpointPort)
+		byoCluster.Spec.ControlPlaneEndpoint.Port = DefaultAPIEndpointPort
 	}
 
 	byoCluster.Status.Ready = true
