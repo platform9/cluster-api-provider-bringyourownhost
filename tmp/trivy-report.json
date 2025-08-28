@@ -1,0 +1,325 @@
+{
+  "SchemaVersion": 2,
+  "CreatedAt": "2025-08-28T09:35:49.114149696Z",
+  "ArtifactName": ".",
+  "ArtifactType": "filesystem",
+  "Metadata": {
+    "RepoURL": "https://github.com/platform9/cluster-api-provider-bringyourownhost",
+    "Branch": "private/harsh/soc2-scan",
+    "Commit": "9a9b61da91d5b44f47264b583a670d189787aae6",
+    "CommitMsg": "Update security-scan.yml with creation of report PR only on push event",
+    "Author": "Harsh Srivastava \u003chsrivastava@platform9.com\u003e",
+    "Committer": "GitHub \u003cnoreply@github.com\u003e"
+  },
+  "Results": [
+    {
+      "Target": "cmd/go.mod",
+      "Class": "lang-pkgs",
+      "Type": "gomod",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2025-22868",
+          "PkgID": "golang.org/x/oauth2@v0.23.0",
+          "PkgName": "golang.org/x/oauth2",
+          "PkgIdentifier": {
+            "PURL": "pkg:golang/golang.org/x/oauth2@v0.23.0",
+            "UID": "da8b4538bac5466c"
+          },
+          "InstalledVersion": "v0.23.0",
+          "FixedVersion": "0.27.0",
+          "Status": "fixed",
+          "SeveritySource": "ghsa",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2025-22868",
+          "DataSource": {
+            "ID": "ghsa",
+            "Name": "GitHub Security Advisory Go",
+            "URL": "https://github.com/advisories?query=type%3Areviewed+ecosystem%3Ago"
+          },
+          "Title": "golang.org/x/oauth2/jws: Unexpected memory consumption during token parsing in golang.org/x/oauth2/jws",
+          "Description": "An attacker can pass a malicious malformed token which causes unexpected memory to be consumed during parsing.",
+          "Severity": "HIGH",
+          "CweIDs": [
+            "CWE-1286"
+          ],
+          "VendorSeverity": {
+            "amazon": 3,
+            "azure": 3,
+            "cbl-mariner": 3,
+            "ghsa": 3,
+            "redhat": 3
+          },
+          "CVSS": {
+            "ghsa": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+              "V3Score": 7.5
+            },
+            "redhat": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+              "V3Score": 7.5
+            }
+          },
+          "References": [
+            "https://access.redhat.com/security/cve/CVE-2025-22868",
+            "https://go.dev/cl/652155",
+            "https://go.dev/issue/71490",
+            "https://nvd.nist.gov/vuln/detail/CVE-2025-22868",
+            "https://pkg.go.dev/vuln/GO-2025-3488",
+            "https://www.cve.org/CVERecord?id=CVE-2025-22868"
+          ],
+          "PublishedDate": "2025-02-26T08:14:24.897Z",
+          "LastModifiedDate": "2025-05-01T19:27:10.43Z"
+        }
+      ]
+    },
+    {
+      "Target": "go.mod",
+      "Class": "lang-pkgs",
+      "Type": "gomod",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2024-41110",
+          "PkgID": "github.com/docker/docker@v24.0.7+incompatible",
+          "PkgName": "github.com/docker/docker",
+          "PkgIdentifier": {
+            "PURL": "pkg:golang/github.com/docker/docker@v24.0.7%2Bincompatible",
+            "UID": "179e3092bf0fc654"
+          },
+          "InstalledVersion": "v24.0.7+incompatible",
+          "FixedVersion": "23.0.15, 26.1.5, 27.1.1, 25.0.6",
+          "Status": "fixed",
+          "SeveritySource": "ghsa",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2024-41110",
+          "DataSource": {
+            "ID": "ghsa",
+            "Name": "GitHub Security Advisory Go",
+            "URL": "https://github.com/advisories?query=type%3Areviewed+ecosystem%3Ago"
+          },
+          "Title": "moby: Authz zero length regression",
+          "Description": "Moby is an open-source project created by Docker for software containerization. A security vulnerability has been detected in certain versions of Docker Engine, which could allow an attacker to bypass authorization plugins (AuthZ) under specific circumstances. The base likelihood of this being exploited is low.\n\nUsing a specially-crafted API request, an Engine API client could make the daemon forward the request or response to an authorization plugin without the body. In certain circumstances, the authorization plugin may allow a request which it would have otherwise denied if the body had been forwarded to it.\n\nA security issue was discovered In 2018, where an attacker could bypass AuthZ plugins using a specially crafted API request. This could lead to unauthorized actions, including privilege escalation. Although this issue was fixed in Docker Engine v18.09.1 in January 2019, the fix was not carried forward to later major versions, resulting in a regression. Anyone who depends on authorization plugins that introspect the request and/or response body to make access control decisions is potentially impacted.\n\nDocker EE v19.03.x and all versions of Mirantis Container Runtime are not vulnerable.\n\ndocker-ce v27.1.1 containes patches to fix the vulnerability. Patches have also been merged into the master, 19.03, 20.0, 23.0, 24.0, 25.0, 26.0, and 26.1 release branches. If one is unable to upgrade immediately, avoid using AuthZ plugins and/or restrict access to the Docker API to trusted parties, following the principle of least privilege.",
+          "Severity": "CRITICAL",
+          "CweIDs": [
+            "CWE-187",
+            "CWE-444",
+            "CWE-863"
+          ],
+          "VendorSeverity": {
+            "amazon": 3,
+            "azure": 4,
+            "cbl-mariner": 4,
+            "ghsa": 4,
+            "photon": 4,
+            "redhat": 4,
+            "ubuntu": 3
+          },
+          "CVSS": {
+            "ghsa": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:H",
+              "V3Score": 10
+            },
+            "redhat": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:H",
+              "V3Score": 9.9
+            }
+          },
+          "References": [
+            "https://access.redhat.com/security/cve/CVE-2024-41110",
+            "https://github.com/moby/moby",
+            "https://github.com/moby/moby/commit/411e817ddf710ff8e08fa193da80cb78af708191",
+            "https://github.com/moby/moby/commit/42f40b1d6dd7562342f832b9cd2adf9e668eeb76",
+            "https://github.com/moby/moby/commit/65cc597cea28cdc25bea3b8a86384b4251872919",
+            "https://github.com/moby/moby/commit/852759a7df454cbf88db4e954c919becd48faa9b",
+            "https://github.com/moby/moby/commit/a31260625655cff9ae226b51757915e275e304b0",
+            "https://github.com/moby/moby/commit/a79fabbfe84117696a19671f4aa88b82d0f64fc1",
+            "https://github.com/moby/moby/commit/ae160b4edddb72ef4bd71f66b975a1a1cc434f00",
+            "https://github.com/moby/moby/commit/ae2b3666c517c96cbc2adf1af5591a6b00d4ec0f",
+            "https://github.com/moby/moby/commit/cc13f952511154a2866bddbb7dddebfe9e83b801",
+            "https://github.com/moby/moby/commit/fc274cd2ff4cf3b48c91697fb327dd1fb95588fb",
+            "https://github.com/moby/moby/security/advisories/GHSA-v23v-6jw2-98fq",
+            "https://lists.debian.org/debian-lts-announce/2024/10/msg00009.html",
+            "https://nvd.nist.gov/vuln/detail/CVE-2024-41110",
+            "https://security.netapp.com/advisory/ntap-20240802-0001/",
+            "https://ubuntu.com/security/notices/USN-7161-1",
+            "https://ubuntu.com/security/notices/USN-7161-2",
+            "https://ubuntu.com/security/notices/USN-7161-3",
+            "https://www.cve.org/CVERecord?id=CVE-2024-41110",
+            "https://www.docker.com/blog/docker-security-advisory-docker-engine-authz-plugin",
+            "https://www.docker.com/blog/docker-security-advisory-docker-engine-authz-plugin/"
+          ],
+          "PublishedDate": "2024-07-24T17:15:11.053Z",
+          "LastModifiedDate": "2024-11-21T09:32:15.16Z"
+        },
+        {
+          "VulnerabilityID": "CVE-2024-45337",
+          "PkgID": "golang.org/x/crypto@v0.17.0",
+          "PkgName": "golang.org/x/crypto",
+          "PkgIdentifier": {
+            "PURL": "pkg:golang/golang.org/x/crypto@v0.17.0",
+            "UID": "a9a35da7d01d9af7"
+          },
+          "InstalledVersion": "v0.17.0",
+          "FixedVersion": "0.31.0",
+          "Status": "fixed",
+          "SeveritySource": "ghsa",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2024-45337",
+          "DataSource": {
+            "ID": "ghsa",
+            "Name": "GitHub Security Advisory Go",
+            "URL": "https://github.com/advisories?query=type%3Areviewed+ecosystem%3Ago"
+          },
+          "Title": "golang.org/x/crypto/ssh: Misuse of ServerConfig.PublicKeyCallback may cause authorization bypass in golang.org/x/crypto",
+          "Description": "Applications and libraries which misuse connection.serverAuthenticate (via callback field ServerConfig.PublicKeyCallback) may be susceptible to an authorization bypass. The documentation for ServerConfig.PublicKeyCallback says that \"A call to this function does not guarantee that the key offered is in fact used to authenticate.\" Specifically, the SSH protocol allows clients to inquire about whether a public key is acceptable before proving control of the corresponding private key. PublicKeyCallback may be called with multiple keys, and the order in which the keys were provided cannot be used to infer which key the client successfully authenticated with, if any. Some applications, which store the key(s) passed to PublicKeyCallback (or derived information) and make security relevant determinations based on it once the connection is established, may make incorrect assumptions. For example, an attacker may send public keys A and B, and then authenticate with A. PublicKeyCallback would be called only twice, first with A and then with B. A vulnerable application may then make authorization decisions based on key B for which the attacker does not actually control the private key. Since this API is widely misused, as a partial mitigation golang.org/x/cry...@v0.31.0 enforces the property that, when successfully authenticating via public key, the last key passed to ServerConfig.PublicKeyCallback will be the key used to authenticate the connection. PublicKeyCallback will now be called multiple times with the same key, if necessary. Note that the client may still not control the last key passed to PublicKeyCallback if the connection is then authenticated with a different method, such as PasswordCallback, KeyboardInteractiveCallback, or NoClientAuth. Users should be using the Extensions field of the Permissions return value from the various authentication callbacks to record data associated with the authentication attempt instead of referencing external state. Once the connection is established the state corresponding to the successful authentication attempt can be retrieved via the ServerConn.Permissions field. Note that some third-party libraries misuse the Permissions type by sharing it across authentication attempts; users of third-party libraries should refer to the relevant projects for guidance.",
+          "Severity": "CRITICAL",
+          "VendorSeverity": {
+            "amazon": 3,
+            "azure": 4,
+            "cbl-mariner": 4,
+            "ghsa": 4,
+            "redhat": 3
+          },
+          "CVSS": {
+            "ghsa": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+              "V3Score": 9.1
+            },
+            "redhat": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:C/C:H/I:H/A:N",
+              "V3Score": 8.2
+            }
+          },
+          "References": [
+            "http://www.openwall.com/lists/oss-security/2024/12/11/2",
+            "https://access.redhat.com/security/cve/CVE-2024-45337",
+            "https://github.com/golang/crypto",
+            "https://github.com/golang/crypto/commit/b4f1988a35dee11ec3e05d6bf3e90b695fbd8909",
+            "https://go.dev/cl/635315",
+            "https://go.dev/issue/70779",
+            "https://groups.google.com/g/golang-announce/c/-nPEi39gI4Q/m/cGVPJCqdAQAJ",
+            "https://nvd.nist.gov/vuln/detail/CVE-2024-45337",
+            "https://pkg.go.dev/vuln/GO-2024-3321",
+            "https://security.netapp.com/advisory/ntap-20250131-0007",
+            "https://security.netapp.com/advisory/ntap-20250131-0007/",
+            "https://www.cve.org/CVERecord?id=CVE-2024-45337"
+          ],
+          "PublishedDate": "2024-12-12T02:02:07.97Z",
+          "LastModifiedDate": "2025-02-18T21:15:22.187Z"
+        },
+        {
+          "VulnerabilityID": "CVE-2025-22869",
+          "PkgID": "golang.org/x/crypto@v0.17.0",
+          "PkgName": "golang.org/x/crypto",
+          "PkgIdentifier": {
+            "PURL": "pkg:golang/golang.org/x/crypto@v0.17.0",
+            "UID": "a9a35da7d01d9af7"
+          },
+          "InstalledVersion": "v0.17.0",
+          "FixedVersion": "0.35.0",
+          "Status": "fixed",
+          "SeveritySource": "ghsa",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2025-22869",
+          "DataSource": {
+            "ID": "ghsa",
+            "Name": "GitHub Security Advisory Go",
+            "URL": "https://github.com/advisories?query=type%3Areviewed+ecosystem%3Ago"
+          },
+          "Title": "golang.org/x/crypto/ssh: Denial of Service in the Key Exchange of golang.org/x/crypto/ssh",
+          "Description": "SSH servers which implement file transfer protocols are vulnerable to a denial of service attack from clients which complete the key exchange slowly, or not at all, causing pending content to be read into memory, but never transmitted.",
+          "Severity": "HIGH",
+          "CweIDs": [
+            "CWE-770"
+          ],
+          "VendorSeverity": {
+            "alma": 3,
+            "amazon": 3,
+            "azure": 3,
+            "cbl-mariner": 3,
+            "ghsa": 3,
+            "oracle-oval": 3,
+            "redhat": 3
+          },
+          "CVSS": {
+            "ghsa": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+              "V3Score": 7.5
+            },
+            "redhat": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+              "V3Score": 7.5
+            }
+          },
+          "References": [
+            "https://access.redhat.com/errata/RHSA-2025:7484",
+            "https://access.redhat.com/security/cve/CVE-2025-22869",
+            "https://bugzilla.redhat.com/2348367",
+            "https://errata.almalinux.org/10/ALSA-2025-7484.html",
+            "https://github.com/golang/crypto",
+            "https://github.com/golang/crypto/commit/7292932d45d55c7199324ab0027cc86e8198aa22",
+            "https://go-review.googlesource.com/c/crypto/+/652135",
+            "https://go.dev/cl/652135",
+            "https://go.dev/issue/71931",
+            "https://linux.oracle.com/cve/CVE-2025-22869.html",
+            "https://linux.oracle.com/errata/ELSA-2025-7484.html",
+            "https://nvd.nist.gov/vuln/detail/CVE-2025-22869",
+            "https://pkg.go.dev/vuln/GO-2025-3487",
+            "https://security.netapp.com/advisory/ntap-20250411-0010",
+            "https://security.netapp.com/advisory/ntap-20250411-0010/",
+            "https://www.cve.org/CVERecord?id=CVE-2025-22869"
+          ],
+          "PublishedDate": "2025-02-26T08:14:24.997Z",
+          "LastModifiedDate": "2025-05-01T19:28:20.74Z"
+        },
+        {
+          "VulnerabilityID": "CVE-2025-22868",
+          "PkgID": "golang.org/x/oauth2@v0.6.0",
+          "PkgName": "golang.org/x/oauth2",
+          "PkgIdentifier": {
+            "PURL": "pkg:golang/golang.org/x/oauth2@v0.6.0",
+            "UID": "9db4f98f08f1f589"
+          },
+          "InstalledVersion": "v0.6.0",
+          "FixedVersion": "0.27.0",
+          "Status": "fixed",
+          "SeveritySource": "ghsa",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2025-22868",
+          "DataSource": {
+            "ID": "ghsa",
+            "Name": "GitHub Security Advisory Go",
+            "URL": "https://github.com/advisories?query=type%3Areviewed+ecosystem%3Ago"
+          },
+          "Title": "golang.org/x/oauth2/jws: Unexpected memory consumption during token parsing in golang.org/x/oauth2/jws",
+          "Description": "An attacker can pass a malicious malformed token which causes unexpected memory to be consumed during parsing.",
+          "Severity": "HIGH",
+          "CweIDs": [
+            "CWE-1286"
+          ],
+          "VendorSeverity": {
+            "amazon": 3,
+            "azure": 3,
+            "cbl-mariner": 3,
+            "ghsa": 3,
+            "redhat": 3
+          },
+          "CVSS": {
+            "ghsa": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+              "V3Score": 7.5
+            },
+            "redhat": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+              "V3Score": 7.5
+            }
+          },
+          "References": [
+            "https://access.redhat.com/security/cve/CVE-2025-22868",
+            "https://go.dev/cl/652155",
+            "https://go.dev/issue/71490",
+            "https://nvd.nist.gov/vuln/detail/CVE-2025-22868",
+            "https://pkg.go.dev/vuln/GO-2025-3488",
+            "https://www.cve.org/CVERecord?id=CVE-2025-22868"
+          ],
+          "PublishedDate": "2025-02-26T08:14:24.897Z",
+          "LastModifiedDate": "2025-05-01T19:27:10.43Z"
+        }
+      ]
+    }
+  ]
+}
