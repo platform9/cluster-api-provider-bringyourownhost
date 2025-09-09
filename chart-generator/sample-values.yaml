@@ -1,1 +1,2 @@
 byohImage: __CONTROLLER_IMAGE__
+byohostAgentHeartbeatTimeout: 120s
