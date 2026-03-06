@@ -9,7 +9,7 @@ replace golang.org/x/net => golang.org/x/net v0.17.0
 require (
 	github.com/docker/cli v24.0.7+incompatible
 	github.com/docker/docker v24.0.7+incompatible
-	github.com/go-logr/logr v1.2.3
+	github.com/go-logr/logr v1.4.3
 	github.com/jackpal/gateway v1.0.7
 	github.com/kube-vip/kube-vip v0.5.5
 	github.com/maxbrunsfeld/counterfeiter/v6 v6.6.1
