@@ -111,7 +111,7 @@ jobs:
           wget -qO- https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo tee /etc/apt/trusted.gpg.d/trivy.asc
           echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
           sudo apt update
-          sudo apt install -y trivy jq
+          sudo apt install -y trivy=0.69.3 jq
 
       - name: Sanitize branch name
         run: echo "SAFE_REF_NAME=${GITHUB_REF_NAME//\//-}" >> $GITHUB_ENV
