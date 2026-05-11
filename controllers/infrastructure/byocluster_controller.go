@@ -5,6 +5,8 @@ package controllers
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"reflect"
 	"time"
 
@@ -30,7 +32,7 @@ import (
 
 var (
 	// DefaultAPIEndpointPort default port for the API endpoint
-	DefaultAPIEndpointPort    = 6443
+	DefaultAPIEndpointPort int32 = 6443
 	clusterControlledType     = &infrav1.ByoCluster{}
 	clusterControlledTypeName = reflect.TypeOf(clusterControlledType).Elem().Name()
 	clusterControlledTypeGVK  = infrav1.GroupVersion.WithKind(clusterControlledTypeName)
@@ -172,7 +174,10 @@ func (r ByoClusterReconciler) reconcileNormal(ctx context.Context, byoCluster *i
 	controllerutil.AddFinalizer(byoCluster, infrav1.ClusterFinalizer)
 
 	if byoCluster.Spec.ControlPlaneEndpoint.Port == 0 {
-		byoCluster.Spec.ControlPlaneEndpoint.Port = int32(DefaultAPIEndpointPort)
+		if DefaultAPIEndpointPort > math.MaxInt32 {
+			return reconcile.Result{}, fmt.Errorf("default API endpoint port value too large: %d", DefaultAPIEndpointPort)
+		}
+		byoCluster.Spec.ControlPlaneEndpoint.Port = DefaultAPIEndpointPort
 	}
 
 	byoCluster.Status.Ready = true
