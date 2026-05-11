@@ -67,12 +67,12 @@ All types follow the Cluster API condition contract and use finalizers for clean
 
 Each controller file maps 1:1 to a resource. Key reconciliation flows:
 
-- `byomachine_controller.go` — the most complex; matches a `ByoMachine` to an available `ByoHost`, injects bootstrap data, and tracks node registration status. Uses `byomachine_scope.go` as a context helper.
+- `byomachine_controller.go` — the most complex; matches a `ByoMachine` to an available `ByoHost`, injects bootstrap data, and tracks node registration status. Uses `byomachine_scope.go` as a context helper. The only controller that uses the `ClusterCacheTracker` (wired in `main.go` as `Tracker: tracker`) to watch workload-cluster objects from the management cluster; all other controllers use only the local management cluster client.
 - `byohost_controller.go` — manages host lifecycle; cleans up when hosts are released.
 - `byoadmission_controller.go` — auto-approves CSRs from registered hosts.
 - `bootstrapkubeconfig_controller.go` — creates the short-lived kubeconfig the agent uses to register itself.
-
-Controllers use controller-runtime's remote cluster cache to watch workload clusters from the management cluster.
+- `k8sinstallerconfig_controller.go` — resolves OCI bundle references and renders installer scripts onto `ByoHost` objects; drives the k8s install/uninstall lifecycle from the management-cluster side.
+- `byomachinetemplate_controller.go` — validates immutability of `ByoMachineTemplate` fields.
 
 ### Host Agent (`agent/`)
 
