@@ -1,0 +1,140 @@
+{
+	"Golang errors": {},
+	"Issues": [
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion int -\u003e int32",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/controllers/infrastructure/byocluster_controller.go",
+			"code": "174: \tif byoCluster.Spec.ControlPlaneEndpoint.Port == 0 {\n175: \t\tbyoCluster.Spec.ControlPlaneEndpoint.Port = int32(DefaultAPIEndpointPort)\n176: \t}\n",
+			"line": "175",
+			"column": "52",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G703",
+			"details": "Path traversal via taint analysis",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/test/e2e/docker_helper.go",
+			"code": "191: \t\tkubeconfig = re.ReplaceAll(kubeconfig, []byte(\"server: https://127.0.0.1:\"+r.Port))\n192: \t\tExpect(os.WriteFile(TempKubeconfigPath, kubeconfig, 0644)).NotTo(HaveOccurred()) //nolint: gosec,mnd\n193: \n",
+			"line": "192",
+			"column": "22",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/test/e2e/e2e_debug_helper.go",
+			"code": "89: func ExecuteShellScript(shellFileName string) {\n90: \tcmd := exec.Command(\"/bin/sh\", \"-x\", shellFileName)\n91: \toutput, err := cmd.Output()\n",
+			"line": "90",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/agent/cloudinit/cmd_runner.go",
+			"code": "23: func (r CmdRunner) RunCmd(ctx context.Context, cmd string) error {\n24: \tcommand := exec.CommandContext(ctx, \"/bin/bash\", \"-c\", cmd)\n25: \tcommand.Stderr = os.Stderr\n",
+			"line": "24",
+			"column": "13",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/test/e2e/e2e_debug_helper.go",
+			"code": "102: func WriteShellScript(shellFileName string, shellFileContent []string) {\n103: \tf, err := os.OpenFile(shellFileName, os.O_APPEND|os.O_WRONLY|os.O_CREATE, DefaultFileMode)\n104: \tif err != nil {\n",
+			"line": "103",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/test/e2e/e2e_debug_helper.go",
+			"code": "76: func ShowFileContent(fileName string) {\n77: \tcontent, err := os.ReadFile(fileName)\n78: \tif err != nil {\n",
+			"line": "77",
+			"column": "18",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/test/e2e/e2e_debug_helper.go",
+			"code": "29: \tbuf := bufio.NewReader(output.Reader)\n30: \tf, err := os.OpenFile(outputFile, os.O_CREATE|os.O_WRONLY, DefaultFileMode)\n31: \tif err != nil {\n",
+			"line": "30",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/test/e2e/docker_helper.go",
+			"code": "191: \t\tkubeconfig = re.ReplaceAll(kubeconfig, []byte(\"server: https://127.0.0.1:\"+r.Port))\n192: \t\tExpect(os.WriteFile(TempKubeconfigPath, kubeconfig, 0644)).NotTo(HaveOccurred()) //nolint: gosec,mnd\n193: \n",
+			"line": "192",
+			"column": "10",
+			"nosec": false,
+			"suppressions": null
+		}
+	],
+	"Stats": {
+		"files": 54,
+		"lines": 7391,
+		"nosec": 0,
+		"found": 8
+	},
+	"GosecVersion": "dev"
+}
