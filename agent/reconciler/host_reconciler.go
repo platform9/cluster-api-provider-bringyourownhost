@@ -257,6 +257,10 @@ func (r *HostReconciler) hostCleanUp(ctx context.Context, byoHost *infrastructur
 		if err != nil {
 			return err
 		}
+		// Mark the condition False immediately after reset so that if the uninstall
+		// script fetch fails below, subsequent reconciles do not re-run kubeadm reset.
+		// The deferred helper.Patch in Reconcile persists this even when we return an error.
+		conditions.MarkFalse(byoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded, infrastructurev1beta1.K8sNodeAbsentReason, clusterv1.ConditionSeverityInfo, "")
 		if r.SkipK8sInstallation {
 			logger.Info("Skipping uninstallation of k8s components")
 		} else {
@@ -291,7 +295,6 @@ func (r *HostReconciler) hostCleanUp(ctx context.Context, byoHost *infrastructur
 				return err
 			}
 		}
-		conditions.MarkFalse(byoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded, infrastructurev1beta1.K8sNodeAbsentReason, clusterv1.ConditionSeverityInfo, "")
 		logger.Info("host removed from the cluster and the uninstall is executed successfully")
 	} else {
 		logger.Info("Skipping k8s node reset and k8s component uninstallation")
