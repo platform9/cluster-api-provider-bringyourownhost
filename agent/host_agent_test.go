@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/klog/v2/klogr"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
 )
@@ -315,6 +316,15 @@ var _ = Describe("Agent", func() {
 					Name:       fakeInstallationSecret.Name,
 					UID:        fakeInstallationSecret.UID,
 				}
+
+				conditions.Set(byoHost, &clusterv1.Condition{
+					Type:               infrastructurev1beta1.K8sComponentsInstallationSucceeded,
+					Status:             corev1.ConditionTrue,
+					Reason:             "Installed",
+					Severity:           clusterv1.ConditionSeverityInfo,
+					Message:            "Kubernetes components installed successfully",
+					LastTransitionTime: metav1.Now(),
+				})
 
 				Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
 			})
