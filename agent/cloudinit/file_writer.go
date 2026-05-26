@@ -6,6 +6,7 @@ package cloudinit
 import (
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"os/user"
 	"strconv"
@@ -69,16 +70,14 @@ func (w FileWriter) WriteToFile(file *Files) error {
 	}
 
 	if file.Permissions != "" {
-		var fileMode uint64
 		base := 8
 		bitSize := 32
-		fileMode, err = strconv.ParseUint(file.Permissions, base, bitSize)
+		fileMode, err := strconv.ParseUint(file.Permissions, base, bitSize)
 		if err != nil {
-			return errors.Wrap(err, fmt.Sprintf("Error parse the file permission %s", file.Permissions))
+			return errors.Wrap(err, fmt.Sprintf("error parse the file permission %s", file.Permissions))
 		}
 
-		err = f.Chmod(fs.FileMode(fileMode))
-		if err != nil {
+		if err := f.Chmod(fs.FileMode(fileMode)); err != nil {
 			return err
 		}
 	}
@@ -95,21 +94,24 @@ func (w FileWriter) WriteToFile(file *Files) error {
 
 		userInfo, err := user.Lookup(owner[0])
 		if err != nil {
-			return errors.Wrap(err, fmt.Sprintf("Error Lookup user %s", owner[0]))
+			return errors.Wrap(err, fmt.Sprintf("error lookup user %s", owner[0]))
 		}
 
 		uid, err := strconv.ParseUint(userInfo.Uid, base, bitSize)
 		if err != nil {
-			return errors.Wrap(err, fmt.Sprintf("Error convert uid %s", userInfo.Uid))
+			return errors.Wrap(err, fmt.Sprintf("error convert uid %s", userInfo.Uid))
 		}
 
 		gid, err := strconv.ParseUint(userInfo.Gid, base, bitSize)
 		if err != nil {
-			return errors.Wrap(err, fmt.Sprintf("Error convert gid %s", userInfo.Gid))
+			return errors.Wrap(err, fmt.Sprintf("error convert gid %s", userInfo.Gid))
 		}
 
-		err = f.Chown(int(uid), int(gid))
-		if err != nil {
+		if uid > math.MaxInt64 || gid > math.MaxInt64 {
+			return fmt.Errorf("uid or gid value too large for int: uid=%d, gid=%d", uid, gid)
+		}
+
+		if err := f.Chown(int(uid), int(gid)); err != nil {
 			return err
 		}
 	}
