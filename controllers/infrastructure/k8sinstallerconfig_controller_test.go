@@ -368,6 +368,25 @@ var _ = Describe("Controllers/K8sInstallerConfigController", func() {
 			Expect(updatedConfig.Status.Ready).To(BeTrue())
 		})
 
+		It("should create uninstall secret without owner reference", func() {
+			_, err := k8sInstallerConfigReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      k8sinstallerConfig.Name,
+					Namespace: k8sinstallerConfig.Namespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			uninstallSecret := &corev1.Secret{}
+			err = k8sClientUncached.Get(ctx, types.NamespacedName{
+				Name:      "byoh-uninstall-" + k8sinstallerConfig.Name,
+				Namespace: k8sinstallerConfig.Namespace,
+			}, uninstallSecret)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(uninstallSecret.OwnerReferences).To(BeEmpty(),
+				"uninstall secret must have no owner so it is not GC'd when K8sInstallerConfig is deleted")
+		})
+
 		Context("When K8sInstallerConfig is deleted", func() {
 			BeforeEach(func() {
 				_, err := k8sInstallerConfigReconciler.Reconcile(ctx, reconcile.Request{

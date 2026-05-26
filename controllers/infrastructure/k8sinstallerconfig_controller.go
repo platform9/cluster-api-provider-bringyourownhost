@@ -220,7 +220,6 @@ func (r *K8sInstallerConfigReconciler) storeInstallationData(ctx context.Context
 			Labels: map[string]string{
 				clusterv1.ClusterNameLabel: scope.Cluster.Name,
 			},
-			OwnerReferences: ownerReference,
 		},
 		Data: map[string][]byte{
 			"uninstall": []byte(uninstall),
