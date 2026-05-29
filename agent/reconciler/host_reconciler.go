@@ -13,6 +13,7 @@ import (
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/registration"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/common"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
@@ -251,53 +252,58 @@ func (r *HostReconciler) hostCleanUp(ctx context.Context, byoHost *infrastructur
 	logger := ctrl.LoggerFrom(ctx)
 	logger.Info("cleaning up host")
 
+	// Guard kubeadm reset behind the installation condition — only run if k8s was installed.
+	// MarkFalse immediately after reset so retries skip reset and only retry the uninstall script.
 	k8sComponentsInstallationSucceeded := conditions.Get(byoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded)
 	if k8sComponentsInstallationSucceeded != nil && k8sComponentsInstallationSucceeded.Status == corev1.ConditionTrue {
 		err := r.resetNode(ctx, byoHost)
 		if err != nil {
 			return err
 		}
-		// Mark the condition False immediately after reset so that if the uninstall
-		// script fetch fails below, subsequent reconciles do not re-run kubeadm reset.
-		// The deferred helper.Patch in Reconcile persists this even when we return an error.
 		conditions.MarkFalse(byoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded, infrastructurev1beta1.K8sNodeAbsentReason, clusterv1.ConditionSeverityInfo, "")
-		if r.SkipK8sInstallation {
-			logger.Info("Skipping uninstallation of k8s components")
-		} else {
-			logger.Info("Executing Uninstall script")
-			if byoHost.Spec.UninstallationSecret == nil {
-				return fmt.Errorf("UninstallationSecret not found in Byohost %s", byoHost.Name)
-			}
-			secret := &corev1.Secret{}
-			err := r.Client.Get(ctx, types.NamespacedName{
-				Name:      byoHost.Spec.UninstallationSecret.Name,
-				Namespace: byoHost.Spec.UninstallationSecret.Namespace,
-			}, secret)
-			if err != nil {
-				logger.Error(err, "error getting uninstallation script secret")
-				r.Recorder.Eventf(byoHost, corev1.EventTypeWarning, "ReadUninstallationSecretFailed", "uninstallation secret %s not found", byoHost.Spec.UninstallationSecret.Name)
-				return err
-			}
-			uninstallScriptBytes, ok := secret.Data["uninstall"]
-			if !ok {
-				return fmt.Errorf("uninstall script not found in secret %s", secret.Name)
-			}
-			uninstallScript := string(uninstallScriptBytes)
-			uninstallScript, err = r.parseScript(ctx, uninstallScript)
-			if err != nil {
-				logger.Error(err, "error parsing Uninstallation script")
-				return err
-			}
-			err = r.CmdRunner.RunCmd(ctx, uninstallScript)
-			if err != nil {
-				logger.Error(err, "error executing Uninstallation script")
-				r.Recorder.Event(byoHost, corev1.EventTypeWarning, "UninstallScriptExecutionFailed", "uninstall script execution failed")
-				return err
-			}
-		}
-		logger.Info("host removed from the cluster and the uninstall is executed successfully")
 	} else {
-		logger.Info("Skipping k8s node reset and k8s component uninstallation")
+		logger.Info("Skipping k8s node reset")
+	}
+
+	// Guard uninstall script behind UninstallationSecret being set — independent of the reset
+	// condition so that retries after a failed uninstall still execute the script.
+	if !r.SkipK8sInstallation && byoHost.Spec.UninstallationSecret != nil {
+		logger.Info("Executing Uninstall script")
+		secret := &corev1.Secret{}
+		err := r.Client.Get(ctx, types.NamespacedName{
+			Name:      byoHost.Spec.UninstallationSecret.Name,
+			Namespace: byoHost.Spec.UninstallationSecret.Namespace,
+		}, secret)
+		if err != nil {
+			logger.Error(err, "error getting uninstallation script secret")
+			r.Recorder.Eventf(byoHost, corev1.EventTypeWarning, "ReadUninstallationSecretFailed", "uninstallation secret %s not found", byoHost.Spec.UninstallationSecret.Name)
+			return err
+		}
+		uninstallScriptBytes, ok := secret.Data["uninstall"]
+		if !ok {
+			return fmt.Errorf("uninstall script not found in secret %s", secret.Name)
+		}
+		uninstallScript := string(uninstallScriptBytes)
+		uninstallScript, err = r.parseScript(ctx, uninstallScript)
+		if err != nil {
+			logger.Error(err, "error parsing Uninstallation script")
+			return err
+		}
+		err = r.CmdRunner.RunCmd(ctx, uninstallScript)
+		if err != nil {
+			logger.Error(err, "error executing Uninstallation script")
+			r.Recorder.Event(byoHost, corev1.EventTypeWarning, "UninstallScriptExecutionFailed", "uninstall script execution failed")
+			return err
+		}
+		// Delete the secret — it has no owner (ownerRef removed in k8sinstallerconfig controller)
+		// so it must be explicitly cleaned up after use.
+		if err := r.Client.Delete(ctx, secret); err != nil && !apierrors.IsNotFound(err) {
+			logger.Error(err, "error deleting uninstallation secret", "secret", secret.Name)
+		}
+		byoHost.Spec.UninstallationSecret = nil
+		logger.Info("host removed from the cluster and the uninstall is executed successfully")
+	} else if r.SkipK8sInstallation {
+		logger.Info("Skipping uninstallation of k8s components")
 	}
 	conditions.MarkFalse(byoHost, infrastructurev1beta1.K8sNodeBootstrapSucceeded, infrastructurev1beta1.K8sNodeAbsentReason, clusterv1.ConditionSeverityInfo, "")
 
@@ -375,10 +381,6 @@ func (r *HostReconciler) removeAnnotations(ctx context.Context, byoHost *infrast
 
 	// Remove BootstrapSecret
 	byoHost.Spec.BootstrapSecret = nil
-
-	// Remove UninstallationSecret reference (secret itself has no owner after Task 1;
-	// clearing the reference avoids a stale pointer on the host after cleanup)
-	byoHost.Spec.UninstallationSecret = nil
 
 	// Remove cluster-name label
 	delete(byoHost.Labels, clusterv1.ClusterNameLabel)
