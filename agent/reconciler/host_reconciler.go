@@ -13,7 +13,6 @@ import (
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/registration"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/common"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
@@ -295,12 +294,6 @@ func (r *HostReconciler) hostCleanUp(ctx context.Context, byoHost *infrastructur
 			r.Recorder.Event(byoHost, corev1.EventTypeWarning, "UninstallScriptExecutionFailed", "uninstall script execution failed")
 			return err
 		}
-		// Delete the secret — it has no owner (ownerRef removed in k8sinstallerconfig controller)
-		// so it must be explicitly cleaned up after use.
-		if err := r.Client.Delete(ctx, secret); err != nil && !apierrors.IsNotFound(err) {
-			logger.Error(err, "error deleting uninstallation secret", "secret", secret.Name)
-		}
-		byoHost.Spec.UninstallationSecret = nil
 		logger.Info("host removed from the cluster and the uninstall is executed successfully")
 	} else if r.SkipK8sInstallation {
 		logger.Info("Skipping uninstallation of k8s components")
