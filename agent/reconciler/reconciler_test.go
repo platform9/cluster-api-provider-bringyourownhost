@@ -578,8 +578,8 @@ runCmd:
 				Expect(updatedByoHost.Annotations).NotTo(HaveKey(infrastructurev1beta1.EndPointIPAnnotation))
 				Expect(updatedByoHost.Annotations).NotTo(HaveKey(infrastructurev1beta1.K8sVersionAnnotation))
 				Expect(updatedByoHost.Annotations).NotTo(HaveKey(infrastructurev1beta1.BundleLookupBaseRegistryAnnotation))
-				Expect(updatedByoHost.Spec.UninstallationSecret).NotTo(BeNil())
-				Expect(updatedByoHost.Spec.UninstallationSecret.Name).To(Equal(uninstallSecretName))
+				Expect(updatedByoHost.Spec.UninstallationSecret).To(BeNil(),
+					"UninstallationSecret reference should be cleared after successful cleanup")
 
 				k8sNodeBootstrapSucceeded := conditions.Get(updatedByoHost, infrastructurev1beta1.K8sNodeBootstrapSucceeded)
 				Expect(*k8sNodeBootstrapSucceeded).To(conditions.MatchCondition(clusterv1.Condition{
@@ -605,6 +605,35 @@ runCmd:
 				})
 				Expect(result).To(Equal(controllerruntime.Result{}))
 				Expect(reconcilerErr).To(MatchError("UninstallationSecret not found in Byohost " + byoHost.Name))
+			})
+
+			It("should not run kubeadm reset a second time when uninstall secret is absent", func() {
+				// First reconcile: kubeadm reset runs, then fails on missing secret
+				byoHost.Spec.UninstallationSecret = nil
+				Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
+
+				_, firstErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
+					NamespacedName: byoHostLookupKey,
+				})
+				Expect(firstErr).To(HaveOccurred())
+				Expect(fakeCommandRunner.RunCmdCallCount()).To(Equal(1), "kubeadm reset must run exactly once on first reconcile")
+				_, firstCmd := fakeCommandRunner.RunCmdArgsForCall(0)
+				Expect(firstCmd).To(Equal(reconciler.KubeadmResetCommand))
+
+				// Reload host state as the reconciler patched it
+				reloadedHost := &infrastructurev1beta1.ByoHost{}
+				Expect(k8sClient.Get(ctx, byoHostLookupKey, reloadedHost)).NotTo(HaveOccurred())
+				k8sComponentsCond := conditions.Get(reloadedHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded)
+				Expect(k8sComponentsCond).NotTo(BeNil())
+				Expect(k8sComponentsCond.Status).To(Equal(corev1.ConditionFalse),
+					"K8sComponentsInstallationSucceeded must be False after reset so second reconcile skips kubeadm reset")
+
+				// Second reconcile: must NOT run kubeadm reset again
+				_, secondErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
+					NamespacedName: byoHostLookupKey,
+				})
+				Expect(secondErr).ToNot(HaveOccurred())
+				Expect(fakeCommandRunner.RunCmdCallCount()).To(Equal(1), "kubeadm reset must NOT be called again on second reconcile")
 			})
 
 			It("should return error if uninstall script execution failed", func() {
