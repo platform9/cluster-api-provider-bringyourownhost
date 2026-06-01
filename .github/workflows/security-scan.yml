@@ -92,7 +92,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           BRANCH="auto/gosec-scan/${{ env.SAFE_REF_NAME }}"
-          PR_NUMBER=$(gh pr list --repo "${{ github.repository }}" --head "$BRANCH" --state open --json number --jq '.[0].number')
+          PR_NUMBER=$(gh pr list --repo "${{ github.repository }}" --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
           if [[ -n "$PR_NUMBER" ]]; then
             gh pr close "$PR_NUMBER" --repo "${{ github.repository }}" --comment "No HIGH/CRITICAL vulnerabilities found in latest scan on \`${{ github.ref_name }}\`. Closing report."
           fi
@@ -184,7 +184,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           BRANCH="auto/trivy-scan/${{ env.SAFE_REF_NAME }}"
-          PR_NUMBER=$(gh pr list --repo "${{ github.repository }}" --head "$BRANCH" --state open --json number --jq '.[0].number')
+          PR_NUMBER=$(gh pr list --repo "${{ github.repository }}" --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
           if [[ -n "$PR_NUMBER" ]]; then
             gh pr close "$PR_NUMBER" --repo "${{ github.repository }}" --comment "No HIGH/CRITICAL vulnerabilities found in latest scan on \`${{ github.ref_name }}\`. Closing report."
           fi
