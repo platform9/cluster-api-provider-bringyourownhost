@@ -30,7 +30,7 @@ modprobe -rq overlay || true && modprobe -r br_netfilter || true
 
 ## restore firewall to its pre-install state
 if command -v ufw >>/dev/null; then
-    if [ -f /var/lib/byoh/ufw-state ] && grep -q "active" /var/lib/byoh/ufw-state; then
+    if [ -f /var/lib/byoh/ufw-state ] && grep -qx "active" /var/lib/byoh/ufw-state; then
         ufw enable
     fi
 fi
