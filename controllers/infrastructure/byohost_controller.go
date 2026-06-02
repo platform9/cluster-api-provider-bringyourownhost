@@ -10,6 +10,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/cluster-api/util/patch"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -62,6 +63,19 @@ func (r *ByoHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ 
 			}
 			logger.Info("deleted uninstallation secret", "secret", secret.Name)
 		}
+
+		// Clear the stale reference so re-used hosts get a fresh uninstall secret
+		// on their next machine assignment.
+		helper, patchErr := patch.NewHelper(byoHost, r.Client)
+		if patchErr != nil {
+			return ctrl.Result{}, patchErr
+		}
+		byoHost.Spec.UninstallationSecret = nil
+		if patchErr = helper.Patch(ctx, byoHost); patchErr != nil {
+			logger.Error(patchErr, "failed to clear uninstallationSecret reference on ByoHost")
+			return ctrl.Result{}, patchErr
+		}
+		logger.Info("cleared uninstallationSecret reference on ByoHost")
 	}
 
 	return ctrl.Result{}, nil
