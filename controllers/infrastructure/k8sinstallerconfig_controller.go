@@ -251,7 +251,7 @@ func (r *K8sInstallerConfigReconciler) storeInstallationData(ctx context.Context
 	if err := r.Status().Update(ctx, scope.Config); err != nil {
 		return errors.Wrapf(err, "failed to update K8sInstallerConfig status with installation/uninstallation secret references")
 	}
-	
+
 	return nil
 }
 
