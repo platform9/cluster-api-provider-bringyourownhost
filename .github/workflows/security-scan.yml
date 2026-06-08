@@ -115,13 +115,14 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Install Trivy
+        env:
+          TRIVY_VERSION: "0.71.0"
         run: |
           sudo apt update
-          sudo apt install wget -y
-          wget -qO- https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo tee /etc/apt/trusted.gpg.d/trivy.asc
-          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
-          sudo apt update
-          sudo apt install -y trivy=0.70.0 jq
+          sudo apt install -y jq
+          curl -sSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.deb" -o trivy.deb
+          sudo dpkg -i trivy.deb
+          rm trivy.deb
 
       - name: Sanitize branch name
         run: echo "SAFE_REF_NAME=${GITHUB_REF_NAME//\//-}" >> $GITHUB_ENV
