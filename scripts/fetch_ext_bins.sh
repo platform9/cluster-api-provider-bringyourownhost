@@ -67,30 +67,27 @@ function fetch_tools {
   mkdir -p ${tmp_root}
 
   # use the pre-existing version in the temporary folder if it matches our k8s version
-  if [[ -x "${tmp_root}/kubebuilder/bin/kube-apiserver" ]]; then
-    version=$(${tmp_root}/kubebuilder/bin/kube-apiserver --version)
+  if [[ -x "${tmp_root}/controller-tools/envtest/kube-apiserver" ]]; then
+    version=$(${tmp_root}/controller-tools/envtest/kube-apiserver --version)
     if [[ $version == *"${k8s_version}"* ]]; then
       return 0
     fi
   fi
 
-  header_text "fetching kubebuilder-tools@${k8s_version}"
-  kb_tools_archive_name="kubebuilder-tools-${k8s_version}-${goos}-${goarch}.tar.gz"
-  kb_tools_download_url="https://storage.googleapis.com/kubebuilder-tools/${kb_tools_archive_name}"
+  header_text "fetching envtest@${k8s_version}"
+  kb_tools_archive_name="envtest-v${k8s_version}-${goos}-${goarch}.tar.gz"
+  kb_tools_download_url="https://github.com/kubernetes-sigs/controller-tools/releases/download/envtest-v${k8s_version}/${kb_tools_archive_name}"
 
   kb_tools_archive_path="${tmp_root}/${kb_tools_archive_name}"
   if [[ ! -f ${kb_tools_archive_path} ]]; then
     curl -fsL ${kb_tools_download_url} -o "${kb_tools_archive_path}"
   fi
+  rm -rf "${tmp_root}/controller-tools"
   tar -zvxf "${kb_tools_archive_path}" -C "${tmp_root}/"
   rm "${kb_tools_archive_path}"
 }
 
 function setup_envs {
-  header_text "setting up kubebuilder-tools@${k8s_version} env vars"
-  # Setup env vars
-  export PATH=${tmp_root}/kubebuilder/bin:$PATH
-  export TEST_ASSET_KUBECTL=${tmp_root}/kubebuilder/bin/kubectl
-  export TEST_ASSET_KUBE_APISERVER=${tmp_root}/kubebuilder/bin/kube-apiserver
-  export TEST_ASSET_ETCD=${tmp_root}/kubebuilder/bin/etcd
+  header_text "setting up envtest@${k8s_version} env vars"
+  export KUBEBUILDER_ASSETS="${tmp_root}/controller-tools/envtest"
 }
