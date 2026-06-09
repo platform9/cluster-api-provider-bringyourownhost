@@ -15,6 +15,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -23,7 +24,12 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 	err := AddToScheme(schema)
 	Expect(err).NotTo(HaveOccurred())
 	decoder, _ := admission.NewDecoder(schema)
+	byoMachine := &ByoMachine{
+		ObjectMeta: metav1.ObjectMeta{Name: "byomachine1", Namespace: "default"},
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(schema).WithObjects(byoMachine).Build()
 	v := &ByoHostValidator{
+		Client:  fakeClient,
 		decoder: decoder,
 	}
 	Context("When ByoHost gets a create request", func() {
