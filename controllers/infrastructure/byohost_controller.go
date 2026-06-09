@@ -5,6 +5,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -58,8 +59,7 @@ func (r *ByoHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ 
 		}
 		if err == nil {
 			if delErr := r.Delete(ctx, secret); delErr != nil && !apierrors.IsNotFound(delErr) {
-				logger.Error(delErr, "failed to delete uninstallation secret", "secret", secret.Name)
-				return ctrl.Result{}, delErr
+				return ctrl.Result{}, fmt.Errorf("failed to delete uninstallation secret %s: %w", secret.Name, delErr)
 			}
 			logger.Info("deleted uninstallation secret", "secret", secret.Name)
 		}
@@ -72,8 +72,7 @@ func (r *ByoHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ 
 		}
 		byoHost.Spec.UninstallationSecret = nil
 		if patchErr = helper.Patch(ctx, byoHost); patchErr != nil {
-			logger.Error(patchErr, "failed to clear uninstallationSecret reference on ByoHost")
-			return ctrl.Result{}, patchErr
+			return ctrl.Result{}, fmt.Errorf("failed to clear uninstallationSecret reference on ByoHost: %w", patchErr)
 		}
 		logger.Info("cleared uninstallationSecret reference on ByoHost")
 	}
