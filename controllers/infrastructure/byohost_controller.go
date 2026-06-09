@@ -48,7 +48,6 @@ func (r *ByoHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ 
 	if byoHost.Spec.UninstallationSecret != nil &&
 		byoHost.Status.MachineRef == nil &&
 		!hasCleanupAnnotation {
-
 		secret := &corev1.Secret{}
 		err := r.Get(ctx, types.NamespacedName{
 			Name:      byoHost.Spec.UninstallationSecret.Name,
