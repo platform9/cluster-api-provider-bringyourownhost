@@ -240,7 +240,7 @@ runCmd:
 					// assert events
 					events := eventutils.CollectEvents(recorder.Events)
 					Expect(events).Should(ConsistOf([]string{
-						fmt.Sprintf("Warning ReadInstallationSecretFailed install and uninstall script %s not found", byoHost.Spec.InstallationSecret.Name),
+						fmt.Sprintf("Warning ReadInstallationSecretFailed install script %s not found", byoHost.Spec.InstallationSecret.Name),
 					}))
 				})
 
@@ -392,7 +392,7 @@ runCmd:
 						// assert events
 						events := eventutils.CollectEvents(recorder.Events)
 						Expect(events).Should(ConsistOf([]string{
-							"Warning ReadInstallationSecretFailed install and uninstall script non-existent not found",
+							"Warning ReadInstallationSecretFailed install script non-existent not found",
 						}))
 
 					})
@@ -415,6 +415,7 @@ runCmd:
 							Namespace: ns,
 							Name:      uninstallSecretName,
 						}
+						Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
 
 						result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 							NamespacedName: byoHostLookupKey,
@@ -597,25 +598,32 @@ runCmd:
 			})
 
 			It("should return an error if we fail to load the uninstallation secret", func() {
-				byoHost.Spec.UninstallationSecret = nil
+				missingSecretName := "byoh-uninstall-missing-" + byoHost.Name
+				byoHost.Spec.UninstallationSecret = &corev1.ObjectReference{
+					Kind:      "Secret",
+					Namespace: ns,
+					Name:      missingSecretName,
+				}
 				Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
 
-				result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
+				_, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 					NamespacedName: byoHostLookupKey,
 				})
-				Expect(result).To(Equal(controllerruntime.Result{}))
-				Expect(reconcilerErr).To(MatchError("UninstallationSecret not found in Byohost " + byoHost.Name))
+				Expect(reconcilerErr).To(HaveOccurred())
+
+				events := eventutils.CollectEvents(recorder.Events)
+				Expect(events).To(ContainElement("Warning ReadUninstallationSecretFailed uninstallation secret " + missingSecretName + " not found"))
 			})
 
 			It("should not run kubeadm reset a second time when uninstall secret is absent", func() {
-				// First reconcile: kubeadm reset runs, then fails on missing secret
+				// First reconcile: kubeadm reset runs, uninstall is skipped (nil secret ref), reconcile returns nil
 				byoHost.Spec.UninstallationSecret = nil
 				Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
 
 				_, firstErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 					NamespacedName: byoHostLookupKey,
 				})
-				Expect(firstErr).To(HaveOccurred())
+				Expect(firstErr).ToNot(HaveOccurred())
 				Expect(fakeCommandRunner.RunCmdCallCount()).To(Equal(1), "kubeadm reset must run exactly once on first reconcile")
 				_, firstCmd := fakeCommandRunner.RunCmdArgsForCall(0)
 				Expect(firstCmd).To(Equal(reconciler.KubeadmResetCommand))
