@@ -28,9 +28,12 @@ fi
 ## remove kernal modules
 modprobe -rq overlay || true && modprobe -r br_netfilter || true
 
-## enable firewall
+## restore firewall to its pre-install state
 if command -v ufw >>/dev/null; then
-    ufw enable
+    if [ -f /var/lib/byoh/ufw-state ] && grep -qx "active" /var/lib/byoh/ufw-state; then
+        ufw enable
+    fi
+    rm -f /var/lib/byoh/ufw-state
 fi
 
 ## enable swap
