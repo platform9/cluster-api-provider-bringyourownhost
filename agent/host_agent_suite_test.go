@@ -103,7 +103,14 @@ var _ = BeforeSuite(func() {
 	dockerClient, err = dClient.NewClientWithOpts(dClient.FromEnv, dClient.WithAPIVersionNegotiation())
 	Expect(err).NotTo(HaveOccurred())
 
-	pathToHostAgentBinary, err = gexec.Build("github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent")
+	// The host agent binary is docker cp'd into an ubuntu:22.04 container and
+	// executed there. Build it static so it does not depend on the build host's
+	// dynamic loader: a CGO build links the toolchain's loader (e.g. a
+	// Nix-provided glibc under /nix/store), which is absent in the container.
+	pathToHostAgentBinary, err = gexec.BuildWithEnvironment(
+		"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent",
+		[]string{"CGO_ENABLED=0"},
+	)
 	Expect(err).NotTo(HaveOccurred())
 
 	writeKubeConfig()
