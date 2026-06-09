@@ -302,12 +302,23 @@ func setControlPlaneIP(ctx context.Context, dockerClient *client.Client) {
 		return
 	}
 	inspect, _ := dockerClient.NetworkInspect(ctx, "kind", types.NetworkInspectOptions{})
-	ipOctets := strings.Split(inspect.IPAM.Config[0].Subnet, ".")
+
+	// kind networks may include IPv6 IPAM configs; find the first IPv4 subnet.
+	var ipv4Subnet string
+	for _, cfg := range inspect.IPAM.Config {
+		if strings.Contains(cfg.Subnet, ".") {
+			ipv4Subnet = cfg.Subnet
+			break
+		}
+	}
+	Expect(ipv4Subnet).NotTo(BeEmpty(), "no IPv4 subnet found in kind network IPAM config")
+	ipOctets := strings.Split(ipv4Subnet, ".")
 
 	// The ControlPlaneEndpoint is a static IP that is in the hosts'
 	// subnet but outside of its DHCP range. We believe 151 is a pretty
 	// high number and we have < 10 containers being spun up, so we
 	// can safely use this IP for the ControlPlaneEndpoint
+	Expect(len(ipOctets)).To(BeNumerically(">=", 4), "unexpected subnet format: %s", ipv4Subnet)
 	ipOctets[3] = "151"
 	ip := strings.Join(ipOctets, ".")
 	err := os.Setenv("CONTROL_PLANE_ENDPOINT_IP", ip)
