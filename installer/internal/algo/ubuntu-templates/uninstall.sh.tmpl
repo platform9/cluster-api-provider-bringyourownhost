@@ -33,6 +33,7 @@ if command -v ufw >>/dev/null; then
     if [ -f /var/lib/byoh/ufw-state ] && grep -qx "active" /var/lib/byoh/ufw-state; then
         ufw enable
     fi
+    rm -f /var/lib/byoh/ufw-state
 fi
 
 ## enable swap
