@@ -34,7 +34,9 @@ swapoff -a && sed -ri '/\sswap\s/s/^#?/#/' /etc/fstab
 ## disable firewall, save current state so uninstall can restore it
 if command -v ufw >>/dev/null; then
     mkdir -p /var/lib/byoh
-    ufw status | grep -q "Status: active" && echo "active" > /var/lib/byoh/ufw-state || echo "inactive" > /var/lib/byoh/ufw-state
+    if [ ! -f /var/lib/byoh/ufw-state ]; then
+        ufw status | grep -q "Status: active" && echo "active" > /var/lib/byoh/ufw-state || echo "inactive" > /var/lib/byoh/ufw-state
+    fi
     ufw disable
 fi
 
