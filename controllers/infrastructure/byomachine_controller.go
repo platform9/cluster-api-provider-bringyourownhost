@@ -661,6 +661,7 @@ func (r *ByoMachineReconciler) markHostForCleanup(ctx context.Context, machineSc
 	} else {
 		logger.Info("Removing pf9 cluster label %s from ByoHost %s", infrav1.ClusterLabel, machineScope.ByoHost.Name)
 		delete(machineScope.ByoHost.Labels, infrav1.ClusterLabel)
+		delete(machineScope.ByoHost.Labels, infrav1.ClusterLabelCP)
 	}
 
 	// Issue the patch for byohost
