@@ -11,6 +11,7 @@ export BUNDLE_VERSION=${BUNDLE_VERSION:-v1.32.2}
 export ARCH=${ARCH:-amd64}
 export CRITOOL_VERSION=${CRITOOL_VERSION:-1.32.0-1.1}
 export UBUNTU_VERSION=${UBUNTU_VERSION:-"22.04"} # Default to 22.04, can be overridden
+export BUNDLE_REGISTRY=${BUNDLE_REGISTRY:-"quay.io/platform9"}
 
 #alias shasum="sha512sum"
 echo "installing imgpkg"
@@ -56,5 +57,5 @@ else
 fi
 
 # Push bundle
-echo "pushing oci bundle to quay.io/platform9/$BUNDLE_NAME"
-./imgpkg push -f ./bundle -i quay.io/platform9/$BUNDLE_NAME:$BUNDLE_VERSION
+echo "pushing oci bundle to $BUNDLE_REGISTRY/$BUNDLE_NAME"
+./imgpkg push -f ./bundle -i $BUNDLE_REGISTRY/$BUNDLE_NAME:$BUNDLE_VERSION
