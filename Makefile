@@ -4,6 +4,15 @@ SHELL:=/usr/bin/env bash
 # Define registries
 STAGING_REGISTRY ?= gcr.io/k8s-staging-cluster-api
 
+# Bundle build variables
+BUNDLE_REGISTRY         ?= quay.io/platform9
+BUNDLE_VERSION          ?= v1.32.2
+BUNDLE_UBUNTU_VERSION   ?= 22.04
+BUNDLE_KUBERNETES_VERSION       ?= 1.32.2-1.1
+BUNDLE_KUBERNETES_MAJOR_VERSION ?= v1.32
+BUNDLE_CRITOOL_VERSION  ?= 1.32.0-1.1
+BUNDLE_CONTAINERD_VERSION ?= 1.7.26
+
 IMAGE_NAME ?= cluster-api-byoh-controller
 TAG ?= dev
 RELEASE_DIR := _dist
@@ -113,6 +122,28 @@ docker-build: ## Build docker image with the manager.
 
 docker-push: ## Push docker image with the manager.
 	docker push ${IMG}
+
+bundle-build: ## Build the BYOH k8s bundle (no push). Override vars e.g: make bundle-build BUNDLE_VERSION=v1.33.2 BUNDLE_REGISTRY=quay.io/shubham-pf9
+	BUNDLE_REGISTRY=$(BUNDLE_REGISTRY) \
+	BUNDLE_VERSION=$(BUNDLE_VERSION) \
+	UBUNTU_VERSION=$(BUNDLE_UBUNTU_VERSION) \
+	KUBERNETES_VERSION=$(BUNDLE_KUBERNETES_VERSION) \
+	KUBERNETES_MAJOR_VERSION=$(BUNDLE_KUBERNETES_MAJOR_VERSION) \
+	CRITOOL_VERSION=$(BUNDLE_CRITOOL_VERSION) \
+	CONTAINERD_VERSION=$(BUNDLE_CONTAINERD_VERSION) \
+	BUILD_ONLY=1 \
+	bash .ci/build-push-bundle.sh
+
+bundle-push: ## Build and push the BYOH k8s bundle. Override vars e.g: make bundle-push BUNDLE_VERSION=v1.33.2 BUNDLE_REGISTRY=quay.io/shubham-pf9
+	BUNDLE_REGISTRY=$(BUNDLE_REGISTRY) \
+	BUNDLE_VERSION=$(BUNDLE_VERSION) \
+	UBUNTU_VERSION=$(BUNDLE_UBUNTU_VERSION) \
+	KUBERNETES_VERSION=$(BUNDLE_KUBERNETES_VERSION) \
+	KUBERNETES_MAJOR_VERSION=$(BUNDLE_KUBERNETES_MAJOR_VERSION) \
+	CRITOOL_VERSION=$(BUNDLE_CRITOOL_VERSION) \
+	CONTAINERD_VERSION=$(BUNDLE_CONTAINERD_VERSION) \
+	BUILD_ONLY=0 \
+	bash .ci/build-push-bundle.sh
 
 prepare-byoh-docker-host-image:
 	docker build test/e2e -f test/e2e/BYOHDockerFile -t ${BYOH_BASE_IMG}

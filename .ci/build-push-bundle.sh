@@ -26,7 +26,7 @@ docker build -t byoh-bundle .
 docker rm -f byoh-bundle-container
 
 echo "executing docker image"
-docker run -e CRITOOL_VERSION -e BUILD_ONLY -e CONTAINERD_VERSION -e KUBERNETES_VERSION -e KUBERNETES_MAJOR_VERSION -e ARCH -e UBUNTU_VERSION --name byoh-bundle-container -i byoh-bundle /bin/bash
+docker run -e CRITOOL_VERSION -e CONTAINERD_VERSION -e KUBERNETES_VERSION -e KUBERNETES_MAJOR_VERSION -e ARCH -e UBUNTU_VERSION -e BUILD_ONLY=1 --name byoh-bundle-container -i byoh-bundle /bin/bash
 
 echo "creating bundle dir to push k8s packages"
 mkdir -p ./bundle
@@ -57,5 +57,9 @@ else
 fi
 
 # Push bundle
-echo "pushing oci bundle to $BUNDLE_REGISTRY/$BUNDLE_NAME"
-./imgpkg push -f ./bundle -i $BUNDLE_REGISTRY/$BUNDLE_NAME:$BUNDLE_VERSION
+if [ "$BUILD_ONLY" -eq 0 ]; then
+    echo "pushing oci bundle to $BUNDLE_REGISTRY/$BUNDLE_NAME"
+    ./imgpkg push -f ./bundle -i $BUNDLE_REGISTRY/$BUNDLE_NAME:$BUNDLE_VERSION
+else
+    echo "BUILD_ONLY=1: skipping push, bundle available at installer/bundle_builder/bundle/"
+fi
