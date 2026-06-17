@@ -22,6 +22,8 @@ const (
 	BundleLookupBaseRegistryAnnotation = "byoh.infrastructure.cluster.x-k8s.io/bundle-registry"
 	// ClusterLabel label is used to mark a cluster where it is attached to
 	ClusterLabel = "kaapi.pf9.io/cluster-name"
+	// ClusterLabelCP label is used to mark a control-plane host attached to a cluster
+	ClusterLabelCP = "kaapi.pf9.io/cluster-name-cp"
 	// Max k8s label value length
 	MaxK8sLabelValueLength = 63
 	LabelHashLength        = 8 // Using 8 chars of SHA256 hex
