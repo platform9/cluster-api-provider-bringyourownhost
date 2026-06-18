@@ -73,7 +73,9 @@ func NewInstaller(ctx context.Context, osDist, arch, k8sVersion string, download
 	var installer K8sInstaller
 	var err error
 
-	if strings.Contains(osbundle, "Ubuntu_22.04") {
+	if strings.Contains(osbundle, "Ubuntu_24.04") {
+		installer, err = algo.NewUbuntu24_04Installer(ctx, arch, addrs)
+	} else if strings.Contains(osbundle, "Ubuntu_22.04") {
 		installer, err = algo.NewUbuntu22_04Installer(ctx, arch, addrs)
 	} else {
 		installer, err = algo.NewUbuntu20_04Installer(ctx, arch, addrs)

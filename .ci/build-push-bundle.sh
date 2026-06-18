@@ -41,19 +41,16 @@ case "$UBUNTU_VERSION" in
     "22.04")
         BUNDLE_NAME="byoh-bundle-ubuntu_22.04_x86-64_k8s"
         ;;
+    "24.04")
+        BUNDLE_NAME="byoh-bundle-ubuntu_24.04_x86-64_k8s"
+        ;;
     *)
         echo "Error: Unsupported Ubuntu version '$UBUNTU_VERSION'"
-        echo "Supported versions are: 20.04, 22.04"
+        echo "Supported versions are: 20.04, 22.04, 24.04"
         docker rm byoh-bundle-container
         exit 1
         ;;
 esac
-
-if [ "$UBUNTU_VERSION" = "20.04" ]; then
-    BUNDLE_NAME="byoh-bundle-ubuntu_20.04.1_x86-64_k8s"
-else
-    BUNDLE_NAME="byoh-bundle-ubuntu_22.04_x86-64_k8s"
-fi
 
 # Push bundle
 echo "pushing oci bundle to quay.io/platform9/$BUNDLE_NAME"
