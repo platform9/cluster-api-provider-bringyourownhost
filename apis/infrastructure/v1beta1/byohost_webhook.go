@@ -70,6 +70,13 @@ func (v *ByoHostValidator) handleCreateUpdate(req *admission.Request) admission.
 		return admission.Denied(fmt.Sprintf("%s is not a valid agent username", userName))
 	}
 
+	// An agent's username encodes the host it owns as the third colon-separated segment
+	// (format: byoh:host:<hostname>). Reject requests where the encoded host does not
+	// match the target ByoHost — an agent must not create or update another agent's host.
+	if len(substrs) >= 3 && !strings.Contains(byoHost.Name, substrs[2]) {
+		return admission.Denied(fmt.Sprintf("%s cannot create/update resource %s", userName, byoHost.Name))
+	}
+
 	return admission.Allowed("")
 }
 
