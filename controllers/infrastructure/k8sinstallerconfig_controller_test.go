@@ -287,12 +287,21 @@ var _ = Describe("Controllers/K8sInstallerConfigController", func() {
 					Namespace: k8sinstallerConfig.Namespace}})
 			Expect(err).NotTo(HaveOccurred())
 
-			createdSecret := &corev1.Secret{}
-			err = k8sClientUncached.Get(ctx, installerSecretLookupKey, createdSecret)
+			installSecret := &corev1.Secret{}
+			err = k8sClientUncached.Get(ctx, installerSecretLookupKey, installSecret)
 			Expect(err).ToNot(HaveOccurred())
-			_, exists := createdSecret.Data["install"]
+			_, exists := installSecret.Data["install"]
 			Expect(exists).To(BeTrue())
-			_, exists = createdSecret.Data["uninstall"]
+
+			// The controller creates a separate secret for the uninstall script.
+			uninstallSecretLookupKey := types.NamespacedName{
+				Name:      "byoh-uninstall-" + k8sinstallerConfig.Name,
+				Namespace: k8sinstallerConfig.Namespace,
+			}
+			uninstallSecret := &corev1.Secret{}
+			err = k8sClientUncached.Get(ctx, uninstallSecretLookupKey, uninstallSecret)
+			Expect(err).ToNot(HaveOccurred())
+			_, exists = uninstallSecret.Data["uninstall"]
 			Expect(exists).To(BeTrue())
 		})
 

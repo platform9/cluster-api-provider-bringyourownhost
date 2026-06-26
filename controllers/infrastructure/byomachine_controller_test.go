@@ -463,6 +463,12 @@ var _ = Describe("Controllers/ByomachineController", func() {
 								Name:       "K8sInstallationSecret",
 								APIVersion: "v1",
 							},
+							UninstallationSecret: &corev1.ObjectReference{
+								Kind:       "Secret",
+								Namespace:  defaultNamespace,
+								Name:       "K8sUninstallationSecret",
+								APIVersion: "v1",
+							},
 						}
 						Expect(ph.Patch(ctx, k8sInstallerConfig, patch.WithStatusObservedGeneration{})).Should(Succeed())
 
