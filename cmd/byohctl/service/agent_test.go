@@ -108,8 +108,7 @@ func setupMockExecEnvironment() func() {
 	}
 }
 
-// Mock command execution for testing
-var execCommand = exec.Command
+// execLookPath is a variable so tests can replace it with a mock.
 var execLookPath = exec.LookPath
 
 // Mock command execution for testing
@@ -387,26 +386,30 @@ func TestEnsureRequiredPackagesMock(t *testing.T) {
 	cleanup := setupMockExecEnvironment()
 	defer cleanup()
 
-	// Force apt-get to always fail to simulate package installation failures
+	// Force apt-get to fail to simulate an update failure.
+	// Intercept both direct "apt-get" calls (used by RunWithStdout) and
+	// "bash -c '... apt-get ...'" calls.
 	execCommand = func(command string, args ...string) *exec.Cmd {
-		if command == "bash" && len(args) > 1 && args[0] == "-c" && strings.Contains(args[1], "apt-get") {
+		// lsof exits non-zero when the file is not locked — simulate apt available.
+		if command == "lsof" {
+			return exec.Command("bash", "-c", "exit 1")
+		}
+		if command == "apt-get" ||
+			(command == "bash" && len(args) > 1 && args[0] == "-c" && strings.Contains(args[1], "apt-get")) {
 			return exec.Command("bash", "-c", "echo 'Package installation failed' >&2; exit 127")
 		}
-		// Let other commands use our standard mocking
 		return mockCommand(command)
 	}
 
-	// Call the function
 	err := ensureRequiredPackages()
 
-	// Should fail with apt-get error
 	if err == nil {
 		t.Fatalf("Expected ensureRequiredPackages to fail, but got no error")
 	}
 
-	// Error should contain information about the failed package installation
-	if !strings.Contains(err.Error(), "failed to install packages") {
-		t.Errorf("ensureRequiredPackages returned error: %v", err)
+	// ensureRequiredPackages runs apt-get update first; check the returned error reflects that.
+	if !strings.Contains(err.Error(), "failed to update apt packages") {
+		t.Errorf("unexpected error from ensureRequiredPackages: %v", err)
 	}
 }
 

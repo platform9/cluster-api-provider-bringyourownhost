@@ -13,6 +13,9 @@ import (
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils"
 )
 
+// execCommand is a variable so tests can replace it with a mock.
+var execCommand = exec.Command
+
 // Package represents a required package and its installation details
 type Package struct {
 	Name            string
@@ -250,7 +253,7 @@ var PurgeDebianPackage = func() error {
 // RunWithStdout runs a command locally returning stdout and err
 func RunWithStdout(name string, args ...string) (string, error) {
 
-	cmd := exec.Command(name, args...)
+	cmd := execCommand(name, args...)
 	byt, err := cmd.Output()
 	stderr := ""
 	if exitError, ok := err.(*exec.ExitError); ok {
