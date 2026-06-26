@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"go/build"
 	"os"
 	"path/filepath"
@@ -45,6 +46,9 @@ var (
 	fakeInstallationSecret = "fake-installation-secret"
 	testEnv                *envtest.Environment
 	dockerClient           *dClient.Client
+	// hostNameSuffix is a per-run Unix timestamp appended to os.Hostname() to make
+	// container names unique across test runs, preventing conflicts from stale containers.
+	hostNameSuffix string
 )
 
 const (
@@ -67,6 +71,7 @@ func setKubeConfig(kubeConfig *os.File) {
 
 var _ = BeforeSuite(func() {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
+	hostNameSuffix = fmt.Sprintf("%d", time.Now().Unix())
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
 			filepath.Join("..", "config", "crd", "bases"),
@@ -165,13 +170,18 @@ func setupTestInfra(ctx context.Context, hostname, kubeconfig string, namespace 
 }
 
 func cleanup(ctx context.Context, byoHostContainer *container.CreateResponse, namespace *corev1.Namespace, agentLogFile string) {
-	err := dockerClient.ContainerStop(ctx, byoHostContainer.ID, container.StopOptions{})
-	Expect(err).NotTo(HaveOccurred())
+	// byoHostContainer is nil when BeforeEach failed before the container was created.
+	if byoHostContainer != nil {
+		err := dockerClient.ContainerStop(ctx, byoHostContainer.ID, container.StopOptions{})
+		Expect(err).NotTo(HaveOccurred())
 
-	err = dockerClient.ContainerRemove(ctx, byoHostContainer.ID, dockertypes.ContainerRemoveOptions{})
-	Expect(err).NotTo(HaveOccurred())
+		// Force ensures removal succeeds even when a lingering exec attachment hasn't
+		// fully closed on the daemon side after ContainerStop.
+		err = dockerClient.ContainerRemove(ctx, byoHostContainer.ID, dockertypes.ContainerRemoveOptions{Force: true})
+		Expect(err).NotTo(HaveOccurred())
+	}
 
-	err = k8sClient.Delete(ctx, namespace)
+	err := k8sClient.Delete(ctx, namespace)
 	Expect(err).NotTo(HaveOccurred(), "failed to delete test namespace")
 
 	_, err = os.Stat(agentLogFile)
