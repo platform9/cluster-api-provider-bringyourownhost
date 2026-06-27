@@ -130,6 +130,7 @@ cluster-templates-v1beta1: kustomize ## Generate cluster templates for v1beta1
 test: $(GINKGO) generate fmt vet manifests test-coverage cmd-test ## Run unit tests
 
 test-coverage: prepare-byoh-docker-host-image ## Run test-coverage
+	find . -name "*.test" -not -path "./cmd/*" -delete
 	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; CGO_ENABLED=0 $(GINKGO) --randomize-all -r --cover --coverprofile=cover.out --output-dir=. --skip-package=test,cmd .
 
 cmd-test: ## Run cmd/byohctl tests (separate Go module)
