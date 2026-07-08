@@ -12,6 +12,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/types"
 )
 
@@ -121,74 +124,84 @@ func TestGetSecret(t *testing.T) {
 	}
 }
 
-// Test SaveKubeConfig method - simplified for unit testing
 func TestSaveKubeConfig(t *testing.T) {
-	// Create temp directory to simulate home directory
-	tempDir, err := os.MkdirTemp("", "test-kubeconfig")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	// Save original environment variables to restore later
-	origHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", origHome)
-
-	// Set HOME to our temp directory for this test
-	os.Setenv("HOME", tempDir)
-
-	// Set up test HTTP server
-	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Send test response with a valid kubeconfig structure
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(types.Secret{
-			Data: map[string]string{
-				"value":  base64.StdEncoding.EncodeToString([]byte("apiVersion: v1\nkind: Config\n")),
-				"config": base64.StdEncoding.EncodeToString([]byte("apiVersion: v1\nkind: Config\n")),
-			},
-		})
-	}))
-	defer ts.Close()
-
-	// Extract host from test server URL
-	host := strings.TrimPrefix(ts.URL, "https://")
-
-	// Create client that skips TLS verification
-	httpClient := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	testCases := []struct {
+		name         string
+		preCreateDir bool
+	}{
+		{
+			name:         "byoh directory does not exist",
+			preCreateDir: false,
+		},
+		{
+			name:         "byoh directory already exists",
+			preCreateDir: true,
 		},
 	}
 
-	client := NewK8sClient(host, "test-domain", "test-tenant", "test-token", "region")
-	client.client = httpClient
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create temp directory to simulate home directory
+			tempDir, err := os.MkdirTemp("", "test-kubeconfig")
+			require.NoError(t, err)
+			defer os.RemoveAll(tempDir)
 
-	// Test SaveKubeConfig
-	err = client.SaveKubeConfig("kubeconfig")
-	if err != nil {
-		t.Errorf("SaveKubeConfig returned error: %v", err)
+			// Save original environment variables to restore later
+			origHome := os.Getenv("HOME")
+			defer os.Setenv("HOME", origHome)
+
+			// Set HOME to our temp directory for this test
+			os.Setenv("HOME", tempDir)
+
+			byohDir := filepath.Join(tempDir, ".byoh")
+			if tc.preCreateDir {
+				err = os.MkdirAll(byohDir, DefaultDirPerms)
+				require.NoError(t, err)
+			}
+
+			// Set up test HTTP server
+			ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Send test response with a valid kubeconfig structure
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(types.Secret{
+					Data: map[string]string{
+						"value":  base64.StdEncoding.EncodeToString([]byte("apiVersion: v1\nkind: Config\n")),
+						"config": base64.StdEncoding.EncodeToString([]byte("apiVersion: v1\nkind: Config\n")),
+					},
+				})
+			}))
+			defer ts.Close()
+
+			// Extract host from test server URL
+			host := strings.TrimPrefix(ts.URL, "https://")
+
+			// Create client that skips TLS verification
+			httpClient := &http.Client{
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				},
+			}
+
+			client := NewK8sClient(host, "test-domain", "test-tenant", "test-token", "region")
+			client.client = httpClient
+
+			// Test SaveKubeConfig
+			err = client.SaveKubeConfig("kubeconfig")
+			require.NoError(t, err)
+
+			// Verify the byoh directory exists
+			dirInfo, err := os.Stat(byohDir)
+			require.NoError(t, err)
+			assert.True(t, dirInfo.IsDir())
+
+			// Verify the kubeconfig file exists at the final location with the correct content
+			// This should be ~/.byoh/config
+			kubeConfigPath := filepath.Join(byohDir, "config")
+			content, err := os.ReadFile(kubeConfigPath)
+			require.NoError(t, err)
+			assert.Equal(t, "apiVersion: v1\nkind: Config\n", string(content))
+		})
 	}
-
-	// Verify the kubeconfig file exists at the final location
-	// This should be ~/.byoh/config
-	byohDir := filepath.Join(tempDir, ".byoh")
-	kubeConfigPath := filepath.Join(byohDir, "config")
-
-	if _, err := os.Stat(kubeConfigPath); os.IsNotExist(err) {
-		t.Errorf("Kubeconfig file not created at expected path: %s", kubeConfigPath)
-	} else if err != nil {
-		t.Errorf("Error checking kubeconfig file: %v", err)
-	} else {
-		// Read the content to verify it's correct
-		content, err := os.ReadFile(kubeConfigPath)
-		if err != nil {
-			t.Errorf("Error reading kubeconfig file: %v", err)
-		} else if string(content) != "apiVersion: v1\nkind: Config\n" {
-			t.Errorf("Expected kubeconfig content 'apiVersion: v1\nkind: Config\n', got '%s'", string(content))
-		}
-	}
-
-	t.Logf("SaveKubeConfig successfully created kubeconfig at %s", kubeConfigPath)
 }
 
 // Test DNS resolution
