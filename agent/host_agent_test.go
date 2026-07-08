@@ -55,6 +55,7 @@ var _ = Describe("Agent", func() {
 
 			hostName, err = os.Hostname()
 			Expect(err).NotTo(HaveOccurred())
+			hostName += "-" + hostNameSuffix
 			runner = setupTestInfra(ctx, hostName, getKubeConfig().Name(), ns)
 
 			byoHostContainer, err = runner.SetupByoDockerHost()
@@ -127,6 +128,7 @@ var _ = Describe("Agent", func() {
 			var err error
 			hostName, err = os.Hostname()
 			Expect(err).NotTo(HaveOccurred())
+			hostName += "-" + hostNameSuffix
 
 			runner = setupTestInfra(ctx, hostName, getKubeConfig().Name(), ns)
 			runner.CommandArgs["--label"] = "site=apac"
@@ -469,6 +471,7 @@ var _ = Describe("Agent", func() {
 
 			hostName, err = os.Hostname()
 			Expect(err).NotTo(HaveOccurred())
+			hostName += "-" + hostNameSuffix
 			runner = setupTestInfra(ctx, hostName, getKubeConfig().Name(), ns)
 
 			byoHostContainer, err = runner.SetupByoDockerHost()
@@ -526,6 +529,7 @@ var _ = Describe("Agent", func() {
 			var err error
 			hostName, err = os.Hostname()
 			Expect(err).NotTo(HaveOccurred())
+			hostName += "-" + hostNameSuffix
 
 			runner = setupTestInfra(ctx, hostName, getKubeConfig().Name(), ns)
 			runner.CommandArgs["--bootstrap-kubeconfig"] = "/root/config"
