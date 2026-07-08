@@ -112,7 +112,12 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 
 	var err error
 	By("building host agent binary")
-	pathToHostAgentBinary, err = gexec.Build("github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent")
+	// The production build always uses CGO_ENABLED=0 because the agent must run
+	// on arbitrary Linux hosts without dynamic library dependencies. Match that here.
+	pathToHostAgentBinary, err = gexec.BuildWithEnvironment(
+		"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent",
+		[]string{"CGO_ENABLED=0"},
+	)
 	Expect(err).NotTo(HaveOccurred())
 
 	clusterConName = e2eConfig.ManagementClusterName
