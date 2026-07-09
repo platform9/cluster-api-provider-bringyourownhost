@@ -134,7 +134,7 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 		It("Should allow update request from manager", func() {
 			admissionRequest := admissionv1.AdmissionRequest{
 				Operation: admissionv1.Update,
-				UserInfo:  v1.UserInfo{Username: managerServiceAccount},
+				UserInfo:  v1.UserInfo{Username: byohSystemManagerServiceAccount},
 				Object: runtime.RawExtension{
 					Raw:    byoHostRaw,
 					Object: byoHost,
@@ -270,8 +270,13 @@ func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 		wantMsg   string
 	}{
 		{
-			name:      "manager service account bypasses the ownership check",
-			userName:  managerServiceAccount,
+			name:      "byoh-system manager service account bypasses the ownership check",
+			userName:  byohSystemManagerServiceAccount,
+			wantAllow: true,
+		},
+		{
+			name:      "kaapi manager service account bypasses the ownership check",
+			userName:  kaapiManagerServiceAccount,
 			wantAllow: true,
 		},
 		{
