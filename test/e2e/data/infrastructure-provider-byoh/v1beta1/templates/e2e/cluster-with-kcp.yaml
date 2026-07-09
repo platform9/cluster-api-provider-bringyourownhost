@@ -123,6 +123,7 @@ spec:
       nodeRegistration:
         ignorePreflightErrors:
         - Swap
+        - SystemVerification
         - DirAvailable--etc-kubernetes-manifests
         - FileAvailable--etc-kubernetes-kubelet.conf
         criSocket: /var/run/containerd/containerd.sock
@@ -133,6 +134,7 @@ spec:
       nodeRegistration:
         ignorePreflightErrors:
         - Swap
+        - SystemVerification
         - DirAvailable--etc-kubernetes-manifests
         - FileAvailable--etc-kubernetes-kubelet.conf
         criSocket: /var/run/containerd/containerd.sock
