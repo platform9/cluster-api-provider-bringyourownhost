@@ -22,7 +22,7 @@ type ByoClusterSpec struct {
 	ControlPlaneEndpoint APIEndpoint `json:"controlPlaneEndpoint"`
 
 	// BundleLookupBaseRegistry is the base Registry URL that is used for pulling byoh bundle images,
-	// if not set, the default will be set to https://projects.registry.vmware.com/cluster_api_provider_bringyourownhost
+	// if not set, the default will be set to https://quay.io/platform9
 	// +optional
 	BundleLookupBaseRegistry string `json:"bundleLookupBaseRegistry,omitempty"`
 }
