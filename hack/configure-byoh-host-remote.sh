@@ -16,10 +16,16 @@ for mod in overlay br_netfilter; do
 done
 
 # Persist and apply the kubeadm-required sysctls.
+#
+# net.netfilter.nf_conntrack_max is global, not per-netns: kube-proxy inside
+# a privileged byoh host container can read it but gets "permission denied"
+# trying to raise it, so the host must already meet or exceed whatever value
+# kube-proxy computes (observed 524288; set well above it for headroom).
 sudo tee "$sysctl_conf" >/dev/null <<'SYSCTL'
 net.bridge.bridge-nf-call-iptables  = 1
 net.bridge.bridge-nf-call-ip6tables = 1
 net.ipv4.ip_forward                 = 1
+net.netfilter.nf_conntrack_max      = 1048576
 SYSCTL
 sudo sysctl --system >/dev/null
 
@@ -27,4 +33,4 @@ sudo sysctl --system >/dev/null
 echo "modules:"
 lsmod | grep -E '^overlay|^br_netfilter' || true
 echo "sysctls:"
-sudo sysctl net.bridge.bridge-nf-call-iptables net.bridge.bridge-nf-call-ip6tables net.ipv4.ip_forward
+sudo sysctl net.bridge.bridge-nf-call-iptables net.bridge.bridge-nf-call-ip6tables net.ipv4.ip_forward net.netfilter.nf_conntrack_max
