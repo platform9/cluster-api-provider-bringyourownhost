@@ -22,6 +22,11 @@ spec:
     spec:
       joinConfiguration:
         nodeRegistration:
+          ignorePreflightErrors:
+            - Swap
+            - SystemVerification
+            - DirAvailable--etc-kubernetes-manifests
+            - FileAvailable--etc-kubernetes-kubelet.conf
           kubeletExtraArgs:
             cgroup-driver: cgroupfs
             eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
