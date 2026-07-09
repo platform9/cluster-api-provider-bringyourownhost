@@ -128,7 +128,7 @@ spec:
         - FileAvailable--etc-kubernetes-kubelet.conf
         criSocket: /var/run/containerd/containerd.sock
         kubeletExtraArgs:
-          cgroup-driver: cgroupfs
+          cgroup-driver: systemd
           eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
     joinConfiguration:
       nodeRegistration:
@@ -139,7 +139,7 @@ spec:
         - FileAvailable--etc-kubernetes-kubelet.conf
         criSocket: /var/run/containerd/containerd.sock
         kubeletExtraArgs:
-          cgroup-driver: cgroupfs
+          cgroup-driver: systemd
           eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
   version: ${KUBERNETES_VERSION}
 ---

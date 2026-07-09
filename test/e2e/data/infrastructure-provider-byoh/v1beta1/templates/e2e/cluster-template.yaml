@@ -33,7 +33,7 @@ spec:
           - DirAvailable--etc-kubernetes-manifests
           - FileAvailable--etc-kubernetes-kubelet.conf
           kubeletExtraArgs:
-            cgroup-driver: cgroupfs
+            cgroup-driver: systemd
             eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
 ---
 apiVersion: cluster.x-k8s.io/v1beta1
@@ -168,7 +168,7 @@ spec:
         - DirAvailable--etc-kubernetes-manifests
         - FileAvailable--etc-kubernetes-kubelet.conf
         kubeletExtraArgs:
-          cgroup-driver: cgroupfs
+          cgroup-driver: systemd
           eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
     joinConfiguration:
       nodeRegistration:
@@ -179,7 +179,7 @@ spec:
         - DirAvailable--etc-kubernetes-manifests
         - FileAvailable--etc-kubernetes-kubelet.conf
         kubeletExtraArgs:
-          cgroup-driver: cgroupfs
+          cgroup-driver: systemd
           eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
   machineTemplate:
     infrastructureRef:
