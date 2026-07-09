@@ -181,6 +181,15 @@ spec:
         kubeletExtraArgs:
           cgroup-driver: systemd
           eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
+    preKubeadmCommands:
+    - |
+      cat <<'EOF' >> /run/kubeadm/kubeadm.yaml
+      ---
+      apiVersion: kubeproxy.config.k8s.io/v1alpha1
+      kind: KubeProxyConfiguration
+      conntrack:
+        maxPerCore: 0
+      EOF
   machineTemplate:
     infrastructureRef:
       apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
