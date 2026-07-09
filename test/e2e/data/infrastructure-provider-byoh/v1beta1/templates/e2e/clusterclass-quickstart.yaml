@@ -39,7 +39,7 @@ spec:
       schema:
         openAPIV3Schema:
           type: string
-          default: "https://projects.registry.vmware.com/cluster_api_provider_bringyourownhost"
+          default: "https://quay.io/platform9"
     - name: controlPlaneIpAddr
       required: true
       schema:
@@ -155,7 +155,7 @@ metadata:
 spec:
   template:
     spec:
-      bundleRepo: projects.registry.vmware.com/cluster_api_provider_bringyourownhost
+      bundleRepo: quay.io/platform9
       bundleType: k8s
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
@@ -199,7 +199,7 @@ metadata:
 spec:
   template:
     spec:
-      bundleRepo: projects.registry.vmware.com/cluster_api_provider_bringyourownhost
+      bundleRepo: quay.io/platform9
       bundleType: k8s
 ---
 apiVersion: v1
