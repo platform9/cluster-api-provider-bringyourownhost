@@ -1,8 +1,6 @@
 module github.com/vmware-tanzu/cluster-api-provider-bringyourownhost
 
-go 1.22
-
-toolchain go1.24.1
+go 1.26.2
 
 replace github.com/insomniacslk/dhcp => github.com/harvester/dhcp v0.0.0-20220421024905-28b38eafefe3
 
@@ -13,14 +11,14 @@ require (
 	github.com/docker/docker v24.0.7+incompatible
 	github.com/docker/go-units v0.5.0
 	github.com/go-logr/logr v1.4.3
-	github.com/jackpal/gateway v1.0.7
+	github.com/jackpal/gateway v1.2.0
 	github.com/kube-vip/kube-vip v0.5.5
 	github.com/maxbrunsfeld/counterfeiter/v6 v6.6.1
 	github.com/onsi/ginkgo/v2 v2.9.2
 	github.com/onsi/gomega v1.27.5
 	github.com/pkg/errors v0.9.1
 	github.com/spf13/pflag v1.0.10
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.11.1
 	k8s.io/api v0.26.1
 	k8s.io/apimachinery v0.26.1
 	k8s.io/client-go v0.26.1
@@ -151,7 +149,7 @@ require (
 	go.uber.org/zap v1.24.0 // indirect
 	golang.org/x/crypto v0.17.0 // indirect
 	golang.org/x/mod v0.9.0 // indirect
-	golang.org/x/net v0.24.0 // indirect
+	golang.org/x/net v0.50.0 // indirect
 	golang.org/x/oauth2 v0.6.0 // indirect
 	golang.org/x/sync v0.2.0 // indirect
 	golang.org/x/sys v0.22.0 // indirect
