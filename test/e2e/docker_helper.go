@@ -19,6 +19,7 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/docker/pkg/system"
+	"github.com/docker/go-units"
 	. "github.com/onsi/gomega" //nolint: stylecheck
 	"github.com/pkg/errors"
 	"k8s.io/client-go/tools/clientcmd"
@@ -171,6 +172,17 @@ func (r *ByoHostRunner) createDockerContainer() (container.CreateResponse, error
 			Tmpfs:       tmpfs,
 			NetworkMode: container.NetworkMode(r.NetworkInterface),
 			Binds:       []string{"/var", "/lib/modules:/lib/modules:ro"},
+			// kube-proxy's iptables/netlink usage exhausts Docker's default 1024
+			// nofile limit almost immediately; match kind's own node ulimit.
+			Resources: container.Resources{
+				Ulimits: []*units.Ulimit{
+					{
+						Name: "nofile",
+						Soft: 1048576,
+						Hard: 1048576,
+					},
+				},
+			},
 		},
 		&network.NetworkingConfig{EndpointsConfig: map[string]*network.EndpointSettings{r.NetworkInterface: {}}},
 		nil, r.ByoHostName)
