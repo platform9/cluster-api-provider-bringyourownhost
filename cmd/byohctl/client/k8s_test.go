@@ -65,8 +65,8 @@ func TestGetNamespace(t *testing.T) {
 func TestGetSecret(t *testing.T) {
 	// Set up test HTTP server
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Updated to match the actual path being requested by the client
-		expectedPath := "/oidc-proxy/127-test-domain-test-tenant/api/v1/namespaces/127-test-domain-test-tenant/secrets/kubeconfig"
+		// Path format: /oidc-proxy/{namespace}/{region}/api/v1/namespaces/{namespace}/secrets/{name}
+		expectedPath := "/oidc-proxy/127-test-domain-test-tenant/region/api/v1/namespaces/127-test-domain-test-tenant/secrets/kubeconfig"
 		if r.URL.Path != expectedPath {
 			t.Errorf("Expected path %s, got %s", expectedPath, r.URL.Path)
 		}

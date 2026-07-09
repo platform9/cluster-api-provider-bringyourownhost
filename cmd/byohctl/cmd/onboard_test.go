@@ -2,10 +2,10 @@ package cmd
 
 import (
 	"bytes"
+	"fmt"
+	"os"
 	"strings"
 	"testing"
-
-	"os"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -334,21 +334,19 @@ region: "config-region"
 }
 
 func TestConfigFileAndCLIDefaultFallback(t *testing.T) {
-	// No CLI or config, should use default for domain, tenant, verbosity
+	// No CLI or config, should use default for domain, tenant, verbosity.
+	// Args are passed as literals rather than globals because AddOnboardFlags
+	// resets the global vars to their zero-value defaults when called inside
+	// createTestCommand.
 	resetOnboardGlobals()
-	username = "testuser"
-	fqdn = "test.platform9.com"
-	clientToken = "testtoken"
-	regionName = "test-region"
-	password = "testpass"
 
 	testCmd := createTestCommand()
 	args := []string{
-		"--username", username,
-		"--url", fqdn,
-		"--client-token", clientToken,
-		"--region", regionName,
-		"--password", password,
+		"--username", "testuser",
+		"--url", "test.platform9.com",
+		"--client-token", "testtoken",
+		"--region", "test-region",
+		"--password", "testpass",
 	}
 	testCmd.SetArgs(args)
 	if err := testCmd.Execute(); err != nil {
@@ -367,18 +365,38 @@ func TestConfigFileAndCLIDefaultFallback(t *testing.T) {
 
 // Helper function to create a test command with the same flag setup as onboardCmd
 func createTestCommand() *cobra.Command {
-	// Create a new command for testing
 	testCmd := &cobra.Command{
 		Use:   "test",
 		Short: "Test command",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// This function will be called when Execute() is called
-			// It will validate the required and mutually exclusive flags
+			// Mirror runOnboard: load config first, then validate required fields.
+			// Returns an error instead of os.Exit so tests can inspect the result.
+			if configFile != "" {
+				cfg, err := LoadOnboardConfig(configFile)
+				if err == nil {
+					mergeConfigWithFlags(cfg)
+				}
+			}
+			var missing []string
+			if fqdn == "" {
+				missing = append(missing, "--url")
+			}
+			if username == "" {
+				missing = append(missing, "--username")
+			}
+			if clientToken == "" {
+				missing = append(missing, "--client-token")
+			}
+			if regionName == "" {
+				missing = append(missing, "--region")
+			}
+			if len(missing) > 0 {
+				return fmt.Errorf("missing required values: %s", strings.Join(missing, ", "))
+			}
 			return nil
 		},
 	}
 
-	// Add the same flags as onboardCmd
 	AddOnboardFlags(
 		testCmd,
 		&fqdn, &username, &password, &passwordInteractive,
@@ -431,7 +449,10 @@ func TestInteractivePassword(t *testing.T) {
 		},
 	}
 
-	// Execute the command
+	// Isolate from os.Args so test coverage flags (--test.coverprofile etc.)
+	// are not parsed by cobra as unknown flags.
+	testCmd.SetArgs([]string{})
+
 	if err := testCmd.Execute(); err != nil {
 		t.Fatalf("Command execution failed: %v", err)
 	}
