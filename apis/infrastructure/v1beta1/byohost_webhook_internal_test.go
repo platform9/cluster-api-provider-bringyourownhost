@@ -7,9 +7,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/require"
 	admissionv1 "k8s.io/api/admission/v1"
 	v1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -250,3 +252,94 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 		})
 	})
 })
+
+func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
+	scheme := runtime.NewScheme()
+	err := AddToScheme(scheme)
+	require.NoError(t, err)
+	decoder, err := admission.NewDecoder(scheme)
+	require.NoError(t, err)
+
+	v := &ByoHostValidator{decoder: decoder}
+
+	testCases := []struct {
+		name      string
+		userName  string
+		hostName  string // ByoHost.Name; defaults to "host1" when empty
+		wantAllow bool
+		wantMsg   string
+	}{
+		{
+			name:      "manager service account bypasses the ownership check",
+			userName:  managerServiceAccount,
+			wantAllow: true,
+		},
+		{
+			name:      "email-like username bypasses the ownership check",
+			userName:  "user@example.com",
+			wantAllow: true,
+		},
+		{
+			name:      "username with fewer than 2 segments is rejected before the ownership check runs",
+			userName:  "unauthorized-user",
+			wantAllow: false,
+			wantMsg:   "unauthorized-user is not a valid agent username",
+		},
+		{
+			name:      "username with no host segment skips the ownership check",
+			userName:  "byoh:host",
+			wantAllow: true,
+		},
+		{
+			name:      "agent encoding a different host is denied",
+			userName:  "byoh:host:host2",
+			wantAllow: false,
+			wantMsg:   "byoh:host:host2 cannot create/update resource host1",
+		},
+		{
+			name:      "agent encoding the target host is allowed",
+			userName:  "byoh:host:host1",
+			wantAllow: true,
+		},
+		{
+			name:      "ownership check matches by substring containment, not exact equality",
+			userName:  "byoh:host:host1",
+			hostName:  "host12",
+			wantAllow: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			hostName := tc.hostName
+			if hostName == "" {
+				hostName = "host1"
+			}
+			byoHost := &ByoHost{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      hostName,
+					Namespace: "default",
+				},
+			}
+			byoHostRaw, err := json.Marshal(byoHost)
+			require.NoError(t, err)
+
+			req := &admission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					UserInfo: v1.UserInfo{Username: tc.userName},
+					Object: runtime.RawExtension{
+						Raw:    byoHostRaw,
+						Object: byoHost,
+					},
+				},
+			}
+
+			resp := v.handleCreateUpdate(req)
+
+			require.Equal(t, tc.wantAllow, resp.AdmissionResponse.Allowed)
+			if !tc.wantAllow {
+				require.Equal(t, tc.wantMsg, string(resp.AdmissionResponse.Result.Reason))
+			}
+		})
+	}
+}
