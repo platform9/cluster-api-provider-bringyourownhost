@@ -89,12 +89,7 @@ var _ = Describe("When BYOH joins existing cluster [PR-Blocking]", func() {
 		defer output.Close()
 		byohostContainerIDs = append(byohostContainerIDs, byohostContainerID)
 		f := WriteDockerLog(output, agentLogFile1)
-		defer func() {
-			deferredErr := f.Close()
-			if deferredErr != nil {
-				Showf("error closing file %s: %v", agentLogFile1, deferredErr)
-			}
-		}()
+		defer closeLogFile(f, agentLogFile1)
 
 		runner.ByoHostName = byoHostName2
 		runner.BootstrapKubeconfigData = generateBootstrapKubeconfig(runner.Context, bootstrapClusterProxy, clusterConName)
@@ -107,12 +102,7 @@ var _ = Describe("When BYOH joins existing cluster [PR-Blocking]", func() {
 
 		// read the log of host agent container in backend, and write it
 		f = WriteDockerLog(output, agentLogFile2)
-		defer func() {
-			deferredErr := f.Close()
-			if deferredErr != nil {
-				Showf("error closing file %s: %v", agentLogFile2, deferredErr)
-			}
-		}()
+		defer closeLogFile(f, agentLogFile2)
 
 		setControlPlaneIP(context.Background(), dockerClient)
 		clusterctl.ApplyClusterTemplateAndWait(ctx, clusterctl.ApplyClusterTemplateAndWaitInput{

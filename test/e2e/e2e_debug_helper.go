@@ -66,6 +66,13 @@ func WriteDockerLog(output types.HijackedResponse, outputFile string) *os.File {
 	return f
 }
 
+// closeLogFile closes f, logging any error against filename
+func closeLogFile(f *os.File, filename string) {
+	if err := f.Close(); err != nil {
+		Showf("error closing file %s: %v", filename, err)
+	}
+}
+
 // Showf prints formatted string to stdout
 func Showf(format string, a ...interface{}) {
 	fmt.Printf(format, a...)

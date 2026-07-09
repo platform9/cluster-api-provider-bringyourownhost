@@ -93,12 +93,7 @@ var _ = Describe("When BYO Host rejoins the capacity pool", func() {
 		defer output.Close()
 		byohostContainerIDs = append(byohostContainerIDs, byohostContainerID)
 		f := WriteDockerLog(output, agentLogFile1)
-		defer func() {
-			deferredErr := f.Close()
-			if deferredErr != nil {
-				Showf("Error closing file %s: %v", agentLogFile1, deferredErr)
-			}
-		}()
+		defer closeLogFile(f, agentLogFile1)
 
 		runner.ByoHostName = byoHostName2
 		runner.BootstrapKubeconfigData = generateBootstrapKubeconfig(runner.Context, bootstrapClusterProxy, clusterConName)
@@ -111,12 +106,7 @@ var _ = Describe("When BYO Host rejoins the capacity pool", func() {
 
 		// read the log of host agent container in backend, and write it
 		f = WriteDockerLog(output, agentLogFile2)
-		defer func() {
-			deferredErr := f.Close()
-			if deferredErr != nil {
-				Showf("Error closing file %s: %v", agentLogFile2, deferredErr)
-			}
-		}()
+		defer closeLogFile(f, agentLogFile2)
 
 		By("Creating a cluster")
 
