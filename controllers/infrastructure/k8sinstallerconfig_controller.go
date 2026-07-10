@@ -35,6 +35,11 @@ import (
 type K8sInstallerConfigReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+	// SkipKernelModuleCleanup disables the kernel module unload step in the generated uninstall
+	// script. In production, BYO hosts own their kernel and must unload these modules. But in E2E's
+	// containerized hosts, they share Docker's kernel, and unloading them there breaks Docker's own
+	// bridge networking and hangs cluster deletion.
+	SkipKernelModuleCleanup bool
 }
 
 // k8sInstallerConfigScope defines a scope defined around a K8sInstallerConfig and its ByoMachine
@@ -149,7 +154,7 @@ func (r *K8sInstallerConfigReconciler) reconcileNormal(ctx context.Context, scop
 
 	k8sVersion := scope.Config.GetAnnotations()[infrav1.K8sVersionAnnotation]
 	downloader := installer.NewBundleDownloader(scope.Config.Spec.BundleType, scope.Config.Spec.BundleRepo, "{{.BUNDLE_DOWNLOAD_PATH}}", logger)
-	installerObj, err := installer.NewInstaller(ctx, scope.ByoMachine.Status.HostInfo.OSImage, scope.ByoMachine.Status.HostInfo.Architecture, k8sVersion, downloader)
+	installerObj, err := installer.NewInstaller(ctx, scope.ByoMachine.Status.HostInfo.OSImage, scope.ByoMachine.Status.HostInfo.Architecture, k8sVersion, downloader, r.SkipKernelModuleCleanup)
 	if err != nil {
 		logger.Error(err, "failed to create installer instance", "osImage", scope.ByoMachine.Status.HostInfo.OSImage, "architecture", scope.ByoMachine.Status.HostInfo.Architecture, "k8sVersion", k8sVersion)
 		return ctrl.Result{}, err

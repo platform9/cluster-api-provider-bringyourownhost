@@ -18,8 +18,8 @@ type Ubuntu22_04Installer struct {
 }
 
 // NewUbuntu22_04Installer will return new Ubuntu22_04Installer instance
-func NewUbuntu22_04Installer(ctx context.Context, arch, bundleAddrs string) (*Ubuntu22_04Installer, error) {
-	base, err := NewBaseUbuntuInstaller(ctx, arch, bundleAddrs, systemdCgroupConfig)
+func NewUbuntu22_04Installer(ctx context.Context, arch, bundleAddrs string, skipKernelModuleCleanup bool) (*Ubuntu22_04Installer, error) {
+	base, err := NewBaseUbuntuInstaller(ctx, arch, bundleAddrs, systemdCgroupConfig, skipKernelModuleCleanup)
 	if err != nil {
 		return nil, err
 	}
