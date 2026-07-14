@@ -71,7 +71,7 @@ func GenerateBootstrapKubeconfigFromBootstrapToken(tokenStr string, bootstrapKub
 		}},
 		// Define auth based on the obtained client cert.
 		AuthInfos: map[string]*clientcmdapi.AuthInfo{infrastructurev1beta1.DefaultAuth: {
-			Token: fmt.Sprintf(tokenID + "." + tokenSecret),
+			Token: tokenID + "." + tokenSecret,
 		}},
 		// Define a context that connects the auth info and cluster, and set it as the default
 		Contexts: map[string]*clientcmdapi.Context{infrastructurev1beta1.DefaultContext: {
