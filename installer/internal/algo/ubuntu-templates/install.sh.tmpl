@@ -46,9 +46,13 @@ modprobe overlay && modprobe br_netfilter
 ## adding os configuration
 tar -C / -xvf "$BUNDLE_PATH/conf.tar" && sysctl --system 
 
+## wait for dpkg lock (unattended-upgrades or apt may hold it at boot)
+timeout 300 bash -c 'until flock -n /var/lib/dpkg/lock-frontend true 2>/dev/null; do echo "waiting for dpkg lock..."; sleep 5; done'
+
 ## installing deb packages
 for pkg in cri-tools kubernetes-cni kubectl kubelet kubeadm; do
-    dpkg --install "$BUNDLE_PATH/$pkg.deb" && apt-mark hold $pkg
+    dpkg --install "$BUNDLE_PATH/$pkg.deb"
+    apt-mark hold $pkg
 done
 
 ## intalling containerd
