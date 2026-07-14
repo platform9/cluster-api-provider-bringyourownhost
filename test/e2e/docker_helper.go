@@ -19,6 +19,7 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/docker/pkg/system"
+	"github.com/docker/go-units"
 	. "github.com/onsi/gomega" //nolint: stylecheck
 	"github.com/pkg/errors"
 	"k8s.io/client-go/tools/clientcmd"
@@ -171,9 +172,40 @@ func (r *ByoHostRunner) createDockerContainer() (container.CreateResponse, error
 			Tmpfs:       tmpfs,
 			NetworkMode: container.NetworkMode(r.NetworkInterface),
 			Binds:       []string{"/var", "/lib/modules:/lib/modules:ro"},
+			// kube-proxy's iptables/netlink usage exhausts Docker's default 1024
+			// nofile limit almost immediately; match kind's own node ulimit.
+			Resources: container.Resources{
+				Ulimits: []*units.Ulimit{
+					{
+						Name: "nofile",
+						Soft: 1048576,
+						Hard: 1048576,
+					},
+				},
+			},
 		},
 		&network.NetworkingConfig{EndpointsConfig: map[string]*network.EndpointSettings{r.NetworkInterface: {}}},
 		nil, r.ByoHostName)
+}
+
+// raiseInotifyInstanceLimit bumps fs.inotify.max_user_instances inside the container.
+//
+// Docker's --sysctl rejects fs.inotify.* at container-create time (not on its namespaced-sysctl
+// allowlist), so it has to be applied with an exec after the container starts. Running several
+// byohost containers alongside the management kind cluster on one Linux VM exhausts the host's
+// default of 128 instances, which makes containerd's CRI plugin fail to load ("too many open
+// files") and leaves kubeadm join stuck retrying against a dead CRI socket.
+func (r *ByoHostRunner) raiseInotifyInstanceLimit(containerID string) error {
+	execCommand, err := r.DockerClient.ContainerExecCreate(r.Context, containerID, types.ExecConfig{
+		AttachStdout: true,
+		AttachStderr: true,
+		Cmd:          []string{"sysctl", "-w", "fs.inotify.max_user_instances=8192"},
+	})
+	if err != nil {
+		return errors.Wrapf(err, "create exec for raising inotify instance limit in container %q", containerID)
+	}
+	return errors.Wrapf(r.DockerClient.ContainerExecStart(r.Context, execCommand.ID, types.ExecStartCheck{}),
+		"raise inotify instance limit in container %q", containerID)
 }
 
 func (r *ByoHostRunner) copyKubeconfig(config cpConfig, listopt types.ContainerListOptions) error {
@@ -261,6 +293,7 @@ func (r *ByoHostRunner) SetupByoDockerHost() (*container.CreateResponse, error) 
 
 	Expect(err).NotTo(HaveOccurred())
 	Expect(r.DockerClient.ContainerStart(r.Context, byohost.ID, types.ContainerStartOptions{})).NotTo(HaveOccurred())
+	Expect(r.raiseInotifyInstanceLimit(byohost.ID)).To(Succeed())
 
 	config := cpConfig{
 		sourcePath: r.PathToHostAgentBinary,
