@@ -223,7 +223,7 @@ func (r *ByoHostRunner) copyKubeconfig(config cpConfig, listopt types.ContainerL
 
 		re := regexp.MustCompile("server:.*")
 		kubeconfig = re.ReplaceAll(kubeconfig, []byte("server: https://127.0.0.1:"+r.Port))
-		Expect(os.WriteFile(TempKubeconfigPath, kubeconfig, 0644)).NotTo(HaveOccurred()) //nolint: gosec,mnd
+		Expect(os.WriteFile(TempKubeconfigPath, kubeconfig, 0600)).NotTo(HaveOccurred()) // #nosec G703 -- TempKubeconfigPath is a fixed local const, not user input //nolint:mnd
 
 		// If the --bootstrap-kubeconfig is not provided, the tests will use
 		// kubeconfig placed in ~/.byoh/config

@@ -28,7 +28,7 @@ func WriteDockerLog(output types.HijackedResponse, outputFile string) *os.File {
 	s := make(chan string)
 	e := make(chan error)
 	buf := bufio.NewReader(output.Reader)
-	f, err := os.OpenFile(outputFile, os.O_CREATE|os.O_WRONLY, DefaultFileMode)
+	f, err := os.OpenFile(outputFile, os.O_CREATE|os.O_WRONLY, DefaultFileMode) // #nosec G304 -- e2e debug helper; callers always pass a fixed /tmp path owned by the test suite
 	if err != nil {
 		Showf("OpenFile %s failed, Get err %v", outputFile, err)
 		return nil
@@ -82,7 +82,7 @@ func Showf(format string, a ...interface{}) {
 
 // ShowFileContent prints to stdout the content of the given file
 func ShowFileContent(fileName string) {
-	content, err := os.ReadFile(fileName)
+	content, err := os.ReadFile(fileName) // #nosec G304 -- e2e debug helper; callers always pass a fixed /tmp path owned by the test suite
 	if err != nil {
 		Showf("ioutil.ReadFile %s return failed: Get err %v", fileName, err)
 		return
@@ -96,7 +96,7 @@ func ShowFileContent(fileName string) {
 // ExecuteShellScript executes a given shell script file location
 func ExecuteShellScript(shellFileName string) {
 	// No caller passes a context through this debug-only helper; scope one locally.
-	cmd := exec.CommandContext(context.Background(), "/bin/sh", "-x", shellFileName)
+	cmd := exec.CommandContext(context.Background(), "/bin/sh", "-x", shellFileName) // #nosec G204 -- e2e debug helper; callers always pass a fixed /tmp path owned by the test suite
 	output, err := cmd.Output()
 	if err != nil {
 		Showf("execute %s return failed: Get err %v, output: %s", shellFileName, err, output)
@@ -109,7 +109,7 @@ func ExecuteShellScript(shellFileName string) {
 
 // WriteShellScript writes shell script contents/commands to the given file location
 func WriteShellScript(shellFileName string, shellFileContent []string) {
-	f, err := os.OpenFile(shellFileName, os.O_APPEND|os.O_WRONLY|os.O_CREATE, DefaultFileMode)
+	f, err := os.OpenFile(shellFileName, os.O_APPEND|os.O_WRONLY|os.O_CREATE, DefaultFileMode) // #nosec G304 -- e2e debug helper; callers always pass a fixed /tmp path owned by the test suite
 	if err != nil {
 		Showf("Open %s return failed: Get err %v", shellFileName, err)
 		return

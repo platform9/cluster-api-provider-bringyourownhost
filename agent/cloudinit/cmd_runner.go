@@ -21,7 +21,7 @@ type CmdRunner struct {
 
 // RunCmd executes the command string
 func (r CmdRunner) RunCmd(ctx context.Context, cmd string) error {
-	command := exec.CommandContext(ctx, "/bin/bash", "-c", cmd)
+	command := exec.CommandContext(ctx, "/bin/bash", "-c", cmd) // #nosec G204 -- cmd is admin-authored install/bootstrap content from K8sInstallerConfig/cloud-init, not external/untrusted input
 	command.Stderr = os.Stderr
 	command.Stdout = os.Stdout
 	if err := command.Run(); err != nil {
