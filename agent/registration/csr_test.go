@@ -23,6 +23,8 @@ import (
 	"k8s.io/klog/v2/klogr"
 )
 
+const csrApprovedMsg = "approved"
+
 var _ = Describe("CSR Registration", func() {
 	var (
 		ctx                = context.TODO()
@@ -185,8 +187,8 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 					}
 					byohCSR.Status.Conditions = append(byohCSR.Status.Conditions, certv1.CertificateSigningRequestCondition{
 						Type:    certv1.CertificateApproved,
-						Reason:  "approved",
-						Message: "approved",
+						Reason:  csrApprovedMsg,
+						Message: csrApprovedMsg,
 						Status:  corev1.ConditionTrue,
 					})
 					_, err = k8sClientSet.CertificatesV1().CertificateSigningRequests().UpdateApproval(ctx, fmt.Sprintf(registration.ByohCSRNameFormat, hostName), byohCSR, metav1.UpdateOptions{})
@@ -218,8 +220,8 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 					}
 					byohCSR.Status.Conditions = append(byohCSR.Status.Conditions, certv1.CertificateSigningRequestCondition{
 						Type:    certv1.CertificateApproved,
-						Reason:  "approved",
-						Message: "approved",
+						Reason:  csrApprovedMsg,
+						Message: csrApprovedMsg,
 						Status:  corev1.ConditionTrue,
 					})
 					_, err = k8sClientSet.CertificatesV1().CertificateSigningRequests().UpdateApproval(ctx, fmt.Sprintf(registration.ByohCSRNameFormat, hostName), byohCSR, metav1.UpdateOptions{})

@@ -14,6 +14,8 @@ import (
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/cloudinit"
 )
 
+const testContent = "some-content"
+
 var _ = Describe("FileWriter", func() {
 
 	var (
@@ -51,7 +53,7 @@ var _ = Describe("FileWriter", func() {
 			Encoding:    "",
 			Owner:       "",
 			Permissions: strconv.FormatInt(int64(filePermission), 8),
-			Content:     "some-content",
+			Content:     testContent,
 			Append:      false,
 		}
 
@@ -103,7 +105,7 @@ var _ = Describe("FileWriter", func() {
 			Encoding:    "",
 			Owner:       "root",
 			Permissions: "",
-			Content:     "some-content",
+			Content:     testContent,
 			Append:      false,
 		}
 
@@ -120,7 +122,7 @@ var _ = Describe("FileWriter", func() {
 			Encoding:    "",
 			Owner:       "some:random",
 			Permissions: "",
-			Content:     "some-content",
+			Content:     testContent,
 			Append:      false,
 		}
 

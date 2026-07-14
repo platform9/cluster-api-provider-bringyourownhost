@@ -26,6 +26,17 @@ import (
 	controllerruntime "sigs.k8s.io/controller-runtime"
 )
 
+const (
+	kindSecret                   = "Secret"
+	nonExistentName              = "non-existent"
+	testK8sVersion               = "1.22"
+	testBundleLookupBaseRegistry = "projects.blah.com"
+	uninstallScriptKey           = "uninstall"
+
+	eventInstallScriptExecutionSucceeded = "Normal InstallScriptExecutionSucceeded install script executed"
+	eventBootstrapK8sNodeSucceeded       = "Normal BootstrapK8sNodeSucceeded k8s Node Bootstraped"
+)
+
 var _ = Describe("Byohost Agent Tests", func() {
 
 	var (
@@ -132,9 +143,9 @@ var _ = Describe("Byohost Agent Tests", func() {
 
 			It("should return an error if we fail to load the bootstrap secret", func() {
 				byoHost.Spec.BootstrapSecret = &corev1.ObjectReference{
-					Kind:      "Secret",
-					Namespace: "non-existent",
-					Name:      "non-existent",
+					Kind:      kindSecret,
+					Namespace: nonExistentName,
+					Name:      nonExistentName,
 				}
 				Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
 
@@ -165,14 +176,14 @@ runCmd:
 					Expect(k8sClient.Create(ctx, bootstrapSecret)).NotTo(HaveOccurred())
 
 					byoHost.Spec.BootstrapSecret = &corev1.ObjectReference{
-						Kind:      "Secret",
+						Kind:      kindSecret,
 						Namespace: bootstrapSecret.Namespace,
 						Name:      bootstrapSecret.Name,
 					}
 
 					byoHost.Annotations = map[string]string{
-						infrastructurev1beta1.K8sVersionAnnotation:               "1.22",
-						infrastructurev1beta1.BundleLookupBaseRegistryAnnotation: "projects.blah.com",
+						infrastructurev1beta1.K8sVersionAnnotation:               testK8sVersion,
+						infrastructurev1beta1.BundleLookupBaseRegistryAnnotation: testBundleLookupBaseRegistry,
 					}
 
 					Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
@@ -225,9 +236,9 @@ runCmd:
 
 				It("should return an error if we fail to load the installation secret", func() {
 					byoHost.Spec.InstallationSecret = &corev1.ObjectReference{
-						Kind:      "Secret",
-						Namespace: "non-existent",
-						Name:      "non-existent",
+						Kind:      kindSecret,
+						Namespace: nonExistentName,
+						Name:      nonExistentName,
 					}
 					Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
 
@@ -251,19 +262,19 @@ runCmd:
 
 						installationSecret = builder.Secret(ns, "test-secret3").
 							WithKeyData("install", installScript).
-							WithKeyData("uninstall", uninstallScript).
+							WithKeyData(uninstallScriptKey, uninstallScript).
 							Build()
 						Expect(k8sClient.Create(ctx, installationSecret)).NotTo(HaveOccurred())
 
 						byoHost.Spec.InstallationSecret = &corev1.ObjectReference{
-							Kind:      "Secret",
+							Kind:      kindSecret,
 							Namespace: installationSecret.Namespace,
 							Name:      installationSecret.Name,
 						}
 
 						byoHost.Annotations = map[string]string{
-							infrastructurev1beta1.K8sVersionAnnotation:               "1.22",
-							infrastructurev1beta1.BundleLookupBaseRegistryAnnotation: "projects.blah.com",
+							infrastructurev1beta1.K8sVersionAnnotation:               testK8sVersion,
+							infrastructurev1beta1.BundleLookupBaseRegistryAnnotation: testBundleLookupBaseRegistry,
 						}
 
 						Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
@@ -309,8 +320,8 @@ runCmd:
 						// assert events
 						events := eventutils.CollectEvents(recorder.Events)
 						Expect(events).Should(ConsistOf([]string{
-							"Normal InstallScriptExecutionSucceeded install script executed",
-							"Normal BootstrapK8sNodeSucceeded k8s Node Bootstraped",
+							eventInstallScriptExecutionSucceeded,
+							eventBootstrapK8sNodeSucceeded,
 						}))
 					})
 
@@ -355,7 +366,7 @@ runCmd:
 							Build()
 						Expect(k8sClient.Create(ctx, invalidInstallationSecret)).NotTo(HaveOccurred())
 						byoHost.Spec.InstallationSecret = &corev1.ObjectReference{
-							Kind:      "Secret",
+							Kind:      kindSecret,
 							Namespace: invalidInstallationSecret.Namespace,
 							Name:      invalidInstallationSecret.Name,
 						}
@@ -377,9 +388,9 @@ runCmd:
 					It("should return error if installation secrent does not exists", func() {
 						fakeCommandRunner.RunCmdReturns(errors.New("failed to execute install script"))
 						byoHost.Spec.InstallationSecret = &corev1.ObjectReference{
-							Kind:      "Secret",
-							Namespace: "non-existent",
-							Name:      "non-existent",
+							Kind:      kindSecret,
+							Namespace: nonExistentName,
+							Name:      nonExistentName,
 						}
 						Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
 
@@ -405,13 +416,13 @@ runCmd:
 								Namespace: ns,
 							},
 							Data: map[string][]byte{
-								"uninstall": []byte(uninstallScript),
+								uninstallScriptKey: []byte(uninstallScript),
 							},
 						}
 						Expect(k8sClient.Create(ctx, uninstallSecret)).NotTo(HaveOccurred())
 
 						byoHost.Spec.UninstallationSecret = &corev1.ObjectReference{
-							Kind:      "Secret",
+							Kind:      kindSecret,
 							Namespace: ns,
 							Name:      uninstallSecretName,
 						}
@@ -450,8 +461,8 @@ runCmd:
 						// assert events
 						events := eventutils.CollectEvents(recorder.Events)
 						Expect(events).Should(ConsistOf([]string{
-							"Normal InstallScriptExecutionSucceeded install script executed",
-							"Normal BootstrapK8sNodeSucceeded k8s Node Bootstraped",
+							eventInstallScriptExecutionSucceeded,
+							eventBootstrapK8sNodeSucceeded,
 						}))
 					})
 
@@ -478,8 +489,8 @@ runCmd:
 						// assert events
 						events := eventutils.CollectEvents(recorder.Events)
 						Expect(events).Should(ConsistOf([]string{
-							"Normal InstallScriptExecutionSucceeded install script executed",
-							"Normal BootstrapK8sNodeSucceeded k8s Node Bootstraped",
+							eventInstallScriptExecutionSucceeded,
+							eventBootstrapK8sNodeSucceeded,
 						}))
 					})
 					AfterEach(func() {
@@ -513,8 +524,8 @@ runCmd:
 				byoHost.Labels = map[string]string{clusterv1.ClusterNameLabel: "test-cluster"}
 				byoHost.Annotations = map[string]string{
 					infrastructurev1beta1.HostCleanupAnnotation:              "",
-					infrastructurev1beta1.BundleLookupBaseRegistryAnnotation: "projects.blah.com",
-					infrastructurev1beta1.K8sVersionAnnotation:               "1.22",
+					infrastructurev1beta1.BundleLookupBaseRegistryAnnotation: testBundleLookupBaseRegistry,
+					infrastructurev1beta1.K8sVersionAnnotation:               testK8sVersion,
 				}
 				conditions.MarkTrue(byoHost, infrastructurev1beta1.K8sNodeBootstrapSucceeded)
 				conditions.MarkTrue(byoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded)
@@ -547,13 +558,13 @@ runCmd:
 						Namespace: ns,
 					},
 					Data: map[string][]byte{
-						"uninstall": []byte(uninstallScript),
+						uninstallScriptKey: []byte(uninstallScript),
 					},
 				}
 				Expect(k8sClient.Create(ctx, uninstallSecret)).NotTo(HaveOccurred())
 
 				byoHost.Spec.UninstallationSecret = &corev1.ObjectReference{
-					Kind:      "Secret",
+					Kind:      kindSecret,
 					Namespace: ns,
 					Name:      uninstallSecretName,
 				}
@@ -600,7 +611,7 @@ runCmd:
 			It("should return an error if we fail to load the uninstallation secret", func() {
 				missingSecretName := "byoh-uninstall-missing-" + byoHost.Name
 				byoHost.Spec.UninstallationSecret = &corev1.ObjectReference{
-					Kind:      "Secret",
+					Kind:      kindSecret,
 					Namespace: ns,
 					Name:      missingSecretName,
 				}
@@ -654,12 +665,12 @@ runCmd:
 						Namespace: ns,
 					},
 					Data: map[string][]byte{
-						"uninstall": []byte(uninstallScript),
+						uninstallScriptKey: []byte(uninstallScript),
 					},
 				}
 				Expect(k8sClient.Create(ctx, uninstallSecret)).NotTo(HaveOccurred())
 				byoHost.Spec.UninstallationSecret = &corev1.ObjectReference{
-					Kind:      "Secret",
+					Kind:      kindSecret,
 					Namespace: ns,
 					Name:      uninstallSecretName,
 				}
@@ -687,12 +698,12 @@ runCmd:
 						Namespace: ns,
 					},
 					Data: map[string][]byte{
-						"uninstall": []byte(uninstallScript),
+						uninstallScriptKey: []byte(uninstallScript),
 					},
 				}
 				Expect(k8sClient.Create(ctx, uninstallSecret)).NotTo(HaveOccurred())
 				byoHost.Spec.UninstallationSecret = &corev1.ObjectReference{
-					Kind:      "Secret",
+					Kind:      kindSecret,
 					Namespace: ns,
 					Name:      uninstallSecretName,
 				}
@@ -725,12 +736,12 @@ runCmd:
 						Namespace: ns,
 					},
 					Data: map[string][]byte{
-						"uninstall": []byte(uninstallScript),
+						uninstallScriptKey: []byte(uninstallScript),
 					},
 				}
 				Expect(k8sClient.Create(ctx, uninstallSecret)).NotTo(HaveOccurred())
 				byoHost.Spec.UninstallationSecret = &corev1.ObjectReference{
-					Kind:      "Secret",
+					Kind:      kindSecret,
 					Namespace: ns,
 					Name:      uninstallSecretName,
 				}
@@ -755,12 +766,12 @@ runCmd:
 						Namespace: ns,
 					},
 					Data: map[string][]byte{
-						"uninstall": []byte(uninstallScript),
+						uninstallScriptKey: []byte(uninstallScript),
 					},
 				}
 				Expect(k8sClient.Create(ctx, uninstallSecret)).NotTo(HaveOccurred())
 				byoHost.Spec.UninstallationSecret = &corev1.ObjectReference{
-					Kind:      "Secret",
+					Kind:      kindSecret,
 					Namespace: ns,
 					Name:      uninstallSecretName,
 				}

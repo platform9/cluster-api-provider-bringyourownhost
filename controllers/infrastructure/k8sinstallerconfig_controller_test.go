@@ -161,7 +161,7 @@ var _ = Describe("Controllers/K8sInstallerConfigController", func() {
 		ph, err := patch.NewHelper(k8sinstallerConfig, k8sClientUncached)
 		Expect(err).ShouldNot(HaveOccurred())
 		pauseAnnotations := map[string]string{
-			clusterv1.PausedAnnotation: "paused",
+			clusterv1.PausedAnnotation: pausedAnnotationValue,
 		}
 		annotations.AddAnnotations(k8sinstallerConfig, pauseAnnotations)
 		Expect(ph.Patch(ctx, k8sinstallerConfig, patch.WithStatusObservedGeneration{})).Should(Succeed())
@@ -191,7 +191,7 @@ var _ = Describe("Controllers/K8sInstallerConfigController", func() {
 			Expect(err).ShouldNot(HaveOccurred())
 			byoMachine.Status.HostInfo = infrav1.HostInfo{
 				Architecture: "amd64",
-				OSName:       "linux",
+				OSName:       testOSNameLinux,
 				OSImage:      "Ubuntu 20.04.1 LTS",
 			}
 			conditions.Set(byoMachine, &clusterv1.Condition{
@@ -507,7 +507,7 @@ var _ = Describe("Controllers/K8sInstallerConfigController", func() {
 			ph, err := patch.NewHelper(byoMachine, k8sClientUncached)
 			Expect(err).ShouldNot(HaveOccurred())
 			byoMachine.Spec.InstallerRef = &corev1.ObjectReference{
-				Kind:       "K8sInstallerConfigTemplate",
+				Kind:       k8sInstallerConfigTemplateKind,
 				Name:       k8sinstallerConfigTemplate.Name,
 				Namespace:  k8sinstallerConfigTemplate.Namespace,
 				APIVersion: infrav1.GroupVersion.String(),

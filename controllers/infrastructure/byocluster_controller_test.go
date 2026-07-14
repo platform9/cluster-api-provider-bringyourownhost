@@ -40,7 +40,7 @@ var _ = Describe("Controllers/ByoclusterController", func() {
 		_, err := byoClusterReconciler.Reconcile(ctx, reconcile.Request{
 			NamespacedName: types.NamespacedName{
 				Name:      "non-existent-byocluster",
-				Namespace: "non-existent-namespace"}})
+				Namespace: nonExistentNamespace}})
 		Expect(err).NotTo(HaveOccurred())
 	})
 

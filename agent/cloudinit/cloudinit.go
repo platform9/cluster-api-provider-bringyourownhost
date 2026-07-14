@@ -15,6 +15,8 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+const encodingBase64 = "application/base64"
+
 // ScriptExecutor bootstrap script executor
 type ScriptExecutor struct {
 	WriteFilesExecutor    IFileWriter
@@ -86,9 +88,9 @@ func parseEncodingScheme(e string) []string {
 
 	switch e {
 	case "gz+base64", "gzip+base64", "gz+b64", "gzip+b64":
-		return []string{"application/base64", "application/x-gzip"}
+		return []string{encodingBase64, "application/x-gzip"}
 	case "base64", "b64":
-		return []string{"application/base64"}
+		return []string{encodingBase64}
 	}
 
 	return []string{"text/plain"}
@@ -97,7 +99,7 @@ func parseEncodingScheme(e string) []string {
 func decodeContent(content string, encodings []string) (string, error) {
 	for _, e := range encodings {
 		switch e {
-		case "application/base64":
+		case encodingBase64:
 			rByte, err := base64.StdEncoding.DecodeString(content)
 			if err != nil {
 				return content, errors.WithStack(err)
