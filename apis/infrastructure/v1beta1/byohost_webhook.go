@@ -25,8 +25,18 @@ type ByoHostValidator struct {
 	decoder *admission.Decoder
 }
 
-// To allow byoh manager service account to patch ByoHost CR
-const managerServiceAccount = "system:serviceaccount:kaapi:byoh-controller-manager"
+// The byoh-controller-manager's namespace differs by deployment: "byoh-system" is the OSS
+// default (config/default, e2e), "kaapi" is the PF9 production deployment. Both identities
+// are allowlisted to bypass the per-agent host-ownership check below.
+const (
+	kaapiManagerServiceAccount      = "system:serviceaccount:kaapi:byoh-controller-manager"
+	byohSystemManagerServiceAccount = "system:serviceaccount:byoh-system:byoh-controller-manager"
+)
+
+var managerServiceAccounts = map[string]struct{}{
+	kaapiManagerServiceAccount:      struct{}{},
+	byohSystemManagerServiceAccount: struct{}{},
+}
 
 // Precompile email-like regex for efficiency
 var emailLikeUserRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
@@ -55,7 +65,7 @@ func (v *ByoHostValidator) handleCreateUpdate(req *admission.Request) admission.
 	}
 	userName := req.UserInfo.Username
 	// allow manager service account to patch ByoHost
-	if userName == managerServiceAccount {
+	if _, ok := managerServiceAccounts[userName]; ok {
 		return admission.Allowed("")
 	}
 
