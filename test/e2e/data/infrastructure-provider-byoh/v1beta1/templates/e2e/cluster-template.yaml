@@ -188,7 +188,7 @@ kind: ByoCluster
 metadata:
   name: ${CLUSTER_NAME}
 spec:
-  bundleLookupBaseRegistry: projects.registry.vmware.com/cluster_api_provider_bringyourownhost
+  bundleLookupBaseRegistry: quay.io/platform9
   controlPlaneEndpoint:
     host: ${CONTROL_PLANE_ENDPOINT_IP}
     port: 6443
@@ -226,7 +226,7 @@ metadata:
 spec:
   template:
     spec:
-      bundleRepo: projects.registry.vmware.com/cluster_api_provider_bringyourownhost
+      bundleRepo: quay.io/platform9
       bundleType: k8s
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
@@ -236,5 +236,5 @@ metadata:
 spec:
   template:
     spec:
-      bundleRepo: projects.registry.vmware.com/cluster_api_provider_bringyourownhost
+      bundleRepo: quay.io/platform9
       bundleType: k8s
