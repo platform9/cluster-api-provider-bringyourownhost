@@ -13,8 +13,8 @@ type Ubuntu20_04Installer struct {
 }
 
 // NewUbuntu20_04Installer will return new Ubuntu20_04Installer instance
-func NewUbuntu20_04Installer(ctx context.Context, arch, bundleAddrs string) (*Ubuntu20_04Installer, error) {
-	base, err := NewBaseUbuntuInstaller(ctx, arch, bundleAddrs, "") // No special containerd config needed for 20.04
+func NewUbuntu20_04Installer(ctx context.Context, arch, bundleAddrs string, skipKernelModuleCleanup bool) (*Ubuntu20_04Installer, error) {
+	base, err := NewBaseUbuntuInstaller(ctx, arch, bundleAddrs, "", skipKernelModuleCleanup) // No special containerd config needed for 20.04
 	if err != nil {
 		return nil, err
 	}

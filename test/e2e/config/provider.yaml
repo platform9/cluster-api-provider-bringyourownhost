@@ -106,6 +106,7 @@ variables:
   BUNDLE_LOOKUP_TAG: "v1.31.0"
   CONTROL_PLANE_ENDPOINT_IP: ""
   MANUAL_CSR_APPROVAL: "disable"
+  BYOH_SKIP_KERNEL_MODULE_CLEANUP: "enable"
 
 intervals:
   default/wait-controllers: ["3m", "10s"]
