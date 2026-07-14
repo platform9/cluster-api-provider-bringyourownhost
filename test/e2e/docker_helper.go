@@ -32,6 +32,8 @@ const (
 	bootstrapKubeconfig = "/tmp/boostrap-kubeconfig"
 	// ipv4OctetCount is the number of dot-separated octets in an IPv4 subnet (e.g. "10.0.0.0/24").
 	ipv4OctetCount = 4
+	// kubeconfigFileMode restricts the temp kubeconfig to owner-only access (it contains cluster credentials).
+	kubeconfigFileMode os.FileMode = 0600
 )
 
 type cpConfig struct {
@@ -223,7 +225,7 @@ func (r *ByoHostRunner) copyKubeconfig(config cpConfig, listopt types.ContainerL
 
 		re := regexp.MustCompile("server:.*")
 		kubeconfig = re.ReplaceAll(kubeconfig, []byte("server: https://127.0.0.1:"+r.Port))
-		Expect(os.WriteFile(TempKubeconfigPath, kubeconfig, 0600)).NotTo(HaveOccurred()) // #nosec G703 -- TempKubeconfigPath is a fixed local const, not user input //nolint:mnd
+		Expect(os.WriteFile(TempKubeconfigPath, kubeconfig, kubeconfigFileMode)).NotTo(HaveOccurred()) // #nosec G703 -- TempKubeconfigPath is a fixed local const, not user input
 
 		// If the --bootstrap-kubeconfig is not provided, the tests will use
 		// kubeconfig placed in ~/.byoh/config
