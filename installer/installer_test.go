@@ -28,7 +28,7 @@ var _ = Describe("Byohost Installer Tests", func() {
 
 	Context("When installer object is created for valid OS and arch", func() {
 		It("should create the object successfully", func() {
-			_, err := installer.NewInstaller(context.TODO(), os, arch, k8sversion, downloader)
+			_, err := installer.NewInstaller(context.TODO(), os, arch, k8sversion, downloader, false)
 			Expect(err).ShouldNot(HaveOccurred())
 		})
 	})
@@ -36,7 +36,7 @@ var _ = Describe("Byohost Installer Tests", func() {
 	Context("When installer object is created for invalid arch", func() {
 		It("should fail create the object", func() {
 			arch = "arm64"
-			_, err := installer.NewInstaller(context.TODO(), os, arch, k8sversion, downloader)
+			_, err := installer.NewInstaller(context.TODO(), os, arch, k8sversion, downloader, false)
 			Expect(err).To(MatchError(installer.ErrOsK8sNotSupported))
 		})
 	})
@@ -44,7 +44,7 @@ var _ = Describe("Byohost Installer Tests", func() {
 	Context("When installer object is created for invalid OS", func() {
 		It("should fail create the object", func() {
 			os = "rhel"
-			_, err := installer.NewInstaller(context.TODO(), os, arch, k8sversion, downloader)
+			_, err := installer.NewInstaller(context.TODO(), os, arch, k8sversion, downloader, false)
 			Expect(err).To(MatchError(installer.ErrOsK8sNotSupported))
 		})
 	})

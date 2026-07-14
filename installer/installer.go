@@ -53,7 +53,7 @@ var archOldNameMap = map[string]string{
 }
 
 // NewInstaller will return a new installer
-func NewInstaller(ctx context.Context, osDist, arch, k8sVersion string, downloader *bundleDownloader) (K8sInstaller, error) {
+func NewInstaller(ctx context.Context, osDist, arch, k8sVersion string, downloader *bundleDownloader, skipKernelModuleCleanup bool) (K8sInstaller, error) {
 	bundleArchName := arch
 	// replacing the arch name to old name to match with the bundle name
 	if _, exists := archOldNameMap[arch]; exists {
@@ -74,9 +74,9 @@ func NewInstaller(ctx context.Context, osDist, arch, k8sVersion string, download
 	var err error
 
 	if strings.Contains(osbundle, "Ubuntu_22.04") {
-		installer, err = algo.NewUbuntu22_04Installer(ctx, arch, addrs)
+		installer, err = algo.NewUbuntu22_04Installer(ctx, arch, addrs, skipKernelModuleCleanup)
 	} else {
-		installer, err = algo.NewUbuntu20_04Installer(ctx, arch, addrs)
+		installer, err = algo.NewUbuntu20_04Installer(ctx, arch, addrs, skipKernelModuleCleanup)
 	}
 
 	if err != nil {
