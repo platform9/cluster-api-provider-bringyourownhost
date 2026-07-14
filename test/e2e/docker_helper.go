@@ -20,7 +20,7 @@ import (
 	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/docker/pkg/system"
 	"github.com/docker/go-units"
-	. "github.com/onsi/gomega" //nolint: stylecheck
+	. "github.com/onsi/gomega" //nolint: staticcheck
 	"github.com/pkg/errors"
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/cluster-api/test/framework"

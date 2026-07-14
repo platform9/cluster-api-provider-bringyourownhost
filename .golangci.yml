@@ -1,13 +1,8 @@
-# golangci.com configuration
-# https://github.com/golangci/golangci/wiki/Configuration
-service:
-  golangci-lint-version: 1.50.0 # use the fixed version to not introduce new linters unexpectedly
-
+version: "2"
 run:
   timeout: 10m
-
 linters:
-  disable-all: true
+  default: none
   enable:
     - bodyclose
     - depguard
@@ -20,124 +15,113 @@ linters:
     - gocritic
     - gocyclo
     - goheader
-#    - goimports
-    - mnd
     - goprintffuncname
     - gosec
-    - gosimple
     - govet
     - ineffassign
     - misspell
+    - mnd
     - nakedret
     - noctx
-    # - nolintlint
     - rowserrcheck
     - staticcheck
-    - stylecheck
     - testpackage
-    - typecheck
     - unconvert
-#    - unparam
     - unused
     - whitespace
-
-  # don't enable:
-  # - asciicheck
-  # - exhaustive
-  # - gochecknoinits
-  # - gochecknoglobals
-  # - gocognit
-  # - godot
-  # - godox
-  # - goerr113
-  # - interfacer
-  # - lll
-  # - nestif
-  # - prealloc
-  # - revive
-  # - scopelint
-  # - wsl
-
-linters-settings:
-  depguard:
-    # allow: 
-    # main.go:13:2: import 'k8s.io/client-go/plugin/pkg/client/auth' is not allowed from list 'Main' (depguard)
-    rules: 
-      main:
-        list-mode: lax 
-        allow: 
-          - $gostd
-          - k8s.io/client-go/plugin/pkg/client/auth
-  dupl:
-    threshold: 200
-  funlen:
-    lines: 100
-    statements: 50
-  goheader:
-    values:
-      const:
-        COMPANY: VMware, Inc.
-        LICENSE: Apache-2.0
-      regexp:
-        YEAR: 20\d*-*\d*
-    template: |-
-      Copyright {{ YEAR }} {{ COMPANY }} All Rights Reserved.
-      SPDX-License-Identifier: {{ LICENSE }}
-  goconst:
-    min-len: 2
-    min-occurrences: 2
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - experimental
-      - opinionated
-      - performance
-      - style
-    disabled-checks:
-      - dupImport # https://github.com/go-critic/go-critic/issues/845
-      - ifElseChain
-      - octalLiteral
-      - whyNoLint
-      - wrapperFunc
-  gocyclo:
-    min-complexity: 18
-  goimports:
-    local-prefixes: github.com/vmware-tanzu
-  mnd:
-    checks:
-      - argument
-      - case
-      - condition
-      - return
-    ignored-functions:
-      - log.*
-    ignore-numbers:
-      - "2"
-  govet:
-    check-shadowing: true
-  misspell:
-    locale: US
-  nolintlint:
-    allow-leading-space: true # don't require machine-readable nolint directives (i.e. with no leading space)
-    allow-unused: false # report any unused nolint directives
-    require-explanation: false # don't require an explanation for nolint directives
-    require-specific: false # don't require nolint directives to be specific about which linter is being skipped
-  whitespace:
-    multi-func: true
-  gofmt:
-    # simplify code: gofmt with `-s` option, true by default
-    simplify: true
-  gosec:
-    excludes:
-      - G115 
-issues:
-  exclude-dirs:
-    - ".*fakes/"
-  exclude-files:
-    - ".*dummy.go"
-  exclude-rules:
-    # Exclude some linters from running on tests files.
-    - path: _test\.go
-      linters:
-        - dupl
-        - gosec
+  settings:
+    depguard:
+      rules:
+        main:
+          list-mode: lax
+          allow:
+            - $gostd
+            - k8s.io/client-go/plugin/pkg/client/auth
+    dupl:
+      threshold: 200
+    funlen:
+      lines: 100
+      statements: 50
+    goconst:
+      min-len: 2
+      min-occurrences: 2
+    gocritic:
+      disabled-checks:
+        - dupImport
+        - ifElseChain
+        - octalLiteral
+        - whyNoLint
+        - wrapperFunc
+      enabled-tags:
+        - diagnostic
+        - experimental
+        - opinionated
+        - performance
+        - style
+    gocyclo:
+      min-complexity: 18
+    goheader:
+      values:
+        const:
+          COMPANY: VMware, Inc.
+          LICENSE: Apache-2.0
+        regexp:
+          YEAR: 20\d*-*\d*
+      template: |-
+        Copyright {{ YEAR }} {{ COMPANY }} All Rights Reserved.
+        SPDX-License-Identifier: {{ LICENSE }}
+    govet:
+      enable:
+        - shadow
+    gosec:
+      excludes:
+        - G115
+    misspell:
+      locale: US
+    mnd:
+      checks:
+        - argument
+        - case
+        - condition
+        - return
+      ignored-functions:
+        - log.*
+      ignored-numbers:
+        - "2"
+    nolintlint:
+      require-explanation: false
+      require-specific: false
+      allow-unused: false
+    whitespace:
+      multi-func: true
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - dupl
+          - gosec
+        path: _test\.go
+    paths:
+      - .*dummy.go
+      - .*fakes/
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  settings:
+    gofmt:
+      simplify: true
+    goimports:
+      local-prefixes:
+        - github.com/vmware-tanzu
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
