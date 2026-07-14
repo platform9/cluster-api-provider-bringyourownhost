@@ -75,7 +75,7 @@ spec:
                 ip: 127.0.0.1
             volumes:
             - hostPath:
-                path: /etc/kubernetes/admin.conf
+                path: /etc/kubernetes/super-admin.conf
                 type: FileOrCreate
               name: kubeconfig
           status: {}

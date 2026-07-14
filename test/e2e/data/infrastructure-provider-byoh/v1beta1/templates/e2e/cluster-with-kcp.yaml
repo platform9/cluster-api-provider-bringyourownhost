@@ -60,6 +60,22 @@ spec:
       name: "${CLUSTER_NAME}-control-plane"
       namespace: "${NAMESPACE}"
   kubeadmConfigSpec:
+    # kube-proxy's conntrack tuning tries to raise net.netfilter.nf_conntrack_max,
+    # a global (non-namespaced) sysctl a privileged container can read but never
+    # write -- crash-looping with "permission denied" regardless of the host's
+    # own value. CAPI's KubeadmControlPlane has no field for KubeProxyConfiguration
+    # (kubernetes-sigs/cluster-api#4512), so append one to kubeadm's own config
+    # file before it runs, disabling the tuning kubeadm would otherwise bake into
+    # the kube-proxy ConfigMap it creates.
+    preKubeadmCommands:
+      - |
+        cat <<'EOF' >> /run/kubeadm/kubeadm.yaml
+        ---
+        apiVersion: kubeproxy.config.k8s.io/v1alpha1
+        kind: KubeProxyConfiguration
+        conntrack:
+          maxPerCore: 0
+        EOF
     clusterConfiguration:
       controllerManager:
         extraArgs: {enable-hostpath-provisioner: 'true'}
@@ -113,7 +129,7 @@ spec:
               ip: 127.0.0.1
           volumes:
           - hostPath:
-              path: /etc/kubernetes/admin.conf
+              path: /etc/kubernetes/super-admin.conf
               type: FileOrCreate
             name: kubeconfig
         status: {}
@@ -123,21 +139,23 @@ spec:
       nodeRegistration:
         ignorePreflightErrors:
         - Swap
+        - SystemVerification
         - DirAvailable--etc-kubernetes-manifests
         - FileAvailable--etc-kubernetes-kubelet.conf
         criSocket: /var/run/containerd/containerd.sock
         kubeletExtraArgs:
-          cgroup-driver: cgroupfs
+          cgroup-driver: systemd
           eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
     joinConfiguration:
       nodeRegistration:
         ignorePreflightErrors:
         - Swap
+        - SystemVerification
         - DirAvailable--etc-kubernetes-manifests
         - FileAvailable--etc-kubernetes-kubelet.conf
         criSocket: /var/run/containerd/containerd.sock
         kubeletExtraArgs:
-          cgroup-driver: cgroupfs
+          cgroup-driver: systemd
           eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
   version: ${KUBERNETES_VERSION}
 ---
