@@ -44,7 +44,7 @@ linters:
       statements: 50
     goconst:
       min-len: 2
-      min-occurrences: 2
+      min-occurrences: 3
     gocritic:
       disabled-checks:
         - dupImport
@@ -106,6 +106,11 @@ linters:
           - dupl
           - gosec
         path: _test\.go
+      # New files added since the fork from vmware-tanzu don't carry (and
+      # shouldn't fabricate) a VMware copyright header.
+      - linters:
+          - goheader
+        path: installer/internal/algo/common_ubuntu_test\.go$
     paths:
       - .*dummy.go
       - .*fakes/
