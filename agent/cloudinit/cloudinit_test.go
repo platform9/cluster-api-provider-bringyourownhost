@@ -5,10 +5,12 @@ package cloudinit_test
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path"
+	"reflect"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -156,6 +158,30 @@ runCmd:
 			Expect(fakeCmdExecutor.RunCmdCallCount()).To(Equal(1))
 
 			Expect(err.Error()).To(ContainSubstring("command execution failed"))
+		})
+	})
+
+	Context("Files.Path JSON tag", func() {
+		It("has no malformed trailing option in the json tag", func() {
+			field, ok := reflect.TypeOf(cloudinit.Files{}).FieldByName("Path")
+			Expect(ok).To(BeTrue())
+
+			// A trailing comma with no option after it (e.g. `json:"path,"`) is
+			// invalid struct tag syntax (staticcheck SA5008); guard against it
+			// creeping back in.
+			Expect(field.Tag.Get("json")).To(Equal("path"))
+		})
+
+		It("round-trips the Path field as the \"path\" JSON key", func() {
+			original := cloudinit.Files{Path: "/tmp/somefile"}
+
+			data, err := json.Marshal(original)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(data).To(MatchJSON(`{"path":"/tmp/somefile","content":""}`))
+
+			var roundTripped cloudinit.Files
+			Expect(json.Unmarshal(data, &roundTripped)).To(Succeed())
+			Expect(roundTripped.Path).To(Equal(original.Path))
 		})
 	})
 })

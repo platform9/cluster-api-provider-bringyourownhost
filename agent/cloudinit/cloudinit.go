@@ -29,7 +29,7 @@ type bootstrapConfig struct {
 
 // Files details required for files written by bootstrap script
 type Files struct {
-	Path        string `json:"path,"`
+	Path        string `json:"path"`
 	Encoding    string `json:"encoding,omitempty"`
 	Owner       string `json:"owner,omitempty"`
 	Permissions string `json:"permissions,omitempty"`
