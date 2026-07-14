@@ -30,6 +30,8 @@ const (
 	kindImage           = "byoh/node:e2e"
 	TempKubeconfigPath  = "/tmp/mgmt.conf"
 	bootstrapKubeconfig = "/tmp/boostrap-kubeconfig"
+	// ipv4OctetCount is the number of dot-separated octets in an IPv4 subnet (e.g. "10.0.0.0/24").
+	ipv4OctetCount = 4
 )
 
 type cpConfig struct {
@@ -351,7 +353,7 @@ func setControlPlaneIP(ctx context.Context, dockerClient *client.Client) {
 	// subnet but outside of its DHCP range. We believe 151 is a pretty
 	// high number and we have < 10 containers being spun up, so we
 	// can safely use this IP for the ControlPlaneEndpoint
-	Expect(len(ipOctets)).To(BeNumerically(">=", 4), "unexpected subnet format: %s", ipv4Subnet)
+	Expect(len(ipOctets)).To(BeNumerically(">=", ipv4OctetCount), "unexpected subnet format: %s", ipv4Subnet)
 	ipOctets[3] = "151"
 	ip := strings.Join(ipOctets, ".")
 	err := os.Setenv("CONTROL_PLANE_ENDPOINT_IP", ip)
