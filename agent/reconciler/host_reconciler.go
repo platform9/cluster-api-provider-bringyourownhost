@@ -77,7 +77,7 @@ func (r *HostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctr
 	}
 
 	// Handle deleted machines
-	if !byoHost.ObjectMeta.DeletionTimestamp.IsZero() {
+	if !byoHost.DeletionTimestamp.IsZero() {
 		return r.reconcileDelete(ctx, byoHost)
 	}
 	return r.reconcileNormal(ctx, byoHost)

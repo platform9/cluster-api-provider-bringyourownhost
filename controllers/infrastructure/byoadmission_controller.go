@@ -35,7 +35,7 @@ func (r *ByoAdmissionReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	logger.Info("Reconcile request received", "object", req.NamespacedName)
 
 	// Fetch the CSR from the api-server
-	csr, err := r.ClientSet.CertificatesV1().CertificateSigningRequests().Get(ctx, req.NamespacedName.Name, metav1.GetOptions{})
+	csr, err := r.ClientSet.CertificatesV1().CertificateSigningRequests().Get(ctx, req.Name, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			logger.Error(err, "CertificateSigningRequest not found, won't reconcile")

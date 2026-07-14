@@ -428,7 +428,7 @@ var _ = Describe("Controllers/K8sInstallerConfigController", func() {
 				Expect(k8sClientUncached.Delete(ctx, k8sinstallerConfig)).Should(Succeed())
 
 				WaitForObjectToBeUpdatedInCache(k8sinstallerConfig, func(object client.Object) bool {
-					return !object.(*infrav1.K8sInstallerConfig).ObjectMeta.DeletionTimestamp.IsZero()
+					return !object.(*infrav1.K8sInstallerConfig).DeletionTimestamp.IsZero()
 				})
 			})
 
@@ -456,7 +456,7 @@ var _ = Describe("Controllers/K8sInstallerConfigController", func() {
 
 					Expect(k8sClientUncached.Delete(ctx, byoMachine)).Should(Succeed())
 					WaitForObjectToBeUpdatedInCache(byoMachine, func(object client.Object) bool {
-						return !object.(*infrav1.ByoMachine).ObjectMeta.DeletionTimestamp.IsZero()
+						return !object.(*infrav1.ByoMachine).DeletionTimestamp.IsZero()
 					})
 					_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: byoMachineLookupKey})
 					Expect(err).ToNot(HaveOccurred())

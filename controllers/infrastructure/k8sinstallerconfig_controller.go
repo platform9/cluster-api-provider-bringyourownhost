@@ -66,7 +66,7 @@ func (r *K8sInstallerConfigReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 	// Fetch the K8sInstallerConfig instance
 	config := &infrav1.K8sInstallerConfig{}
-	err := r.Client.Get(ctx, req.NamespacedName, config)
+	err := r.Get(ctx, req.NamespacedName, config)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
@@ -107,7 +107,7 @@ func (r *K8sInstallerConfigReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	// Handle deleted K8sInstallerConfig
-	if !config.ObjectMeta.DeletionTimestamp.IsZero() {
+	if !config.DeletionTimestamp.IsZero() {
 		return r.reconcileDelete(ctx, scope)
 	}
 
@@ -200,12 +200,12 @@ func (r *K8sInstallerConfigReconciler) storeInstallationData(ctx context.Context
 		Type: clusterv1.ClusterSecretType,
 	}
 
-	if err := r.Client.Create(ctx, installSecret); err != nil {
+	if err := r.Create(ctx, installSecret); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
 			return errors.Wrapf(err, "failed to create installation secret for K8sInstallerConfig %s/%s", scope.Config.Namespace, scope.Config.Name)
 		}
 		logger.Info("installation secret for K8sInstallerConfig already exists, updating", "secret", installSecret.Name, "K8sInstallerConfig", scope.Config.Name)
-		if err := r.Client.Update(ctx, installSecret); err != nil {
+		if err := r.Update(ctx, installSecret); err != nil {
 			return errors.Wrapf(err, "failed to update installation secret for K8sInstallerConfig %s/%s", scope.Config.Namespace, scope.Config.Name)
 		}
 	}
@@ -232,12 +232,12 @@ func (r *K8sInstallerConfigReconciler) storeInstallationData(ctx context.Context
 		Type: clusterv1.ClusterSecretType,
 	}
 
-	if err := r.Client.Create(ctx, uninstallSecret); err != nil {
+	if err := r.Create(ctx, uninstallSecret); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
 			return errors.Wrapf(err, "failed to create uninstallation secret for K8sInstallerConfig %s/%s", scope.Config.Namespace, scope.Config.Name)
 		}
 		logger.Info("uninstallation secret for K8sInstallerConfig already exists, updating", "secret", uninstallSecret.Name, "K8sInstallerConfig", scope.Config.Name)
-		if err := r.Client.Update(ctx, uninstallSecret); err != nil {
+		if err := r.Update(ctx, uninstallSecret); err != nil {
 			return errors.Wrapf(err, "failed to update uninstallation secret for K8sInstallerConfig %s/%s", scope.Config.Namespace, scope.Config.Name)
 		}
 	}
@@ -285,7 +285,7 @@ func (r *K8sInstallerConfigReconciler) ByoMachineToK8sInstallerConfigMapFunc(o c
 	result := []ctrl.Request{}
 	if m.Spec.InstallerRef != nil && m.Spec.InstallerRef.GroupVersionKind() == infrav1.GroupVersion.WithKind("K8sInstallerConfigTemplate") {
 		configList := &infrav1.K8sInstallerConfigList{}
-		if err := r.Client.List(ctx, configList, client.InNamespace(m.Namespace)); err != nil {
+		if err := r.List(ctx, configList, client.InNamespace(m.Namespace)); err != nil {
 			logger.Error(err, "failed to list K8sInstallerConfig")
 			return result
 		}

@@ -53,7 +53,7 @@ func (r *ByoClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// Get the ByoCluster resource for this request.
 	byoCluster := &infrav1.ByoCluster{}
-	if err := r.Client.Get(ctx, req.NamespacedName, byoCluster); err != nil {
+	if err := r.Get(ctx, req.NamespacedName, byoCluster); err != nil {
 		if apierrors.IsNotFound(err) {
 			logger.V(4).Info("ByoCluster not found, won't reconcile", "key", req.NamespacedName)
 			return reconcile.Result{}, nil
@@ -111,7 +111,7 @@ func patchByoCluster(ctx context.Context, patchHelper *patch.Helper, byoCluster 
 	// Always update the readyCondition by summarizing the state of other conditions.
 	// A step counter is added to represent progress during the provisioning process (instead we are hiding it during the deletion process).
 	conditions.SetSummary(byoCluster,
-		conditions.WithStepCounterIf(byoCluster.ObjectMeta.DeletionTimestamp.IsZero()),
+		conditions.WithStepCounterIf(byoCluster.DeletionTimestamp.IsZero()),
 	)
 
 	// Patch the object, ignoring conflicts on the conditions owned by this controller.

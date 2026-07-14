@@ -95,7 +95,7 @@ var _ = Describe("Controllers/ByoclusterController", func() {
 
 		Expect(k8sClientUncached.Delete(ctx, byoCluster)).Should(Succeed())
 		WaitForObjectToBeUpdatedInCache(byoCluster, func(object client.Object) bool {
-			return !object.(*infrastructurev1beta1.ByoCluster).ObjectMeta.DeletionTimestamp.IsZero()
+			return !object.(*infrastructurev1beta1.ByoCluster).DeletionTimestamp.IsZero()
 		})
 
 		_, err = byoClusterReconciler.Reconcile(ctx, reconcile.Request{

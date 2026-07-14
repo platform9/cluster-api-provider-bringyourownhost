@@ -92,7 +92,7 @@ func (r *ByoMachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// Fetch the ByoMachine instance
 	byoMachine := &infrav1.ByoMachine{}
-	err := r.Client.Get(ctx, req.NamespacedName, byoMachine)
+	err := r.Get(ctx, req.NamespacedName, byoMachine)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
@@ -131,7 +131,7 @@ func (r *ByoMachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		Name:      cluster.Spec.InfrastructureRef.Name,
 	}
 
-	if err = r.Client.Get(ctx, infraClusterName, byoCluster); err != nil {
+	if err = r.Get(ctx, infraClusterName, byoCluster); err != nil {
 		logger.Error(err, "failed to get infra cluster")
 		return ctrl.Result{}, nil
 	}
@@ -179,7 +179,7 @@ func (r *ByoMachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// Handle deleted machines
-	if !byoMachine.ObjectMeta.DeletionTimestamp.IsZero() {
+	if !byoMachine.DeletionTimestamp.IsZero() {
 		return r.reconcileDelete(ctx, machineScope)
 	}
 
@@ -196,7 +196,7 @@ func (r *ByoMachineReconciler) FetchAttachedByoHost(ctx context.Context, byomach
 	byohostLabels, _ := labels.NewRequirement(infrav1.AttachedByoMachineLabel, selection.Equals, []string{generateSafeLabelValue(byomachineNamespace, byomachineName)})
 	selector = selector.Add(*byohostLabels)
 	hostsList := &infrav1.ByoHostList{}
-	err := r.Client.List(
+	err := r.List(
 		ctx,
 		hostsList,
 		&client.ListOptions{LabelSelector: selector},
@@ -373,14 +373,14 @@ func (r *ByoMachineReconciler) ClusterToByoMachines(logger logr.Logger) handler.
 		logger = logger.WithValues("objectMapper", "ClusterToByoMachines", "namespace", c.Namespace, "Cluster", c.Name)
 
 		// Don't handle deleted clusters
-		if !c.ObjectMeta.DeletionTimestamp.IsZero() {
+		if !c.DeletionTimestamp.IsZero() {
 			logger.Info("Cluster has a deletion timestamp, skipping mapping.")
 			return nil
 		}
 
 		clusterLabels := map[string]string{clusterv1.ClusterNameLabel: c.Name}
 		byoMachineList := &infrav1.ByoMachineList{}
-		if err := r.Client.List(context.TODO(), byoMachineList, client.InNamespace(c.Namespace), client.MatchingLabels(clusterLabels)); err != nil {
+		if err := r.List(context.TODO(), byoMachineList, client.InNamespace(c.Namespace), client.MatchingLabels(clusterLabels)); err != nil {
 			logger.Error(err, "Failed to get ByoMachine, skipping mapping.")
 			return nil
 		}
@@ -551,7 +551,7 @@ func (r *ByoMachineReconciler) attachByoHost(ctx context.Context, machineScope *
 	byohostLabels, _ := labels.NewRequirement(clusterv1.ClusterNameLabel, selection.DoesNotExist, nil)
 	selector = selector.Add(*byohostLabels)
 
-	err = r.Client.List(ctx, hostsList, &client.ListOptions{
+	err = r.List(ctx, hostsList, &client.ListOptions{
 		LabelSelector: selector,
 		Namespace:     machineScope.ByoMachine.Namespace,
 	})
@@ -671,13 +671,13 @@ func (r *ByoMachineReconciler) markHostForCleanup(ctx context.Context, machineSc
 func (r *ByoMachineReconciler) getInstallerConfig(ctx context.Context, byoMachine *infrav1.ByoMachine) (*unstructured.Unstructured, error) {
 	installerConfig := &unstructured.Unstructured{}
 	gvk := byoMachine.Spec.InstallerRef.GroupVersionKind()
-	gvk.Kind = strings.Replace(gvk.Kind, "Template", "", -1)
+	gvk.Kind = strings.ReplaceAll(gvk.Kind, "Template", "")
 	installerConfig.SetGroupVersionKind(gvk)
 	installerConfigName := client.ObjectKey{
 		Namespace: byoMachine.Namespace,
 		Name:      byoMachine.Name,
 	}
-	if err := r.Client.Get(ctx, installerConfigName, installerConfig); err != nil {
+	if err := r.Get(ctx, installerConfigName, installerConfig); err != nil {
 		return nil, err
 	}
 	return installerConfig, nil
@@ -697,7 +697,7 @@ func (r *ByoMachineReconciler) createInstallerConfig(ctx context.Context, machin
 			Namespace: machineScope.ByoMachine.Spec.InstallerRef.Namespace,
 			Name:      machineScope.ByoMachine.Spec.InstallerRef.Name,
 		}
-		if err = r.Client.Get(ctx, installerTemplateName, template); err != nil {
+		if err = r.Get(ctx, installerTemplateName, template); err != nil {
 			logger.Error(err, "failed to get installer config template")
 			return err
 		}
@@ -716,7 +716,7 @@ func (r *ByoMachineReconciler) createInstallerConfig(ctx context.Context, machin
 			return err
 		} else {
 			installerConfig.SetName(machineScope.ByoMachine.Name)
-			if err = r.Client.Create(ctx, installerConfig); err != nil {
+			if err = r.Create(ctx, installerConfig); err != nil {
 				logger.Error(err, "failed to create installer config")
 				return err
 			}

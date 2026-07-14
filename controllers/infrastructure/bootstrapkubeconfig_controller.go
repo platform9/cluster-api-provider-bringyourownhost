@@ -43,7 +43,7 @@ func (r *BootstrapKubeconfigReconciler) Reconcile(ctx context.Context, req ctrl.
 
 	// Fetch the BootstrapKubeconfig instance
 	bootstrapKubeconfig := &infrastructurev1beta1.BootstrapKubeconfig{}
-	err := r.Client.Get(ctx, req.NamespacedName, bootstrapKubeconfig)
+	err := r.Get(ctx, req.NamespacedName, bootstrapKubeconfig)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
@@ -68,7 +68,7 @@ func (r *BootstrapKubeconfigReconciler) Reconcile(ctx context.Context, req ctrl.
 	}
 
 	// create secret
-	err = r.Client.Create(ctx, bootstrapKubeconfigSecret)
+	err = r.Create(ctx, bootstrapKubeconfigSecret)
 	if err != nil {
 		return ctrl.Result{}, err
 	}

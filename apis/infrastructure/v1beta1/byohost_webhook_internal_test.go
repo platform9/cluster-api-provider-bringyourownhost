@@ -341,9 +341,9 @@ func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 
 			resp := v.handleCreateUpdate(req)
 
-			require.Equal(t, tc.wantAllow, resp.AdmissionResponse.Allowed)
+			require.Equal(t, tc.wantAllow, resp.Allowed)
 			if !tc.wantAllow {
-				require.Equal(t, tc.wantMsg, string(resp.AdmissionResponse.Result.Reason))
+				require.Equal(t, tc.wantMsg, string(resp.Result.Reason))
 			}
 		})
 	}

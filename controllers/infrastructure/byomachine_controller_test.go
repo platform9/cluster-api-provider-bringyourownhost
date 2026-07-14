@@ -200,7 +200,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 
 				Expect(k8sClientUncached.Delete(ctx, byoMachine)).Should(Succeed())
 				WaitForObjectToBeUpdatedInCache(byoMachine, func(object client.Object) bool {
-					return !object.(*infrastructurev1beta1.ByoMachine).ObjectMeta.DeletionTimestamp.IsZero()
+					return !object.(*infrastructurev1beta1.ByoMachine).DeletionTimestamp.IsZero()
 				})
 				_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: byoMachineLookupKey})
 				Expect(err).ToNot(HaveOccurred())
@@ -387,7 +387,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 						Expect(k8sClientUncached.Delete(ctx, byoMachine)).Should(Succeed())
 
 						WaitForObjectToBeUpdatedInCache(byoMachine, func(object client.Object) bool {
-							return !object.(*infrastructurev1beta1.ByoMachine).ObjectMeta.DeletionTimestamp.IsZero()
+							return !object.(*infrastructurev1beta1.ByoMachine).DeletionTimestamp.IsZero()
 						})
 					})
 
