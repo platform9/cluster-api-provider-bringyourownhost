@@ -39,7 +39,7 @@ func (s *BaseUbuntuInstaller) Uninstall() string {
 }
 
 // NewBaseUbuntuInstaller creates a new base Ubuntu installer
-func NewBaseUbuntuInstaller(ctx context.Context, arch, bundleAddrs, containerdConfig string) (*BaseUbuntuInstaller, error) {
+func NewBaseUbuntuInstaller(ctx context.Context, arch, bundleAddrs, containerdConfig string, skipKernelModuleCleanup bool) (*BaseUbuntuInstaller, error) {
 	// Validate embedded templates
 	if commonUbuntuInstallTemplate == "" {
 		return nil, fmt.Errorf("install template is empty - template file may be missing")
@@ -48,12 +48,13 @@ func NewBaseUbuntuInstaller(ctx context.Context, arch, bundleAddrs, containerdCo
 		return nil, fmt.Errorf("uninstall template is empty - template file may be missing")
 	}
 
-	data := map[string]string{
-		"BundleAddrs":        bundleAddrs,
-		"Arch":               arch,
-		"ImgpkgVersion":      ImgpkgVersion,
-		"ContainerdConfig":   containerdConfig,
-		"BundleDownloadPath": "/var/lib/byoh/bundles",
+	data := map[string]any{
+		"BundleAddrs":             bundleAddrs,
+		"Arch":                    arch,
+		"ImgpkgVersion":           ImgpkgVersion,
+		"ContainerdConfig":        containerdConfig,
+		"BundleDownloadPath":      "/var/lib/byoh/bundles",
+		"SkipKernelModuleCleanup": skipKernelModuleCleanup,
 	}
 
 	// Parse and validate templates
