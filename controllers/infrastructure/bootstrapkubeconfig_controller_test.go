@@ -36,7 +36,7 @@ var _ = Describe("Controllers/BoottrapKubeconfigController", func() {
 		_, err := bootstrapKubeconfigReconciler.Reconcile(ctx, reconcile.Request{
 			NamespacedName: types.NamespacedName{
 				Name:      "non-existent-bootstrap-kubeconfig",
-				Namespace: "non-existent-namespace"}})
+				Namespace: nonExistentNamespace}})
 		Expect(err).NotTo(HaveOccurred())
 	})
 

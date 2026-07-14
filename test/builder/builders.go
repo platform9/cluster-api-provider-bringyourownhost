@@ -66,7 +66,7 @@ func (b *ByoMachineBuilder) Build() *infrastructurev1beta1.ByoMachine {
 		Spec: infrastructurev1beta1.ByoMachineSpec{},
 	}
 	if b.machine != nil {
-		byoMachine.ObjectMeta.OwnerReferences = []metav1.OwnerReference{
+		byoMachine.OwnerReferences = []metav1.OwnerReference{
 			{
 				Kind:       "Machine",
 				Name:       b.machine.Name,
@@ -76,7 +76,7 @@ func (b *ByoMachineBuilder) Build() *infrastructurev1beta1.ByoMachine {
 		}
 	}
 	if b.clusterLabel != "" {
-		byoMachine.ObjectMeta.Labels = map[string]string{
+		byoMachine.Labels = map[string]string{
 			clusterv1.ClusterNameLabel: b.clusterLabel,
 		}
 	}
@@ -187,7 +187,7 @@ func (c *ByoClusterBuilder) Build() *infrastructurev1beta1.ByoCluster {
 	}
 
 	if c.cluster != nil {
-		cluster.ObjectMeta.OwnerReferences = []metav1.OwnerReference{
+		cluster.OwnerReferences = []metav1.OwnerReference{
 			{
 				Kind:       "Cluster",
 				Name:       c.cluster.Name,
@@ -540,7 +540,7 @@ func (b *K8sInstallerConfigBuilder) Build() *infrastructurev1beta1.K8sInstallerC
 		Spec: infrastructurev1beta1.K8sInstallerConfigSpec{},
 	}
 	if b.byomachine != nil {
-		k8sinstallerconfig.ObjectMeta.OwnerReferences = []metav1.OwnerReference{
+		k8sinstallerconfig.OwnerReferences = []metav1.OwnerReference{
 			{
 				Kind:       "ByoMachine",
 				Name:       b.byomachine.Name,
@@ -550,7 +550,7 @@ func (b *K8sInstallerConfigBuilder) Build() *infrastructurev1beta1.K8sInstallerC
 		}
 	}
 	if b.clusterLabel != "" {
-		k8sinstallerconfig.ObjectMeta.Labels = map[string]string{
+		k8sinstallerconfig.Labels = map[string]string{
 			clusterv1.ClusterNameLabel: b.clusterLabel,
 		}
 	}

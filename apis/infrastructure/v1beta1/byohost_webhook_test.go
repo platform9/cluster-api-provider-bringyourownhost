@@ -17,6 +17,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const (
+	testByoHostKind  = "ByoHost"
+	testAPIVersion   = "infrastructure.cluster.x-k8s.io/v1beta1"
+	defaultHostName  = "host1"
+	defaultNamespace = "default"
+)
+
 var _ = Describe("ByohostWebhook", func() {
 
 	Context("When ByoHost gets a delete request", func() {
@@ -27,12 +34,12 @@ var _ = Describe("ByohostWebhook", func() {
 			ctx = context.Background()
 			byoHost = &byohv1beta1.ByoHost{
 				TypeMeta: metav1.TypeMeta{
-					Kind:       "ByoHost",
-					APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
+					Kind:       testByoHostKind,
+					APIVersion: testAPIVersion,
 				},
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "host1",
-					Namespace: "default",
+					Name:      defaultHostName,
+					Namespace: defaultNamespace,
 				},
 				Spec: byohv1beta1.ByoHostSpec{},
 			}
@@ -56,11 +63,11 @@ var _ = Describe("ByohostWebhook", func() {
 				byoMachine = &byohv1beta1.ByoMachine{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "ByoMachine",
-						APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
+						APIVersion: testAPIVersion,
 					},
 					ObjectMeta: metav1.ObjectMeta{
 						GenerateName: "byomachine-",
-						Namespace:    "default",
+						Namespace:    defaultNamespace,
 					},
 					Spec: byohv1beta1.ByoMachineSpec{},
 				}
@@ -102,12 +109,12 @@ var _ = Describe("ByohostWebhook", func() {
 			ctx = context.Background()
 			byoHost = &byohv1beta1.ByoHost{
 				TypeMeta: metav1.TypeMeta{
-					Kind:       "ByoHost",
-					APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
+					Kind:       testByoHostKind,
+					APIVersion: testAPIVersion,
 				},
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "host1",
-					Namespace: "default",
+					Name:      defaultHostName,
+					Namespace: defaultNamespace,
 				},
 				Spec: byohv1beta1.ByoHostSpec{},
 			}
@@ -133,12 +140,12 @@ var _ = Describe("ByohostWebhook", func() {
 			ctx = context.Background()
 			byoHost = &byohv1beta1.ByoHost{
 				TypeMeta: metav1.TypeMeta{
-					Kind:       "ByoHost",
-					APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
+					Kind:       testByoHostKind,
+					APIVersion: testAPIVersion,
 				},
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "host1",
-					Namespace: "default",
+					Name:      defaultHostName,
+					Namespace: defaultNamespace,
 				},
 				Spec: byohv1beta1.ByoHostSpec{},
 			}
@@ -150,7 +157,7 @@ var _ = Describe("ByohostWebhook", func() {
 			Expect(ValidUserK8sClient.Update(ctx, byoHost)).Should(Succeed())
 			Eventually(func() (done bool) {
 				updatedByoHost := &byohv1beta1.ByoHost{}
-				err := ValidUserK8sClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: "host1"}, updatedByoHost)
+				err := ValidUserK8sClient.Get(ctx, types.NamespacedName{Namespace: defaultNamespace, Name: defaultHostName}, updatedByoHost)
 				Expect(err).ShouldNot(HaveOccurred())
 				return updatedByoHost.Status.HostDetails.Architecture == arch
 			})

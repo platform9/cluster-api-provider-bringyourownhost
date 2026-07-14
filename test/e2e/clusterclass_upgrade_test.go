@@ -74,12 +74,12 @@ var _ = Describe("Clusterclass upgrade test [K8s-upgrade]", func() {
 				Namespace:             namespace.Name,
 				PathToHostAgentBinary: pathToHostAgentBinary,
 				DockerClient:          dockerClient,
-				NetworkInterface:      "kind",
+				NetworkInterface:      dockerNetworkInterfaceKind,
 				bootstrapClusterProxy: bootstrapClusterProxy,
 				CommandArgs: map[string]string{
-					"--bootstrap-kubeconfig": "/bootstrap.conf",
-					"--namespace":            namespace.Name,
-					"--v":                    "1",
+					agentFlagBootstrapKubeconfig: bootstrapConfPath,
+					agentFlagNamespace:           namespace.Name,
+					agentFlagVerbosity:           "1",
 				},
 			}
 			runner.BootstrapKubeconfigData = generateBootstrapKubeconfig(runner.Context, bootstrapClusterProxy, clusterConName)

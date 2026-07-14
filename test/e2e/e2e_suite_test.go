@@ -38,6 +38,15 @@ const (
 	IPFamily          = "IP_FAMILY"
 )
 
+// Shared docker-host command-line flags used across this package's e2e specs.
+const (
+	dockerNetworkInterfaceKind   = "kind"
+	agentFlagBootstrapKubeconfig = "--bootstrap-kubeconfig"
+	agentFlagNamespace           = "--namespace"
+	agentFlagVerbosity           = "--v"
+	bootstrapConfPath            = "/bootstrap.conf"
+)
+
 // Test suite flags
 var (
 	// configPath is the path to the e2e config file.

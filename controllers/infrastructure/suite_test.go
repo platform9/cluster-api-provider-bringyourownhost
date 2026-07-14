@@ -37,6 +37,14 @@ import (
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
 
+// Shared test fixtures used across this package's test files.
+const (
+	nonExistentNamespace           = "non-existent-namespace"
+	pausedAnnotationValue          = "paused"
+	k8sInstallerConfigTemplateKind = "K8sInstallerConfigTemplate"
+	testOSNameLinux                = "linux"
+)
+
 var (
 	testEnv                               *envtest.Environment
 	clientFake                            client.Client

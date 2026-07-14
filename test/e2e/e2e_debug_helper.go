@@ -5,6 +5,7 @@ package e2e
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -94,7 +95,8 @@ func ShowFileContent(fileName string) {
 
 // ExecuteShellScript executes a given shell script file location
 func ExecuteShellScript(shellFileName string) {
-	cmd := exec.Command("/bin/sh", "-x", shellFileName)
+	// No caller passes a context through this debug-only helper; scope one locally.
+	cmd := exec.CommandContext(context.Background(), "/bin/sh", "-x", shellFileName)
 	output, err := cmd.Output()
 	if err != nil {
 		Showf("execute %s return failed: Get err %v, output: %s", shellFileName, err, output)

@@ -9,6 +9,13 @@ import (
 	. "github.com/onsi/gomega"
 )
 
+const (
+	labelKeyK1   = "k1"
+	labelKeyK2   = "k2"
+	labelValueV1 = "v1"
+	labelValueV2 = "v2"
+)
+
 var _ = Describe("Label flag for host agent", func() {
 
 	Context("When the label flag is provided", func() {
@@ -19,46 +26,46 @@ var _ = Describe("Label flag for host agent", func() {
 			labels = make(labelFlags)
 		})
 		It("Should accept the single label flag", func() {
-			expectedLabels := labelFlags{"k1": "v1"}
+			expectedLabels := labelFlags{labelKeyK1: labelValueV1}
 			Expect(labels.Set("k1=v1")).NotTo(HaveOccurred())
 			Expect(labels).Should(Equal(expectedLabels))
 		})
 
 		It("Should accept the single label flag with comma separated kv pairs", func() {
-			expectedLabels := labelFlags{"k1": "v1", "k2": "v2"}
+			expectedLabels := labelFlags{labelKeyK1: labelValueV1, labelKeyK2: labelValueV2}
 			Expect(labels.Set("k1=v1,k2=v2")).NotTo(HaveOccurred())
 			Expect(labels).Should(Equal(expectedLabels))
 		})
 
 		It("Should accept the single label flag with comma separated kv pairs with trailing comma", func() {
-			expectedLabels := labelFlags{"k1": "v1", "k2": "v2"}
+			expectedLabels := labelFlags{labelKeyK1: labelValueV1, labelKeyK2: labelValueV2}
 			Expect(labels.Set("k1=v1,k2=v2,")).NotTo(HaveOccurred())
 			Expect(labels).Should(Equal(expectedLabels))
 		})
 
 		It("Should accept the multiple label flags", func() {
-			expectedLabels := labelFlags{"k1": "v1", "k2": "v2"}
+			expectedLabels := labelFlags{labelKeyK1: labelValueV1, labelKeyK2: labelValueV2}
 			Expect(labels.Set("k1=v1")).NotTo(HaveOccurred())
 			Expect(labels.Set("k2=v2")).NotTo(HaveOccurred())
 			Expect(labels).Should(Equal(expectedLabels))
 		})
 
 		It("Should accept the multiple label flags with comma separated kv pairs", func() {
-			expectedLabels := labelFlags{"k1": "v1", "k2": "v2", "k3": "v3", "k4": "v4"}
+			expectedLabels := labelFlags{labelKeyK1: labelValueV1, labelKeyK2: labelValueV2, "k3": "v3", "k4": "v4"}
 			Expect(labels.Set("k1=v1,k2=v2")).NotTo(HaveOccurred())
 			Expect(labels.Set("k3=v3,k4=v4")).NotTo(HaveOccurred())
 			Expect(labels).Should(Equal(expectedLabels))
 		})
 
 		It("Should accept the multiple label flags with a mix of comma separated kv pairs and a single kv pair", func() {
-			expectedLabels := labelFlags{"k1": "v1", "k2": "v2", "k3": "v3"}
+			expectedLabels := labelFlags{labelKeyK1: labelValueV1, labelKeyK2: labelValueV2, "k3": "v3"}
 			Expect(labels.Set("k1=v1,k2=v2")).NotTo(HaveOccurred())
 			Expect(labels.Set("k3=v3")).NotTo(HaveOccurred())
 			Expect(labels).Should(Equal(expectedLabels))
 		})
 
 		It("Should not accept the single label flag with only a key", func() {
-			Expect(labels.Set("k1")).To(MatchError("invalid argument value. expect key=value, got k1"))
+			Expect(labels.Set(labelKeyK1)).To(MatchError("invalid argument value. expect key=value, got k1"))
 		})
 
 		It("Should not accept the single label flag with comma separated errorneous input", func() {

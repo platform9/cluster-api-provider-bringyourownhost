@@ -27,6 +27,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
+const warningNoAvailableByoHostEvent = "Warning ByoHostSelectionFailed No available ByoHost"
+
 var _ = Describe("Controllers/ByomachineController", func() {
 	var (
 		byoMachineLookupKey        types.NamespacedName
@@ -80,7 +82,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 		_, err := reconciler.Reconcile(ctx, reconcile.Request{
 			NamespacedName: types.NamespacedName{
 				Name:      "non-existent-byomachine",
-				Namespace: "non-existent-namespace"}})
+				Namespace: nonExistentNamespace}})
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -178,7 +180,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 				// assert events
 				events := eventutils.CollectEvents(recorder.Events)
 				Expect(events).Should(ConsistOf([]string{
-					"Warning ByoHostSelectionFailed No available ByoHost",
+					warningNoAvailableByoHostEvent,
 				}))
 			})
 
@@ -200,7 +202,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 
 				Expect(k8sClientUncached.Delete(ctx, byoMachine)).Should(Succeed())
 				WaitForObjectToBeUpdatedInCache(byoMachine, func(object client.Object) bool {
-					return !object.(*infrastructurev1beta1.ByoMachine).ObjectMeta.DeletionTimestamp.IsZero()
+					return !object.(*infrastructurev1beta1.ByoMachine).DeletionTimestamp.IsZero()
 				})
 				_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: byoMachineLookupKey})
 				Expect(err).ToNot(HaveOccurred())
@@ -304,7 +306,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 					ph, err := patch.NewHelper(byoMachine, k8sClientUncached)
 					Expect(err).ShouldNot(HaveOccurred())
 					pauseAnnotations := map[string]string{
-						clusterv1.PausedAnnotation: "paused",
+						clusterv1.PausedAnnotation: pausedAnnotationValue,
 					}
 					annotations.AddAnnotations(byoMachine, pauseAnnotations)
 					Expect(ph.Patch(ctx, byoMachine, patch.WithStatusObservedGeneration{})).Should(Succeed())
@@ -347,7 +349,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 					ph, err := patch.NewHelper(byoHost, k8sClientUncached)
 					Expect(err).ShouldNot(HaveOccurred())
 					byoHost.Status.HostDetails = infrastructurev1beta1.HostInfo{
-						OSName:       "linux",
+						OSName:       testOSNameLinux,
 						OSImage:      "Ubuntu 20.04.4 LTS",
 						Architecture: "arm64",
 					}
@@ -359,7 +361,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 
 					WaitForObjectToBeUpdatedInCache(byoHost, func(object client.Object) bool {
 						return object.(*infrastructurev1beta1.ByoHost).Status.HostDetails == infrastructurev1beta1.HostInfo{
-							OSName:       "linux",
+							OSName:       testOSNameLinux,
 							OSImage:      "Ubuntu 20.04.4 LTS",
 							Architecture: "arm64",
 						}
@@ -387,7 +389,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 						Expect(k8sClientUncached.Delete(ctx, byoMachine)).Should(Succeed())
 
 						WaitForObjectToBeUpdatedInCache(byoMachine, func(object client.Object) bool {
-							return !object.(*infrastructurev1beta1.ByoMachine).ObjectMeta.DeletionTimestamp.IsZero()
+							return !object.(*infrastructurev1beta1.ByoMachine).DeletionTimestamp.IsZero()
 						})
 					})
 
@@ -434,7 +436,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 						ph, err := patch.NewHelper(byoMachine, k8sClientUncached)
 						Expect(err).ShouldNot(HaveOccurred())
 						byoMachine.Spec.InstallerRef = &corev1.ObjectReference{
-							Kind:       "K8sInstallerConfigTemplate",
+							Kind:       k8sInstallerConfigTemplateKind,
 							Namespace:  defaultNamespace,
 							Name:       defaultK8sInstallerConfigTemplateName,
 							APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
@@ -498,7 +500,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 				Expect(err).ShouldNot(HaveOccurred())
 
 				pauseAnnotations := map[string]string{
-					clusterv1.PausedAnnotation: "paused",
+					clusterv1.PausedAnnotation: pausedAnnotationValue,
 				}
 				annotations.AddAnnotations(byoMachine, pauseAnnotations)
 
@@ -655,7 +657,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 				// assert events
 				events := eventutils.CollectEvents(recorder.Events)
 				Expect(events).Should(ConsistOf([]string{
-					"Warning ByoHostSelectionFailed No available ByoHost",
+					warningNoAvailableByoHostEvent,
 				}))
 			})
 		})
@@ -693,7 +695,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 				// assert events
 				events := eventutils.CollectEvents(recorder.Events)
 				Expect(events).Should(ConsistOf([]string{
-					"Warning ByoHostSelectionFailed No available ByoHost",
+					warningNoAvailableByoHostEvent,
 				}))
 			})
 		})
@@ -803,7 +805,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 				ph, err := patch.NewHelper(byoMachine, k8sClientUncached)
 				Expect(err).ShouldNot(HaveOccurred())
 				byoMachine.Spec.InstallerRef = &corev1.ObjectReference{
-					Kind:       "K8sInstallerConfigTemplate",
+					Kind:       k8sInstallerConfigTemplateKind,
 					Namespace:  k8sInstallerConfigTemplate.Namespace,
 					Name:       k8sInstallerConfigTemplate.Name,
 					UID:        k8sInstallerConfigTemplate.UID,
@@ -835,7 +837,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 				ph, err := patch.NewHelper(byoMachine, k8sClientUncached)
 				Expect(err).ShouldNot(HaveOccurred())
 				byoMachine.Spec.InstallerRef = &corev1.ObjectReference{
-					Kind:       "K8sInstallerConfigTemplate",
+					Kind:       k8sInstallerConfigTemplateKind,
 					Namespace:  defaultNamespace,
 					Name:       defaultK8sInstallerConfigTemplateName,
 					APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
