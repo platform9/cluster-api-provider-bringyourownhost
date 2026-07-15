@@ -88,7 +88,7 @@ If someone wants to implement their own installer controller then they need to f
 
 ## Compatibility with Cluster API
 
-- BYOH is currently compatible wth Cluster API v1beta1 (v1.0)
+- BYOH is currently compatible with Cluster API v1beta2, built/tested against Cluster API v1.13.3
 
 ## Supported OS and Kubernetes versions
 | Operating System  | Architecture  | Kubernetes v1.31.* |
