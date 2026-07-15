@@ -6,7 +6,7 @@ package v1beta1
 import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 )
 
 const (
@@ -113,12 +113,12 @@ func init() {
 	SchemeBuilder.Register(&ByoHost{}, &ByoHostList{})
 }
 
-// GetConditions gets the ByoHost status conditions
-func (byoHost *ByoHost) GetConditions() clusterv1.Conditions {
+// GetV1Beta1Conditions gets the ByoHost status conditions
+func (byoHost *ByoHost) GetV1Beta1Conditions() clusterv1.Conditions {
 	return byoHost.Status.Conditions
 }
 
-// SetConditions sets the ByoHost status conditions
-func (byoHost *ByoHost) SetConditions(conditions clusterv1.Conditions) {
+// SetV1Beta1Conditions sets the ByoHost status conditions
+func (byoHost *ByoHost) SetV1Beta1Conditions(conditions clusterv1.Conditions) {
 	byoHost.Status.Conditions = conditions
 }
