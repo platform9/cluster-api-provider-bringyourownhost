@@ -14,8 +14,10 @@ import (
 	certv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 )
+
+const byoMachineKind = "ByoMachine"
 
 // ByoMachineBuilder holds the variables and objects required to build an infrastructurev1beta1.ByoMachine
 type ByoMachineBuilder struct {
@@ -56,7 +58,7 @@ func (b *ByoMachineBuilder) WithLabelSelector(selector map[string]string) *ByoMa
 func (b *ByoMachineBuilder) Build() *infrastructurev1beta1.ByoMachine {
 	byoMachine := &infrastructurev1beta1.ByoMachine{
 		TypeMeta: metav1.TypeMeta{
-			Kind:       "ByoMachine",
+			Kind:       byoMachineKind,
 			APIVersion: infrastructurev1beta1.GroupVersion.String(),
 		},
 		ObjectMeta: metav1.ObjectMeta{
@@ -130,11 +132,12 @@ func (b *ByoHostBuilder) Build() *infrastructurev1beta1.ByoHost {
 
 // MachineBuilder holds the variables and objects required to build a clusterv1.Machine
 type MachineBuilder struct {
-	namespace           string
-	name                string
-	cluster             string
-	version             string
-	bootstrapDataSecret string
+	namespace             string
+	name                  string
+	cluster               string
+	version               string
+	bootstrapDataSecret   string
+	infrastructureRefName string
 }
 
 // ByoClusterBuilder holds the variables and objects required to build an infrastructurev1beta1.ByoCluster
@@ -230,6 +233,12 @@ func (m *MachineBuilder) WithBootstrapDataSecret(secret string) *MachineBuilder 
 	return m
 }
 
+// WithInfrastructureRef sets the Machine's infrastructureRef to point at a ByoMachine of the given name
+func (m *MachineBuilder) WithInfrastructureRef(byoMachineName string) *MachineBuilder {
+	m.infrastructureRefName = byoMachineName
+	return m
+}
+
 // Build returns a Machine with the attributes added to the MachineBuilder
 func (m *MachineBuilder) Build() *clusterv1.Machine {
 	machine := &clusterv1.Machine{
@@ -243,13 +252,26 @@ func (m *MachineBuilder) Build() *clusterv1.Machine {
 		},
 		Spec: clusterv1.MachineSpec{
 			ClusterName: m.cluster,
-			Version:     &m.version,
+			Version:     m.version,
+			InfrastructureRef: clusterv1.ContractVersionedObjectReference{
+				APIGroup: infrastructurev1beta1.GroupVersion.Group,
+				Kind:     byoMachineKind,
+				Name:     m.infrastructureRefName,
+			},
+			// ConfigRef is always set (even without a data secret) so that Bootstrap is
+			// never the exact zero value: Bootstrap's `omitzero` JSON tag would otherwise
+			// drop the entire bootstrap field, and CAPI v1beta2 requires it to be present.
+			Bootstrap: clusterv1.Bootstrap{
+				ConfigRef: clusterv1.ContractVersionedObjectReference{
+					APIGroup: "bootstrap.cluster.x-k8s.io",
+					Kind:     "KubeadmConfig",
+					Name:     m.name,
+				},
+			},
 		},
 	}
 	if m.bootstrapDataSecret != "" {
-		machine.Spec.Bootstrap = clusterv1.Bootstrap{
-			DataSecretName: &m.bootstrapDataSecret,
-		}
+		machine.Spec.Bootstrap.DataSecretName = &m.bootstrapDataSecret
 	}
 
 	return machine
@@ -294,18 +316,19 @@ func (c *ClusterBuilder) Build() *clusterv1.Cluster {
 			Name:      c.name,
 			Namespace: c.namespace,
 		},
-		Spec: clusterv1.ClusterSpec{},
-	}
-	if c.paused {
-		cluster.Spec.Paused = c.paused
+		Spec: clusterv1.ClusterSpec{
+			// Paused is always set (even to false) so that Spec is never the exact
+			// zero value: ClusterSpec's `omitzero` JSON tag would otherwise drop the
+			// entire spec field, and CAPI v1beta2 requires spec to be present.
+			Paused: &c.paused,
+		},
 	}
 
 	if c.byoCluster != nil {
-		cluster.Spec.InfrastructureRef = &corev1.ObjectReference{
-			Kind:      "ByoCluster",
-			Namespace: c.byoCluster.Namespace,
-			Name:      c.byoCluster.Name,
-			UID:       c.byoCluster.UID,
+		cluster.Spec.InfrastructureRef = clusterv1.ContractVersionedObjectReference{
+			APIGroup: infrastructurev1beta1.GroupVersion.Group,
+			Kind:     "ByoCluster",
+			Name:     c.byoCluster.Name,
 		}
 	}
 
@@ -542,7 +565,7 @@ func (b *K8sInstallerConfigBuilder) Build() *infrastructurev1beta1.K8sInstallerC
 	if b.byomachine != nil {
 		k8sinstallerconfig.OwnerReferences = []metav1.OwnerReference{
 			{
-				Kind:       "ByoMachine",
+				Kind:       byoMachineKind,
 				Name:       b.byomachine.Name,
 				APIVersion: infrastructurev1beta1.GroupVersion.String(),
 				UID:        b.byomachine.UID,

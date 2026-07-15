@@ -15,12 +15,14 @@ import (
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/test/builder"
 	eventutils "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/test/utils/events"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/annotations"
-	"sigs.k8s.io/cluster-api/util/conditions"
+	capiconditions "sigs.k8s.io/cluster-api/util/conditions"
+	conditions "sigs.k8s.io/cluster-api/util/conditions/deprecated/v1beta1"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -54,6 +56,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 			WithClusterName(defaultClusterName).
 			WithClusterVersion(testClusterVersion).
 			WithBootstrapDataSecret(fakeBootstrapSecret).
+			WithInfrastructureRef(defaultByoMachineName).
 			Build()
 		Expect(k8sClientUncached.Create(ctx, machine)).Should(Succeed())
 
@@ -89,6 +92,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 	It("should return error when cluster does not exist", func() {
 		machineForByoMachineWithoutCluster := builder.Machine(defaultNamespace, "machine-for-a-byomachine-without-cluster").
 			WithClusterName(defaultClusterName).
+			WithInfrastructureRef(defaultByoMachineName).
 			Build()
 		Expect(k8sClientUncached.Create(ctx, machineForByoMachineWithoutCluster)).Should(Succeed())
 
@@ -104,18 +108,22 @@ var _ = Describe("Controllers/ByomachineController", func() {
 			NamespacedName: types.NamespacedName{
 				Name:      byoMachineWithNonExistingCluster.Name,
 				Namespace: byoMachineWithNonExistingCluster.Namespace}})
-		Expect(err).To(MatchError("failed to get Cluster/non-existent-cluster: Cluster.cluster.x-k8s.io \"non-existent-cluster\" not found"))
+		Expect(err).To(MatchError("failed to get Cluster default/non-existent-cluster: Cluster.cluster.x-k8s.io \"non-existent-cluster\" not found"))
 	})
 
 	Context("When cluster infrastructure is ready", func() {
 		BeforeEach(func() {
 			ph, err := patch.NewHelper(capiCluster, k8sClientUncached)
 			Expect(err).ShouldNot(HaveOccurred())
-			capiCluster.Status.InfrastructureReady = true
+			capiconditions.Set(capiCluster, metav1.Condition{
+				Type:   clusterv1.InfrastructureReadyCondition,
+				Status: metav1.ConditionTrue,
+				Reason: clusterv1.ReadyReason,
+			})
 			Expect(ph.Patch(ctx, capiCluster, patch.WithStatusObservedGeneration{})).Should(Succeed())
 
 			WaitForObjectToBeUpdatedInCache(capiCluster, func(object client.Object) bool {
-				return object.(*clusterv1.Cluster).Status.InfrastructureReady == true
+				return capiconditions.IsTrue(object.(*clusterv1.Cluster), clusterv1.InfrastructureReadyCondition)
 			})
 		})
 
@@ -535,6 +543,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 
 				pausedMachine := builder.Machine(defaultNamespace, "paused-machine").
 					WithClusterName(pausedCluster.Name).
+					WithInfrastructureRef("paused-byo-machine").
 					Build()
 				Expect(k8sClientUncached.Create(ctx, pausedMachine)).Should(Succeed())
 
@@ -572,7 +581,14 @@ var _ = Describe("Controllers/ByomachineController", func() {
 				ph, err := patch.NewHelper(machine, k8sClientUncached)
 				Expect(err).ShouldNot(HaveOccurred())
 
-				machine.Spec.Bootstrap = clusterv1.Bootstrap{DataSecretName: nil}
+				machine.Spec.Bootstrap = clusterv1.Bootstrap{
+					ConfigRef: clusterv1.ContractVersionedObjectReference{
+						APIGroup: "bootstrap.cluster.x-k8s.io",
+						Kind:     "KubeadmConfig",
+						Name:     machine.Name,
+					},
+					DataSecretName: nil,
+				}
 				Expect(ph.Patch(ctx, machine, patch.WithStatusObservedGeneration{})).Should(Succeed())
 
 				WaitForObjectToBeUpdatedInCache(machine, func(object client.Object) bool {
@@ -825,7 +841,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 				Expect(err).ShouldNot(HaveOccurred())
 
 				Expect(k8sInstallerConfigTemplate.Spec.Template.Spec).To(Equal(createdK8sInstallerConfig.Spec))
-				Expect(createdK8sInstallerConfig.GetAnnotations()[infrastructurev1beta1.K8sVersionAnnotation]).To(Equal(*machine.Spec.Version))
+				Expect(createdK8sInstallerConfig.GetAnnotations()[infrastructurev1beta1.K8sVersionAnnotation]).To(Equal(machine.Spec.Version))
 			})
 		})
 
@@ -863,12 +879,16 @@ var _ = Describe("Controllers/ByomachineController", func() {
 		BeforeEach(func() {
 			ph, err := patch.NewHelper(capiCluster, k8sClientUncached)
 			Expect(err).ShouldNot(HaveOccurred())
-			capiCluster.Status.InfrastructureReady = false
+			capiconditions.Set(capiCluster, metav1.Condition{
+				Type:   clusterv1.InfrastructureReadyCondition,
+				Status: metav1.ConditionFalse,
+				Reason: clusterv1.NotReadyReason,
+			})
 			err = ph.Patch(ctx, capiCluster, patch.WithStatusObservedGeneration{})
 			Expect(err).ShouldNot(HaveOccurred())
 
 			WaitForObjectToBeUpdatedInCache(capiCluster, func(object client.Object) bool {
-				return object.(*clusterv1.Cluster).Status.InfrastructureReady == false
+				return !capiconditions.IsTrue(object.(*clusterv1.Cluster), clusterv1.InfrastructureReadyCondition)
 			})
 		})
 

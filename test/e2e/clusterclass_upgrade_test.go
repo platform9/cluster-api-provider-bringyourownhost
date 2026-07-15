@@ -10,13 +10,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/cluster-api/test/framework"
 	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
 	"sigs.k8s.io/cluster-api/util"
@@ -116,8 +115,8 @@ var _ = Describe("Clusterclass upgrade test [K8s-upgrade]", func() {
 				Namespace:                namespace.Name,
 				ClusterName:              clusterName,
 				KubernetesVersion:        kubernetesVersionUpgradeFrom,
-				ControlPlaneMachineCount: pointer.Int64(1),
-				WorkerMachineCount:       pointer.Int64(1),
+				ControlPlaneMachineCount: ptr.To(int64(1)),
+				WorkerMachineCount:       ptr.To(int64(1)),
 			},
 			WaitForClusterIntervals:      e2eConfig.GetIntervals(specName, "wait-cluster"),
 			WaitForControlPlaneIntervals: e2eConfig.GetIntervals(specName, "wait-control-plane"),
@@ -126,17 +125,17 @@ var _ = Describe("Clusterclass upgrade test [K8s-upgrade]", func() {
 
 		By("Upgrading the control plane")
 		framework.UpgradeClusterTopologyAndWaitForUpgrade(ctx, framework.UpgradeClusterTopologyAndWaitForUpgradeInput{
-			ClusterProxy:                bootstrapClusterProxy,
-			Cluster:                     clusterResources.Cluster,
-			ControlPlane:                clusterResources.ControlPlane,
-			EtcdImageTag:                etcdUpgradeVersion,
-			DNSImageTag:                 coreDNSUpgradeVersion,
-			MachineDeployments:          clusterResources.MachineDeployments,
-			KubernetesUpgradeVersion:    kubernetesVersionUpgradeTo,
-			WaitForMachinesToBeUpgraded: e2eConfig.GetIntervals(specName, "wait-machine-upgrade"),
-			WaitForKubeProxyUpgrade:     e2eConfig.GetIntervals(specName, "wait-machine-upgrade"),
-			WaitForDNSUpgrade:           e2eConfig.GetIntervals(specName, "wait-machine-upgrade"),
-			WaitForEtcdUpgrade:          e2eConfig.GetIntervals(specName, "wait-machine-upgrade"),
+			ClusterProxy:                         bootstrapClusterProxy,
+			Cluster:                              clusterResources.Cluster,
+			ControlPlane:                         clusterResources.ControlPlane,
+			EtcdImageTag:                         etcdUpgradeVersion,
+			DNSImageTag:                          coreDNSUpgradeVersion,
+			MachineDeployments:                   clusterResources.MachineDeployments,
+			KubernetesUpgradeVersion:             kubernetesVersionUpgradeTo,
+			WaitForMachineDeploymentToBeUpgraded: e2eConfig.GetIntervals(specName, "wait-machine-upgrade"),
+			WaitForKubeProxyUpgrade:              e2eConfig.GetIntervals(specName, "wait-machine-upgrade"),
+			WaitForDNSUpgrade:                    e2eConfig.GetIntervals(specName, "wait-machine-upgrade"),
+			WaitForEtcdUpgrade:                   e2eConfig.GetIntervals(specName, "wait-machine-upgrade"),
 		})
 
 		By("Waiting until nodes are ready")
@@ -164,7 +163,7 @@ var _ = Describe("Clusterclass upgrade test [K8s-upgrade]", func() {
 				err := dockerClient.ContainerStop(ctx, byohostContainerID, container.StopOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				err = dockerClient.ContainerRemove(ctx, byohostContainerID, types.ContainerRemoveOptions{})
+				err = dockerClient.ContainerRemove(ctx, byohostContainerID, container.RemoveOptions{})
 				Expect(err).NotTo(HaveOccurred())
 			}
 

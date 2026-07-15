@@ -32,7 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/klog/v2/klogr"
-	"sigs.k8s.io/cluster-api/util/conditions"
+	conditions "sigs.k8s.io/cluster-api/util/conditions/deprecated/v1beta1"
 	"sigs.k8s.io/cluster-api/util/patch"
 )
 
@@ -582,24 +582,24 @@ var _ = Describe("Agent", func() {
 			cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 			Expect(err).ShouldNot(HaveOccurred())
 			// create the directory to place the kubeconfig
-			execCommand, err := cli.ContainerExecCreate(ctx, byoHostContainer.ID, dockertypes.ExecConfig{
+			execCommand, err := cli.ContainerExecCreate(ctx, byoHostContainer.ID, container.ExecOptions{
 				AttachStdin:  false,
 				AttachStdout: true,
 				AttachStderr: true,
 				Cmd:          []string{"sh", "-c", "mkdir ${HOME}/.byoh"},
 			})
 			Expect(err).ShouldNot(HaveOccurred())
-			err = cli.ContainerExecStart(ctx, execCommand.ID, dockertypes.ExecStartCheck{})
+			err = cli.ContainerExecStart(ctx, execCommand.ID, container.ExecAttachOptions{})
 			Expect(err).ShouldNot(HaveOccurred())
 			// copy the kubeconfig
-			execCommand, err = cli.ContainerExecCreate(ctx, byoHostContainer.ID, dockertypes.ExecConfig{
+			execCommand, err = cli.ContainerExecCreate(ctx, byoHostContainer.ID, container.ExecOptions{
 				AttachStdin:  false,
 				AttachStdout: true,
 				AttachStderr: true,
 				Cmd:          []string{"sh", "-c", "cp /root/config ${HOME}/.byoh/"},
 			})
 			Expect(err).ShouldNot(HaveOccurred())
-			err = cli.ContainerExecStart(ctx, execCommand.ID, dockertypes.ExecStartCheck{})
+			err = cli.ContainerExecStart(ctx, execCommand.ID, container.ExecAttachOptions{})
 			Expect(err).ShouldNot(HaveOccurred())
 
 			// start agent
@@ -678,14 +678,14 @@ var _ = Describe("Agent", func() {
 			cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 			Expect(err).ShouldNot(HaveOccurred())
 			time.Sleep(4 * time.Second)
-			response, err := cli.ContainerExecCreate(ctx, byoHostContainer.ID, dockertypes.ExecConfig{
+			response, err := cli.ContainerExecCreate(ctx, byoHostContainer.ID, container.ExecOptions{
 				AttachStdin:  false,
 				AttachStdout: true,
 				AttachStderr: true,
 				Cmd:          []string{"cat", registration.TmpPrivateKey},
 			})
 			Expect(err).ShouldNot(HaveOccurred())
-			result, err := cli.ContainerExecAttach(ctx, response.ID, dockertypes.ExecStartCheck{})
+			result, err := cli.ContainerExecAttach(ctx, response.ID, container.ExecAttachOptions{})
 			Expect(err).ShouldNot(HaveOccurred())
 			defer result.Close()
 			fExec := e2e.WriteDockerLog(result, execLogFile)
@@ -782,14 +782,14 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 			cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 			Expect(err).ShouldNot(HaveOccurred())
 			time.Sleep(2 * time.Second)
-			response, err := cli.ContainerExecCreate(ctx, byoHostContainer.ID, dockertypes.ExecConfig{
+			response, err := cli.ContainerExecCreate(ctx, byoHostContainer.ID, container.ExecOptions{
 				AttachStdin:  false,
 				AttachStdout: true,
 				AttachStderr: true,
 				Cmd:          []string{"cat", "/root/.byoh/config"},
 			})
 			Expect(err).ShouldNot(HaveOccurred())
-			result, err := cli.ContainerExecAttach(ctx, response.ID, dockertypes.ExecStartCheck{})
+			result, err := cli.ContainerExecAttach(ctx, response.ID, container.ExecAttachOptions{})
 			Expect(err).ShouldNot(HaveOccurred())
 			defer result.Close()
 			fExec := e2e.WriteDockerLog(result, execLogFile)

@@ -22,7 +22,7 @@ import (
 // ByoHostValidator validates ByoHosts
 type ByoHostValidator struct {
 	Client  client.Client
-	decoder *admission.Decoder
+	Decoder admission.Decoder
 }
 
 // The byoh-controller-manager's namespace differs by deployment: "byoh-system" is the OSS
@@ -59,7 +59,7 @@ func (v *ByoHostValidator) Handle(ctx context.Context, req admission.Request) ad
 
 func (v *ByoHostValidator) handleCreateUpdate(req *admission.Request) admission.Response {
 	byoHost := &ByoHost{}
-	err := v.decoder.Decode(*req, byoHost)
+	err := v.Decoder.Decode(*req, byoHost)
 	if err != nil {
 		return admission.Errored(http.StatusBadRequest, err)
 	}
@@ -92,7 +92,7 @@ func (v *ByoHostValidator) handleCreateUpdate(req *admission.Request) admission.
 
 func (v *ByoHostValidator) handleDelete(ctx context.Context, req *admission.Request) admission.Response {
 	byoHost := &ByoHost{}
-	err := v.decoder.DecodeRaw(req.OldObject, byoHost)
+	err := v.Decoder.DecodeRaw(req.OldObject, byoHost)
 	if err != nil {
 		return admission.Errored(http.StatusBadRequest, err)
 	}
@@ -116,10 +116,4 @@ func (v *ByoHostValidator) handleDelete(ctx context.Context, req *admission.Requ
 		return admission.Denied("cannot delete ByoHost when MachineRef is assigned")
 	}
 	return admission.Allowed("")
-}
-
-// InjectDecoder injects the decoder.
-func (v *ByoHostValidator) InjectDecoder(d *admission.Decoder) error {
-	v.decoder = d
-	return nil
 }

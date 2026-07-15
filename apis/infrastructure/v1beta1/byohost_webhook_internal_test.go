@@ -34,14 +34,14 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 	schema := runtime.NewScheme()
 	err := AddToScheme(schema)
 	Expect(err).NotTo(HaveOccurred())
-	decoder, _ := admission.NewDecoder(schema)
+	decoder := admission.NewDecoder(schema)
 	byoMachine := &ByoMachine{
 		ObjectMeta: metav1.ObjectMeta{Name: "byomachine1", Namespace: DefaultNamespace},
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(schema).WithObjects(byoMachine).Build()
 	v := &ByoHostValidator{
 		Client:  fakeClient,
-		decoder: decoder,
+		Decoder: decoder,
 	}
 	Context("When ByoHost gets a create request", func() {
 		var (
@@ -76,7 +76,7 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 			}
 			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
 			Expect(resp.AdmissionResponse.Allowed).To(Equal(false))
-			Expect(string(resp.AdmissionResponse.Result.Reason)).To(Equal(fmt.Sprintf("%s is not a valid agent username", unauthorizedUser)))
+			Expect(resp.AdmissionResponse.Result.Message).To(Equal(fmt.Sprintf("%s is not a valid agent username", unauthorizedUser)))
 		})
 		It("Should reject request from another agent user in the group", func() {
 			admissionRequest := admissionv1.AdmissionRequest{
@@ -89,7 +89,7 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 			}
 			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
 			Expect(resp.AdmissionResponse.Allowed).To(Equal(false))
-			Expect(string(resp.AdmissionResponse.Result.Reason)).To(Equal(fmt.Sprintf("%s cannot create/update resource %s", byohHostTwoUser, defaultHostName)))
+			Expect(resp.AdmissionResponse.Result.Message).To(Equal(fmt.Sprintf("%s cannot create/update resource %s", byohHostTwoUser, defaultHostName)))
 		})
 		It("Should allow request from the valid agent user", func() {
 			admissionRequest := admissionv1.AdmissionRequest{
@@ -138,7 +138,7 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 			}
 			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
 			Expect(resp.AdmissionResponse.Allowed).To(Equal(false))
-			Expect(string(resp.AdmissionResponse.Result.Reason)).To(Equal(fmt.Sprintf("%s is not a valid agent username", unauthorizedUser)))
+			Expect(resp.AdmissionResponse.Result.Message).To(Equal(fmt.Sprintf("%s is not a valid agent username", unauthorizedUser)))
 		})
 		It("Should allow update request from manager", func() {
 			admissionRequest := admissionv1.AdmissionRequest{
@@ -175,7 +175,7 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 			}
 			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
 			Expect(resp.AdmissionResponse.Allowed).To(Equal(false))
-			Expect(string(resp.AdmissionResponse.Result.Reason)).To(Equal(fmt.Sprintf("%s is not a valid agent username", unauthorizedUser)))
+			Expect(resp.AdmissionResponse.Result.Message).To(Equal(fmt.Sprintf("%s is not a valid agent username", unauthorizedUser)))
 		})
 
 		It("Should reject request from another agent user in the group", func() {
@@ -189,7 +189,7 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 			}
 			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
 			Expect(resp.AdmissionResponse.Allowed).To(Equal(false))
-			Expect(string(resp.AdmissionResponse.Result.Reason)).To(Equal(fmt.Sprintf("%s cannot create/update resource %s", byohHostTwoUser, defaultHostName)))
+			Expect(resp.AdmissionResponse.Result.Message).To(Equal(fmt.Sprintf("%s cannot create/update resource %s", byohHostTwoUser, defaultHostName)))
 		})
 		It("Should allow request from the valid agent user", func() {
 			admissionRequest := admissionv1.AdmissionRequest{
@@ -257,7 +257,7 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 			}
 			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
 			Expect(resp.AdmissionResponse.Allowed).To(Equal(false))
-			Expect(string(resp.AdmissionResponse.Result.Reason)).To(Equal("cannot delete ByoHost when MachineRef is assigned"))
+			Expect(resp.AdmissionResponse.Result.Message).To(Equal("cannot delete ByoHost when MachineRef is assigned"))
 		})
 	})
 })
@@ -266,10 +266,9 @@ func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 	scheme := runtime.NewScheme()
 	err := AddToScheme(scheme)
 	require.NoError(t, err)
-	decoder, err := admission.NewDecoder(scheme)
-	require.NoError(t, err)
+	decoder := admission.NewDecoder(scheme)
 
-	v := &ByoHostValidator{decoder: decoder}
+	v := &ByoHostValidator{Decoder: decoder}
 
 	testCases := []struct {
 		name      string
@@ -352,7 +351,7 @@ func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 
 			require.Equal(t, tc.wantAllow, resp.Allowed)
 			if !tc.wantAllow {
-				require.Equal(t, tc.wantMsg, string(resp.Result.Reason))
+				require.Equal(t, tc.wantMsg, resp.Result.Message)
 			}
 		})
 	}
