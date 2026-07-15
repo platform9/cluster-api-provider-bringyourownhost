@@ -16,15 +16,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/pkg/errors"
 	infrav1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 
 	clusterutilv1 "sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/annotations"
-	"sigs.k8s.io/cluster-api/util/conditions"
+	conditions "sigs.k8s.io/cluster-api/util/conditions/deprecated/v1beta1"
 	"sigs.k8s.io/cluster-api/util/patch"
 )
 
@@ -119,7 +118,7 @@ func patchByoCluster(ctx context.Context, patchHelper *patch.Helper, byoCluster 
 	return patchHelper.Patch(
 		ctx,
 		byoCluster,
-		patch.WithOwnedConditions{Conditions: []clusterv1.ConditionType{
+		patch.WithOwnedConditions{Conditions: []string{
 			clusterv1.ReadyCondition,
 		}},
 	)
@@ -188,7 +187,7 @@ func (r *ByoClusterReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Ma
 		For(clusterControlledType).
 		// Watch the CAPI resource that owns this infrastructure resource.
 		Watches(
-			&source.Kind{Type: &clusterv1.Cluster{}},
+			&clusterv1.Cluster{},
 			handler.EnqueueRequestsFromMapFunc(clusterutilv1.ClusterToInfrastructureMapFunc(ctx, infrav1.GroupVersion.WithKind(clusterControlledTypeGVK.Kind), mgr.GetClient(), &infrav1.ByoCluster{})),
 		).
 		Complete(r)

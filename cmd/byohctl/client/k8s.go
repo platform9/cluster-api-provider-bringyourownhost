@@ -25,7 +25,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
-	capiv1beta1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	capiv1beta1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 )
 
 const (
