@@ -73,14 +73,14 @@ func NewByohCSR(bootstrapClientConfig *restclient.Config, logger logr.Logger, ex
 // its running on and once the CSR is approved it will fetch the Certificate
 // and create a kubeconfig which will be used then by the host reconciler
 func (bcsr *ByohCSR) BootstrapKubeconfig(hostName string) error {
-	reqName, reqUID, err := bcsr.RequestBYOHClientCert(hostName)
+	ctx, cancel := context.WithTimeout(context.TODO(), CSRApprovalTimeout)
+	defer cancel()
+	reqName, reqUID, err := bcsr.RequestBYOHClientCert(ctx, hostName)
 	if err != nil {
 		return err
 	}
 	bcsr.logger.Info("CSR request created")
 	// wait for certificate to be issued
-	ctx, cancel := context.WithTimeout(context.TODO(), CSRApprovalTimeout)
-	defer cancel()
 	bcsr.logger.Info("waiting for client certificate to be issued")
 	certData, err := csr.WaitForCertificate(ctx, bcsr.bootstrapClient, reqName, reqUID)
 	if err != nil {
@@ -99,7 +99,7 @@ func (bcsr *ByohCSR) BootstrapKubeconfig(hostName string) error {
 
 // RequestBYOHClientCert will generate Private Key and then will create a
 // CertificateSigningRequest in K8s
-func (bcsr *ByohCSR) RequestBYOHClientCert(hostname string) (string, types.UID, error) {
+func (bcsr *ByohCSR) RequestBYOHClientCert(ctx context.Context, hostname string) (string, types.UID, error) {
 	if hostname == "" {
 		return "", "", fmt.Errorf("hostname is not valid")
 	}
@@ -118,7 +118,7 @@ func (bcsr *ByohCSR) RequestBYOHClientCert(hostname string) (string, types.UID, 
 	}
 	certTimeToExpire := bcsr.expiryDuration
 	bcsr.logger.Info("certTimeToExpire", "duration", certTimeToExpire)
-	reqName, reqUID, err := csr.RequestCertificate(bcsr.bootstrapClient,
+	reqName, reqUID, err := csr.RequestCertificateWithContext(ctx, bcsr.bootstrapClient,
 		csrData,
 		fmt.Sprintf(ByohCSRNameFormat, hostname),
 		certv1.KubeAPIServerClientSignerName,
