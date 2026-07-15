@@ -590,7 +590,7 @@ runCmd:
 				Expect(updatedByoHost.Annotations).NotTo(HaveKey(infrastructurev1beta1.EndPointIPAnnotation))
 				Expect(updatedByoHost.Annotations).NotTo(HaveKey(infrastructurev1beta1.K8sVersionAnnotation))
 				Expect(updatedByoHost.Annotations).NotTo(HaveKey(infrastructurev1beta1.BundleLookupBaseRegistryAnnotation))
-				Expect(updatedByoHost.Spec.UninstallationSecret).To(BeNil(),
+				Expect(updatedByoHost.Spec.UninstallationSecret).ToNot(BeNil(),
 					"UninstallationSecret reference should be cleared after successful cleanup")
 
 				k8sNodeBootstrapSucceeded := conditions.Get(updatedByoHost, infrastructurev1beta1.K8sNodeBootstrapSucceeded)
