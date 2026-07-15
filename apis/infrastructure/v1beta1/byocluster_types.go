@@ -5,7 +5,7 @@ package v1beta1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 )
 
 const (
@@ -37,7 +37,7 @@ type ByoClusterStatus struct {
 	Conditions clusterv1.Conditions `json:"conditions,omitempty"`
 
 	// FailureDomains is a list of failure domain objects synced from the infrastructure provider.
-	FailureDomains clusterv1.FailureDomains `json:"failureDomains,omitempty"`
+	FailureDomains []clusterv1.FailureDomain `json:"failureDomains,omitempty"`
 }
 
 // APIEndpoint represents a reachable Kubernetes API endpoint.
@@ -64,13 +64,13 @@ type ByoCluster struct {
 	Status ByoClusterStatus `json:"status,omitempty"`
 }
 
-// GetConditions gets the condition for the ByoCluster status
-func (byoCluster *ByoCluster) GetConditions() clusterv1.Conditions {
+// GetV1Beta1Conditions gets the condition for the ByoCluster status
+func (byoCluster *ByoCluster) GetV1Beta1Conditions() clusterv1.Conditions {
 	return byoCluster.Status.Conditions
 }
 
-// SetConditions sets the conditions for the ByoCluster status
-func (byoCluster *ByoCluster) SetConditions(conditions clusterv1.Conditions) {
+// SetV1Beta1Conditions sets the conditions for the ByoCluster status
+func (byoCluster *ByoCluster) SetV1Beta1Conditions(conditions clusterv1.Conditions) {
 	byoCluster.Status.Conditions = conditions
 }
 
