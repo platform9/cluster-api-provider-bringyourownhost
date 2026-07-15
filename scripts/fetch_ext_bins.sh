@@ -15,7 +15,7 @@ if [[ -n "${TRACE}" ]]; then
   set -x
 fi
 
-k8s_version=1.25.0
+k8s_version=1.31.0
 # goarch=amd64
 goarch="$(go version | awk '{print $NF}' | egrep -o '[^/]+$')"
 goos="unknown"
