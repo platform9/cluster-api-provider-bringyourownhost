@@ -28,9 +28,10 @@ import (
 	"sigs.k8s.io/cluster-api/util/patch"
 )
 
+// DefaultAPIEndpointPort default port for the API endpoint
+const DefaultAPIEndpointPort int32 = 6443
+
 var (
-	// DefaultAPIEndpointPort default port for the API endpoint
-	DefaultAPIEndpointPort    = 6443
 	clusterControlledType     = &infrav1.ByoCluster{}
 	clusterControlledTypeName = reflect.TypeOf(clusterControlledType).Elem().Name()
 	clusterControlledTypeGVK  = infrav1.GroupVersion.WithKind(clusterControlledTypeName)
@@ -172,7 +173,7 @@ func (r ByoClusterReconciler) reconcileNormal(ctx context.Context, byoCluster *i
 	controllerutil.AddFinalizer(byoCluster, infrav1.ClusterFinalizer)
 
 	if byoCluster.Spec.ControlPlaneEndpoint.Port == 0 {
-		byoCluster.Spec.ControlPlaneEndpoint.Port = int32(DefaultAPIEndpointPort)
+		byoCluster.Spec.ControlPlaneEndpoint.Port = DefaultAPIEndpointPort
 	}
 
 	byoCluster.Status.Ready = true
