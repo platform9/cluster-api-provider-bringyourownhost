@@ -20,9 +20,9 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/docker/pkg/system"
 	"github.com/docker/go-units"
+	archive "github.com/moby/go-archive"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega" //nolint: staticcheck
 	"github.com/pkg/errors"
@@ -170,7 +170,7 @@ func copyToContainer(ctx context.Context, cli *client.Client, copyConfig cpConfi
 	resolvedDstPath = dstDir
 	content = preparedArchive
 
-	options := types.CopyToContainerOptions{
+	options := container.CopyToContainerOptions{
 		AllowOverwriteDirWithFile: false,
 		CopyUIDGID:                copyConfig.copyUIDGID,
 	}
@@ -214,7 +214,7 @@ func (r *ByoHostRunner) createDockerContainer() (container.CreateResponse, error
 // default of 128 instances, which makes containerd's CRI plugin fail to load ("too many open
 // files") and leaves kubeadm join stuck retrying against a dead CRI socket.
 func (r *ByoHostRunner) raiseInotifyInstanceLimit(containerID string) error {
-	execCommand, err := r.DockerClient.ContainerExecCreate(r.Context, containerID, types.ExecConfig{
+	execCommand, err := r.DockerClient.ContainerExecCreate(r.Context, containerID, container.ExecOptions{
 		AttachStdout: true,
 		AttachStderr: true,
 		Cmd:          []string{"sysctl", "-w", "fs.inotify.max_user_instances=8192"},
@@ -222,11 +222,11 @@ func (r *ByoHostRunner) raiseInotifyInstanceLimit(containerID string) error {
 	if err != nil {
 		return errors.Wrapf(err, "create exec for raising inotify instance limit in container %q", containerID)
 	}
-	return errors.Wrapf(r.DockerClient.ContainerExecStart(r.Context, execCommand.ID, types.ExecStartCheck{}),
+	return errors.Wrapf(r.DockerClient.ContainerExecStart(r.Context, execCommand.ID, container.ExecStartOptions{}),
 		"raise inotify instance limit in container %q", containerID)
 }
 
-func (r *ByoHostRunner) copyKubeconfig(config cpConfig, listopt types.ContainerListOptions) error {
+func (r *ByoHostRunner) copyKubeconfig(config cpConfig, listopt container.ListOptions) error {
 	var kubeconfig []byte
 	if r.NetworkInterface == "host" {
 		listopt.Filters.Add("name", r.ByoHostName)
@@ -245,28 +245,28 @@ func (r *ByoHostRunner) copyKubeconfig(config cpConfig, listopt types.ContainerL
 		// kubeconfig placed in ~/.byoh/config
 		if r.CommandArgs["--bootstrap-kubeconfig"] == "" {
 			// get the $HOME env variable to set the destination path for kubeconfig
-			execCommand, err := r.DockerClient.ContainerExecCreate(r.Context, containers[0].ID, types.ExecConfig{
+			execCommand, err := r.DockerClient.ContainerExecCreate(r.Context, containers[0].ID, container.ExecOptions{
 				AttachStdin:  false,
 				AttachStdout: true,
 				AttachStderr: true,
 				Cmd:          []string{"sh", "-c", "echo ${HOME}"},
 			})
 			Expect(err).ShouldNot(HaveOccurred())
-			resp, err := r.DockerClient.ContainerExecAttach(r.Context, execCommand.ID, types.ExecStartCheck{})
+			resp, err := r.DockerClient.ContainerExecAttach(r.Context, execCommand.ID, container.ExecAttachOptions{})
 			Expect(err).ShouldNot(HaveOccurred())
 			defer resp.Close()
 			homeDir, err := resp.Reader.ReadString('\n')
 			Expect(err).ShouldNot(HaveOccurred())
 			homeDir = strings.TrimSuffix(homeDir, "\n")
 			// create the directory to place the kubeconfig
-			execCommand, err = r.DockerClient.ContainerExecCreate(r.Context, containers[0].ID, types.ExecConfig{
+			execCommand, err = r.DockerClient.ContainerExecCreate(r.Context, containers[0].ID, container.ExecOptions{
 				AttachStdin:  false,
 				AttachStdout: true,
 				AttachStderr: true,
 				Cmd:          []string{"sh", "-c", "mkdir ${HOME}/.byoh"},
 			})
 			Expect(err).ShouldNot(HaveOccurred())
-			err = r.DockerClient.ContainerExecStart(r.Context, execCommand.ID, types.ExecStartCheck{})
+			err = r.DockerClient.ContainerExecStart(r.Context, execCommand.ID, container.ExecStartOptions{})
 			Expect(err).ShouldNot(HaveOccurred())
 
 			config.sourcePath = TempKubeconfigPath
@@ -318,7 +318,7 @@ func (r *ByoHostRunner) SetupByoDockerHost() (*container.CreateResponse, error) 
 	byohost, err = r.createDockerContainer()
 
 	Expect(err).NotTo(HaveOccurred())
-	Expect(r.DockerClient.ContainerStart(r.Context, byohost.ID, types.ContainerStartOptions{})).NotTo(HaveOccurred())
+	Expect(r.DockerClient.ContainerStart(r.Context, byohost.ID, container.StartOptions{})).NotTo(HaveOccurred())
 	Expect(r.raiseInotifyInstanceLimit(byohost.ID)).To(Succeed())
 
 	config := cpConfig{
@@ -328,7 +328,7 @@ func (r *ByoHostRunner) SetupByoDockerHost() (*container.CreateResponse, error) 
 	}
 	Expect(copyToContainer(r.Context, r.DockerClient, config)).NotTo(HaveOccurred())
 
-	listopt := types.ContainerListOptions{}
+	listopt := container.ListOptions{}
 	listopt.Filters = filters.NewArgs()
 
 	err = r.copyKubeconfig(config, listopt)
@@ -342,7 +342,7 @@ func (r *ByoHostRunner) ExecByoDockerHost(byohost *container.CreateResponse) (ty
 	for flag, arg := range r.CommandArgs {
 		cmdArgs = append(cmdArgs, flag, arg)
 	}
-	rconfig := types.ExecConfig{
+	rconfig := container.ExecOptions{
 		AttachStdout: true,
 		AttachStderr: true,
 		Cmd:          cmdArgs,
@@ -351,7 +351,7 @@ func (r *ByoHostRunner) ExecByoDockerHost(byohost *container.CreateResponse) (ty
 	resp, err := r.DockerClient.ContainerExecCreate(r.Context, byohost.ID, rconfig)
 	Expect(err).NotTo(HaveOccurred())
 
-	output, err := r.DockerClient.ContainerExecAttach(r.Context, resp.ID, types.ExecStartCheck{})
+	output, err := r.DockerClient.ContainerExecAttach(r.Context, resp.ID, container.ExecAttachOptions{})
 	return output, byohost.ID, err
 }
 
@@ -378,7 +378,7 @@ func setControlPlaneIP(ctx context.Context, dockerClient *client.Client) {
 	if ok {
 		return
 	}
-	inspect, _ := dockerClient.NetworkInspect(ctx, "kind", types.NetworkInspectOptions{})
+	inspect, _ := dockerClient.NetworkInspect(ctx, "kind", network.InspectOptions{})
 
 	// kind networks may include IPv6 IPAM configs; find the first IPv4 subnet.
 	var ipv4Subnet string
