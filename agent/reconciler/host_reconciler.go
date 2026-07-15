@@ -375,9 +375,6 @@ func (r *HostReconciler) removeAnnotations(ctx context.Context, byoHost *infrast
 	// Remove BootstrapSecret
 	byoHost.Spec.BootstrapSecret = nil
 
-	// Remove UninstallationSecret reference (secret deletion is handled manager-side)
-	byoHost.Spec.UninstallationSecret = nil
-
 	// Remove cluster-name label
 	delete(byoHost.Labels, clusterv1.ClusterNameLabel)
 
