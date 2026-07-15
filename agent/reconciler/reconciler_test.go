@@ -786,7 +786,7 @@ runCmd:
 				updatedByoHost := &infrastructurev1beta1.ByoHost{}
 				err := k8sClient.Get(ctx, byoHostLookupKey, updatedByoHost)
 				Expect(err).ToNot(HaveOccurred())
-				Expect(updatedByoHost.Spec.UninstallationSecret).To(BeNil())
+				Expect(updatedByoHost.Spec.UninstallationSecret).ToNot(BeNil())
 			})
 
 			It("should skip uninstallation if skip-installation flag is set", func() {

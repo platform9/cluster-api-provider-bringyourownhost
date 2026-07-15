@@ -376,7 +376,11 @@ func (r *HostReconciler) removeAnnotations(ctx context.Context, byoHost *infrast
 	byoHost.Spec.BootstrapSecret = nil
 
 	// Remove UninstallationSecret reference (secret deletion is handled manager-side)
-	byoHost.Spec.UninstallationSecret = nil
+	//
+	// FIXME: Currently we cleanup uninstallation secret from the management plane controller.
+	// This means we have split-ownership of cleanup between the agent and the management plane controller.
+	// We should ensure agent's boundary for cleanup remains within the host itself and it should not be modifying the ByoHost CR at all. The management of the ByoHost CR is the management plane's responsibility, until the host decides to "deboard". And even then it may only ask the management plane to initiate the cleanup of the CR, but not do so itself.
+	// byoHost.Spec.UninstallationSecret = nil
 
 	// Remove cluster-name label
 	delete(byoHost.Labels, clusterv1.ClusterNameLabel)
