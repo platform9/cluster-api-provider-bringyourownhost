@@ -98,7 +98,7 @@ GOLANGCI_LINT = $(shell pwd)/bin/golangci-lint
 lint: golangci-lint
 	${GOLANGCI_LINT} run
 golangci-lint:
-	[ -e ${GOLANGCI_LINT} ] || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(shell pwd)/bin v1.64.8
+	$(call go-get-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2)
 
 ##@ Build
 
@@ -208,7 +208,7 @@ publish-infra-yaml:kustomize # Generate infrastructure-components.yaml for the p
 
 CONTROLLER_GEN = $(shell pwd)/bin/controller-gen
 controller-gen: ## Download controller-gen locally if necessary.
-	$(call go-get-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen@v0.14.0)
+	$(call go-get-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen@v0.21.0)
 
 KUSTOMIZE = $(shell pwd)/bin/kustomize
 kustomize: ## Download kustomize locally if necessary.
