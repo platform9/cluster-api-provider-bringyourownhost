@@ -207,8 +207,6 @@ take-user-input:
 	@echo "$$WARNING"
 	@read -p "Do you want to proceed [Y/n]?" REPLY; \
 	if [[ $$REPLY = "Y" || $$REPLY = "y" ]]; then echo starting e2e test; exit 0 ; else echo aborting; exit 1; fi
-	
-
 
 $(GINKGO): # Build ginkgo from tools folder.
 	cd $(TOOLS_DIR); GOBIN=$(TOOLS_BIN_DIR) go install $(GINKGO_PKG)
@@ -234,7 +232,7 @@ publish-infra-yaml:kustomize # Generate infrastructure-components.yaml for the p
 
 CONTROLLER_GEN = $(shell pwd)/bin/controller-gen
 controller-gen: ## Download controller-gen locally if necessary.
-	$(call go-get-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5)
+	$(call go-get-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen@v0.21.0)
 
 KUSTOMIZE = $(shell pwd)/bin/kustomize
 kustomize: ## Download kustomize locally if necessary.
