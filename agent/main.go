@@ -29,10 +29,11 @@ import (
 	"k8s.io/client-go/rest"
 	klog "k8s.io/klog/v2"
 	"k8s.io/klog/v2/klogr"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
 // labelFlags is a flag that holds a map of label key values.
@@ -186,19 +187,18 @@ func main() {
 	}
 
 	mgr, err := ctrl.NewManager(config, ctrl.Options{
-		Scheme:    scheme,
-		Namespace: namespace,
-		// this enables filtered watch of ByoHost based on the host name
-		// only ByoHost running for this host will be cached
-		NewCache: cache.BuilderWithOptions(cache.Options{
-			SelectorsByObject: cache.SelectorsByObject{
+		Scheme: scheme,
+		Cache: cache.Options{
+			// this enables filtered watch of ByoHost based on the host name
+			// only ByoHost running for this host will be cached
+			DefaultNamespaces: map[string]cache.Config{namespace: {}},
+			ByObject: map[client.Object]cache.ByObject{
 				&infrastructurev1beta1.ByoHost{}: {
 					Field: fields.SelectorFromSet(fields.Set{"metadata.name": hostName}),
 				},
 			},
 		},
-		),
-		MetricsBindAddress: metricsbindaddress,
+		Metrics: metricsserver.Options{BindAddress: metricsbindaddress},
 	})
 	if err != nil {
 		logger.Error(err, "unable to start manager")
