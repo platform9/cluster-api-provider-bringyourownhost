@@ -108,7 +108,7 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 		It("should return error if hostname is invalid", func() {
 			CSRRegistrar, err := registration.NewByohCSR(cfg, logr.Discard(), certExpiryDuration)
 			Expect(err).ShouldNot(HaveOccurred())
-			_, _, err = CSRRegistrar.RequestBYOHClientCert("")
+			_, _, err = CSRRegistrar.RequestBYOHClientCert(ctx, "")
 			Expect(err).To(MatchError("hostname is not valid"))
 		})
 		It("should return client config if bootstrap kubeconfig is valid", func() {
@@ -133,7 +133,7 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 		It("should create csr if bootstrap kubeconfig is valid", func() {
 			CSRRegistrar, err := registration.NewByohCSR(cfg, logr.Discard(), certExpiryDuration)
 			Expect(err).ShouldNot(HaveOccurred())
-			_, _, err = CSRRegistrar.RequestBYOHClientCert(hostName)
+			_, _, err = CSRRegistrar.RequestBYOHClientCert(ctx, hostName)
 			Expect(err).NotTo(HaveOccurred())
 			ByohCSR, err := k8sClientSet.CertificatesV1().CertificateSigningRequests().Get(ctx, fmt.Sprintf(registration.ByohCSRNameFormat, hostName), metav1.GetOptions{})
 			Expect(err).ShouldNot(HaveOccurred())
@@ -161,7 +161,7 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 			Expect(err).ShouldNot(HaveOccurred())
 			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration)
 			Expect(err).ShouldNot(HaveOccurred())
-			_, _, err = CSRRegistrar.RequestBYOHClientCert(hostName)
+			_, _, err = CSRRegistrar.RequestBYOHClientCert(ctx, hostName)
 			Expect(err).Should(HaveOccurred())
 			Expect(err.Error()).Should(ContainSubstring("retrieved csr is not compatible"))
 

@@ -111,6 +111,33 @@ linters:
       - linters:
           - goheader
         path: installer/internal/algo/common_ubuntu_test\.go$
+      # Our own CRDs (ByoCluster/ByoMachine/ByoHost) deliberately keep the CAPI
+      # v1beta1 Conditions/ConditionType contract (via util/conditions/deprecated/v1beta1)
+      # instead of rewriting their status schema to v1beta2's native metav1.Condition -- a
+      # scoped decision made during the CAPI v1.4.4 -> v1.13.3 bump, not an oversight. CAPI
+      # marks these deprecated but keeps them working until v1beta1 is fully dropped
+      # upstream; suppressing here avoids permanent noise for an accepted tradeoff.
+      - linters:
+          - staticcheck
+        text: "is going to be removed when support for v1beta1 will be dropped"
+      # predicates.ClusterUnpausedAndInfrastructureProvisioned's suggested replacement
+      # (ClusterPausedTransitionsOrInfrastructureProvisioned) is NOT a drop-in: it also
+      # fires reconciliation when a cluster *becomes* paused, not just when it unpauses --
+      # a real reconcile-trigger timing change that needs its own deliberate look, not a
+      # silent swap during a dependency bump.
+      - linters:
+          - staticcheck
+        text: "ClusterUnpausedAndInfrastructureProvisioned is deprecated"
+      # textlogger.NewLogger (klogr.New's suggested replacement) emits a different log
+      # line format -- it drops the `"msg"="..."` key-value wrapper klogr produces.
+      # Several tests assert on that exact literal format in captured agent/manager log
+      # output (e.g. host_agent_test.go's Eventually/Consistently blocks grepping for
+      # `"msg"="..."` substrings); confirmed by actually swapping and watching those
+      # tests fail. Not a safe drop-in -- keep klogr until those assertions are
+      # rewritten as their own piece of work.
+      - linters:
+          - staticcheck
+        text: "klogr.New is deprecated"
     paths:
       - .*dummy.go
       - .*fakes/
