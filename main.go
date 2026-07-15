@@ -98,7 +98,7 @@ func main() {
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
 		Tracker:  tracker,
-		Recorder: mgr.GetEventRecorderFor("byomachine-controller"),
+		Recorder: mgr.GetEventRecorderFor("byomachine-controller"), //nolint:staticcheck,SA1019
 	}).SetupWithManager(context.TODO(), mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ByoMachine")
 		os.Exit(1)
