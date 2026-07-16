@@ -84,7 +84,7 @@ func (v *ByoHostValidator) handleCreateUpdate(req *admission.Request) admission.
 	// (format: byoh:host:<hostname>). Reject requests where the encoded host does not
 	// match the target ByoHost — an agent must not create or update another agent's host.
 
-	// FIXME: We only support token based kubeconig for now. cert based flow needs a redesign. Disable it for now to allow host onboarding for the time being.
+	// FIXME: We only support token based kubeconfig for now. cert based flow needs a redesign. Disable it for now to allow host onboarding for the time being.
 	// NOTE: When you're fixing this, see the tests that were skipped as part of the commit that disabled this check.
 	//
 	// if len(substrs) >= 3 && !strings.Contains(byoHost.Name, substrs[2]) {

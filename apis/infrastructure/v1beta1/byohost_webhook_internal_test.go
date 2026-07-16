@@ -80,7 +80,7 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 			Expect(string(resp.AdmissionResponse.Result.Reason)).To(Equal(fmt.Sprintf("%s is not a valid agent username", unauthorizedUser)))
 		})
 		It("Should reject request from another agent user in the group", func() {
-			Skip("faeature not implemented yet")
+			Skip("feature not implemented yet")
 			admissionRequest := admissionv1.AdmissionRequest{
 				Operation: admissionv1.Create,
 				UserInfo:  v1.UserInfo{Username: byohHostTwoUser},
