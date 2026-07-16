@@ -1,9 +1,12 @@
 package service
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/version"
 )
 
 const (
@@ -12,8 +15,9 @@ const (
 	// DefaultFilePerms is the default file permission
 	DefaultFilePerms = 0644
 
-	// ByohAgentDebPackageURL is the URL to download the agent package
-	ByohAgentDebPackageURL = "quay.io/platform9/byoh-agent-deb:0.1.423"
+	// byohAgentDebRepo is the OCI repo that holds the agent deb bundle.
+	// The tag is resolved at runtime by ByohAgentBundleURL, not hardcoded.
+	byohAgentDebRepo = "quay.io/platform9/byoh-agent-deb"
 	// ByohAgentDebPackageFilename is the filename of the agent package
 	ByohAgentDebPackageFilename = "pf9-byohost-agent.deb"
 	// ByohAgentServiceName is the name of the agent service
@@ -39,6 +43,15 @@ const (
 	// pcd-kaapi region key
 	PcdKaapiRegionKey = "pcd-kaapi.pf9.io/region"
 )
+
+// ByohAgentBundleURL returns the OCI bundle reference for the agent deb
+// package matching byohctl's own build version. byohctl and the agent
+// bundle are published from the same commit under the same
+// git-describe tag (see .github/workflows/build-push-agent-bundle.yml),
+// so there is no separate agent version to track by hand.
+func ByohAgentBundleURL() string {
+	return fmt.Sprintf("%s:%s", byohAgentDebRepo, version.GetVersion())
+}
 
 var (
 	HomeDir, _ = os.UserHomeDir()

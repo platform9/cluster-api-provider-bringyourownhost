@@ -190,13 +190,13 @@ var ensureRequiredPackages = func() error {
 }
 
 var downloadDebianPackage = func(tempDir string) (string, error) {
-	utils.LogInfo("Downloading BYOH agent Debian package from %s", ByohAgentDebPackageURL)
+	utils.LogInfo("Downloading BYOH agent Debian package from %s", ByohAgentBundleURL())
 
 	imgpkgPath, _ := exec.LookPath("imgpkg")
 
 	// Use a buffer to capture the command output
 	var outputBuffer bytes.Buffer
-	pullCmd := exec.Command(imgpkgPath, "pull", "-i", ByohAgentDebPackageURL, "-o", tempDir)
+	pullCmd := exec.Command(imgpkgPath, "pull", "-i", ByohAgentBundleURL(), "-o", tempDir)
 	pullCmd.Stdout = &outputBuffer
 	pullCmd.Stderr = &outputBuffer
 

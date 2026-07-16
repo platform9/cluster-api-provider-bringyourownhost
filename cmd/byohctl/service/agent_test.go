@@ -664,7 +664,7 @@ func mockDownloadDebianPackage(outputDir string) (string, error) {
 
 	// Use a buffer to capture the command output
 	var outputBuffer bytes.Buffer
-	pullCmd := execCommand(imgpkgPath, "pull", "-i", ByohAgentDebPackageURL, "-o", outputDir)
+	pullCmd := execCommand(imgpkgPath, "pull", "-i", ByohAgentBundleURL(), "-o", outputDir)
 	pullCmd.Stdout = &outputBuffer
 	pullCmd.Stderr = &outputBuffer
 
