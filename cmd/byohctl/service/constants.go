@@ -17,7 +17,7 @@ const (
 
 	// byohAgentDebRepo is the OCI repo that holds the agent deb bundle.
 	// The tag is resolved at runtime by ByohAgentBundleURL, not hardcoded.
-	byohAgentDebRepo = "quay.io/platform9/byoh-agent-deb"
+	byohAgentDebRepo = "quay.io/platform9/cluster-api-provider-bringyourownhost/agent"
 	// ByohAgentDebPackageFilename is the filename of the agent package
 	ByohAgentDebPackageFilename = "pf9-byohost-agent.deb"
 	// ByohAgentServiceName is the name of the agent service

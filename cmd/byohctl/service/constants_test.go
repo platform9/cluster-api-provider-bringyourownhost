@@ -21,17 +21,17 @@ func TestByohAgentBundleURL(t *testing.T) {
 		{
 			name:        "version baked in via ldflags",
 			versionOvrd: "v1.2.3-4-gabcdef0",
-			want:        "quay.io/platform9/byoh-agent-deb:v1.2.3-4-gabcdef0",
+			want:        "quay.io/platform9/cluster-api-provider-bringyourownhost/agent:v1.2.3-4-gabcdef0",
 		},
 		{
 			name:        "dirty working tree suffix passes through verbatim",
 			versionOvrd: "v1.2.3-4-gabcdef0-dirty",
-			want:        "quay.io/platform9/byoh-agent-deb:v1.2.3-4-gabcdef0-dirty",
+			want:        "quay.io/platform9/cluster-api-provider-bringyourownhost/agent:v1.2.3-4-gabcdef0-dirty",
 		},
 		{
 			name:        "unset version falls back to GetVersion's 0.0.0 default",
 			versionOvrd: "",
-			want:        "quay.io/platform9/byoh-agent-deb:0.0.0",
+			want:        "quay.io/platform9/cluster-api-provider-bringyourownhost/agent:0.0.0",
 		},
 	}
 
