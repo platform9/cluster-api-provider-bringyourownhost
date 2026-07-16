@@ -6,18 +6,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Cluster API Provider BYOH (BringYourOwnHost) is a Kubernetes infrastructure provider that lets operators declare, provision, and manage Kubernetes clusters on already-provisioned Linux hosts. It decouples node provisioning from host provisioning by running an agent daemon on each BYO host that registers with a management cluster.
 
+This repo (`platform9/cluster-api-provider-bringyourownhost`) is Platform9's fork of the upstream `vmware-tanzu/cluster-api-provider-bringyourownhost`. The root Go module keeps the upstream import path (`github.com/vmware-tanzu/cluster-api-provider-bringyourownhost`) for compatibility with existing imports; new Platform9-authored code (`cmd/byohctl`) uses its own module under the `github.com/platform9/...` path instead. Keep this distinction in mind when adding imports — don't assume the whole tree shares one module or one import prefix.
+
 ## Build & Development Commands
 
 ```bash
 # Build
 make build                    # Build manager binary to bin/manager
 make host-agent-binaries      # Build host agent binaries
+cd cmd && go build ./byohctl  # Build byohctl CLI (separate Go module, see Architecture)
 
 # Run tests
-make test                     # All unit tests with coverage
+make test                     # All unit tests with coverage (includes cmd-test)
 make controller-test          # Controller tests only
 make agent-test               # Agent tests only
 make webhook-test             # Webhook tests only
+make cmd-test                 # byohctl tests (cd cmd && go test ./...)
 make test-e2e                 # End-to-end tests (requires a cluster)
 
 # Code quality
@@ -44,11 +48,12 @@ ginkgo -v -focus "description of test" ./controllers/infrastructure/
 
 ## Architecture
 
-### Two-Binary Design
+### Three-Binary Design
 
-The project produces two binaries:
+The project produces three binaries, two of which share the root Go module:
 - **Manager** (`main.go`) — runs in the management cluster; reconciles `ByoCluster`, `ByoMachine`, `ByoHost`, and related CRs.
 - **Host Agent** (`agent/main.go`) — runs as a daemon on each BYO host; registers the host with the management cluster and drives Kubernetes installation.
+- **byohctl** (`cmd/byohctl/`) — operator-facing CLI for onboarding, deauthorizing, and decommissioning a host (`cmd/byohctl/cmd/{onboard,deauthorise,decommission}.go`). Lives in its own Go module (`cmd/go.mod`), tested and built independently of the root module — see `make cmd-test`.
 
 ### Custom Resources (`apis/infrastructure/v1beta1/`)
 
@@ -103,4 +108,23 @@ Markers in type files (e.g. `// +kubebuilder:object:root=true`) drive controller
 
 ## Linting
 
-Config is in `.golangci.yml` (timeout 10 min). Key enabled linters include `gosec`, `staticcheck`, `errcheck`, `gocyclo`, and `depguard`. Run `make lint` before submitting; CI enforces this.
+Config is in `.golangci.yml` (v2 schema, timeout 10 min). Key enabled linters include `gosec`, `staticcheck`, `errcheck`, `gocyclo`, and `depguard`. Run `make lint` before submitting; CI enforces this via `golangci-lint-action@v9` pinned to v2.12.2 (`.github/workflows/lint.yml`).
+
+Gotcha: the `golangci-lint` target in the Makefile only installs the binary if `bin/golangci-lint` doesn't already exist, and pins an older v1.64.8 install script — if you have a stale v1 binary in `bin/`, `make lint` will run against the v2-schema config and fail or disagree with CI. Delete `bin/golangci-lint` and re-run `make lint` if results look wrong.
+
+## Licensing
+
+Most existing files carry a VMware copyright header, e.g.:
+```go
+// Copyright 2021 VMware, Inc. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+```
+
+- Never remove or replace an existing copyright header, including VMware's.
+- When editing a file going forward, add a Platform9 copyright line above the `SPDX-License-Identifier` line (don't replace the existing one) using the current year:
+```go
+// Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+```
+- New files that have no prior header get a Platform9-only header.
