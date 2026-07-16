@@ -14,7 +14,7 @@ This repo (`platform9/cluster-api-provider-bringyourownhost`) is Platform9's for
 # Build
 make build                    # Build manager binary to bin/manager
 make host-agent-binaries      # Build host agent binaries
-cd cmd && go build ./byohctl  # Build byohctl CLI (separate Go module, see Architecture)
+cd cmd/byohctl && make build  # Build byohctl CLI (separate Go module, see Architecture)
 
 # Run tests
 make test                     # All unit tests with coverage (includes cmd-test)
@@ -53,7 +53,7 @@ ginkgo -v -focus "description of test" ./controllers/infrastructure/
 The project produces three binaries, two of which share the root Go module:
 - **Manager** (`main.go`) — runs in the management cluster; reconciles `ByoCluster`, `ByoMachine`, `ByoHost`, and related CRs.
 - **Host Agent** (`agent/main.go`) — runs as a daemon on each BYO host; registers the host with the management cluster and drives Kubernetes installation.
-- **byohctl** (`cmd/byohctl/`) — operator-facing CLI for onboarding, deauthorizing, and decommissioning a host (`cmd/byohctl/cmd/{onboard,deauthorise,decommission}.go`). Lives in its own Go module (`cmd/go.mod`), tested and built independently of the root module — see `make cmd-test`.
+- **byohctl** (`cmd/byohctl/`) — operator-facing CLI for onboarding, deauthorizing, and decommissioning a host (`cmd/byohctl/cmd/{onboard,deauthorise,decommission}.go`). Lives in its own Go module (`cmd/go.mod`) with its own `cmd/byohctl/Makefile`; built and tested independently of the root module — see `make cmd-test`.
 
 ### Custom Resources (`apis/infrastructure/v1beta1/`)
 
