@@ -10,10 +10,8 @@
 SHELL := /usr/bin/env bash
 
 # Version information
-MAJOR ?= 1
-MINOR ?= 0
-BUILD_NUMBER ?= 1
-VERSION := $(MAJOR).$(MINOR).$(BUILD_NUMBER)
+GIT_VERSION := $(shell git describe --dirty --tags --match='v*' 2>/dev/null || echo "v0.0.0-$(shell git rev-parse --short HEAD)")
+VERSION ?= $(GIT_VERSION)
 
 # Build settings
 BINARY_NAME := byohctl
@@ -77,7 +75,7 @@ help:
 	@echo "  make build                    # Build for linux/amd64"
 	@echo "  make build GOOS=darwin        # Build for macOS"
 	@echo "  make build-all                # Build for all platforms"
-	@echo "  make build MAJOR=2 MINOR=1    # Build version 2.1.BUILD_NUMBER"
+	@echo "  make build VERSION=v9.9.9-test # Override version for local testing"
 	@echo ""
 	@echo "Version: $(VERSION)"
 	@echo "Output directory: $(BUILD_DIR)/"
