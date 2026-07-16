@@ -83,9 +83,13 @@ func (v *ByoHostValidator) handleCreateUpdate(req *admission.Request) admission.
 	// An agent's username encodes the host it owns as the third colon-separated segment
 	// (format: byoh:host:<hostname>). Reject requests where the encoded host does not
 	// match the target ByoHost — an agent must not create or update another agent's host.
-	if len(substrs) >= 3 && !strings.Contains(byoHost.Name, substrs[2]) {
-		return admission.Denied(fmt.Sprintf("%s cannot create/update resource %s", userName, byoHost.Name))
-	}
+
+	// FIXME: We only support token based kubeconig for now. cert based flow needs a redesign. Disable it for now to allow host onboarding for the time being.
+	// NOTE: When you're fixing this, see the tests that were skipped as part of the commit that disabled this check.
+	//
+	// if len(substrs) >= 3 && !strings.Contains(byoHost.Name, substrs[2]) {
+	// 	return admission.Denied(fmt.Sprintf("%s cannot create/update resource %s", userName, byoHost.Name))
+	// }
 
 	return admission.Allowed("")
 }
