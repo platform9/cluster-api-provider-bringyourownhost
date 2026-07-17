@@ -37,6 +37,13 @@ jobs:
       - name: build agent
         run: make host-agent-binaries
 
+      - name: Upload agent binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: byoh-hostagent-linux-amd64
+          path: bin/byoh-hostagent-linux-amd64
+          retention-days: 1
+
   test:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-22.04

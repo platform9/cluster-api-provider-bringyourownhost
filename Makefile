@@ -33,6 +33,10 @@ GINKGO_NODES  ?= 1
 E2E_CONF_FILE  ?= ${REPO_ROOT}/test/e2e/config/provider.yaml
 ARTIFACTS ?= ${REPO_ROOT}/_artifacts
 SKIP_RESOURCE_CLEANUP ?= false
+# SKIP_BUILD lets CI reuse an image/binary already obtained from a sibling
+# workflow run instead of rebuilding it; unset by default so local dev and
+# other CI paths keep rebuilding exactly as before.
+SKIP_BUILD ?=
 USE_EXISTING_CLUSTER ?= false
 EXISTING_CLUSTER_BYOHOSTCONFIG_PATH ?=
 GINKGO_NOCOLOR ?= false
@@ -121,7 +125,11 @@ run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./main.go
 
 docker-build: ## Build docker image with the manager.
+ifdef SKIP_BUILD
+	@echo "SKIP_BUILD set; skipping docker build for ${IMG}"
+else
 	docker build -t ${IMG} .
+endif
 
 docker-push: ## Push docker image with the manager.
 	docker push ${IMG}
@@ -235,6 +243,9 @@ host-agent-binaries: ## Builds the binaries for the host-agent
 	HOST_AGENT_DIR=./$(HOST_AGENT_DIR) $(MAKE) host-agent-binary
 
 host-agent-binary: $(RELEASE_DIR)
+ifdef SKIP_BUILD
+	@echo "SKIP_BUILD set; skipping host-agent binary build"
+else
 	docker run \
 		--rm \
 		-e CGO_ENABLED=0 \
@@ -245,6 +256,7 @@ host-agent-binary: $(RELEASE_DIR)
 		golang:1.26.2 \
 		go build -buildvcs=false -a -ldflags "$(GOLDFLAGS)" \
 		-o ./bin/$(notdir $(RELEASE_BINARY))-$(GOOS)-$(GOARCH) $(HOST_AGENT_DIR)
+endif
 
 
 ##@ Release

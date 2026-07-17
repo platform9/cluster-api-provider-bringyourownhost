@@ -1,25 +1,30 @@
 name: e2e-suite
 
 on:
-  pull_request:
-    branches: [ main ]
-    paths-ignore:
-      - '*.md'
-      - 'docs/**'
-      - 'LICENSE'
-      - 'NOTICE'
-      - 'PROJECT'
-      - 'SECURITY_CONTACTS'
+  workflow_run:
+    workflows: ["Build and Publish Controller Manager"]
+    types: [completed]
   workflow_dispatch: {}
 
 jobs:
   e2e:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-22.04
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
+      with:
+        ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+    - name: Pull published controller-manager image
+      if: ${{ github.event_name == 'workflow_run' }}
+      run: |
+        TAG=$(make tag)
+        IMAGE=quay.io/platform9/cluster-api-provider-bringyourownhost/controller-manager
+        docker pull "${IMAGE}:${TAG}"
+        docker tag "${IMAGE}:${TAG}" "${IMAGE}:dev"
 
     - name: Set up Go
       uses: actions/setup-go@v7
@@ -34,4 +39,6 @@ jobs:
       run: sudo sysctl -w net.netfilter.nf_conntrack_max=131072
 
     - name: Run e2e tests
+      env:
+        SKIP_BUILD: ${{ github.event_name == 'workflow_run' && '1' || '' }}
       run: yes | GINKGO_NODES=7 make test-e2e
