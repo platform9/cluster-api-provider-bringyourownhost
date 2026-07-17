@@ -1,4 +1,5 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 // nolint: testpackage
@@ -29,7 +30,7 @@ var (
 	dockerClient *client.Client
 )
 
-var _ = Describe("When BYO Host rejoins the capacity pool", func() {
+var _ = Describe("When BYO Host rejoins the capacity pool [Reuse]", func() {
 
 	var (
 		ctx                 context.Context
