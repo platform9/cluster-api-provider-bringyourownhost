@@ -34,4 +34,4 @@ jobs:
       run: sudo sysctl -w net.netfilter.nf_conntrack_max=131072
 
     - name: Run e2e tests
-      run: yes | GINKGO_NODES=4 make test-e2e
+      run: yes | GINKGO_NODES=7 make test-e2e
