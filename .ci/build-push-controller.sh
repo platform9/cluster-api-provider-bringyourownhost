@@ -3,17 +3,16 @@
 # build-and-push.sh - CI script for building and publishing the byoh controller manager Docker image.
 #
 # Parameters:
-# - IMAGE_REGISTRY  Registry to publish the Docker image. By default 'quay.io/platform9/byoh-controller-manager' is used.
-# - IMAGE_NAME      Name to use for this image. By default 'byoh-controller-manager' is used.
-# - IMAGE_TAG       Tag to use for the image. By default '$BYOHCM_VERSION-$BUILD_NUMBER' is used.
-# - IMAGE_REGISTRY      URL (without scheme) pointing to quay
+# - IMAGE_REGISTRY  Registry to publish the Docker image. By default 'quay.io/platform9/cluster-api-provider-bringyourownhost' is used.
+# - IMAGE_NAME      Name to use for this image. By default 'controller-manager' is used.
+# - IMAGE_TAG       Tag to use for the image. By default the output of `make tag` (git describe) is used.
 # - DRY_RUN         If non-empty, no Docker image will be published.
 # - CONTAINER_TAG   Location of the container_tag file (used as an artifact in TeamCity)
 # - DOCKER_USERNAME Username to login to quay.io.
 # - DOCKER_PASSWORD Password to login to quay.io.
 #
 # Examples:
-# - `USE_SYSTEM_GO=1 IMAGE_REGISTRY=quay.io IMAGE_NAME=platform9/byoh-controller-manager IMAGE_TAG=latest ./build-and-push.sh`: To test the script locally without gimme and push to Docker
+# - `USE_SYSTEM_GO=1 IMAGE_REGISTRY=quay.io IMAGE_NAME=platform9/cluster-api-provider-bringyourownhost/controller-manager IMAGE_TAG=latest ./build-and-push.sh`: To test the script locally without gimme and push to Docker
 
 set -o nounset
 set -o errexit
@@ -25,14 +24,22 @@ CONTAINER_TAG=${CONTAINER_TAG:-${build_dir}/manager-container-tag}
 CONTAINER_FULL_TAG=${CONTAINER_FULL_TAG:-${build_dir}/manager-container-full-tag}
 GO_VERSION=${GO_VERSION:-1.22.5}
 
-BUILD_NUMBER=${BUILD_NUMBER:-0}
-BYOHCM_VERSION=${BYOHCM_VERSION:-0.1}
-
-IMAGE_REGISTRY=${IMAGE_REGISTRY:-"quay.io/platform9"}
-IMAGE_NAME=${IMAGE_NAME:-"byoh-controller-manager"}
-IMAGE_TAG=${IMAGE_TAG:-${BYOHCM_VERSION}.${BUILD_NUMBER}}
+IMAGE_REGISTRY=${IMAGE_REGISTRY:-"quay.io/platform9/cluster-api-provider-bringyourownhost"}
+IMAGE_NAME=${IMAGE_NAME:-"controller-manager"}
+IMAGE_TAG=${IMAGE_TAG:-$(make --no-print-directory -C "${project_root}" tag)}
 IMAGE_NAME_TAG=${IMAGE_NAME}:${IMAGE_TAG}
 IMAGE_REGISTRY_NAME_TAG=${IMAGE_REGISTRY}/${IMAGE_NAME_TAG}
+
+# make -C implicitly enables --print-directory on some GNU Make versions
+# (confirmed: not on this repo's dev-Mac Make 3.81, but yes on the Ubuntu
+# CI runner's newer Make) -- without --no-print-directory above, the
+# "Entering directory" chatter leaks into IMAGE_TAG via command
+# substitution and corrupts the docker -t argument. Fail loud if it ever
+# recurs instead of silently building/pushing a mistagged image.
+if [[ "${IMAGE_TAG}" =~ [[:space:]] ]]; then
+  echo "ERROR: IMAGE_TAG contains whitespace, likely make output leaked into the tag: '${IMAGE_TAG}'" >&2
+  exit 1
+fi
 
 
 main() {
@@ -95,7 +102,7 @@ on_exit() {
 
 configure_docker_registry() {
   repository=$1
-  if [ "${IMAGE_REGISTRY}" = "quay.io/platform9" ]; then
+  if [ "${IMAGE_REGISTRY}" = "quay.io/platform9/cluster-api-provider-bringyourownhost" ]; then
     if [ -n "${DOCKER_PASSWORD:-}" ] ; then
       echo -n "${DOCKER_PASSWORD}" | docker login --username "${DOCKER_USERNAME}" --password-stdin "${IMAGE_REGISTRY}"
     else

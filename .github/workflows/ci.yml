@@ -12,6 +12,7 @@ on:
       - 'SECURITY_CONTACTS'
   pull_request:
     branches: [ main ]
+    types: [opened, synchronize, reopened, ready_for_review]
     paths-ignore:
       - '*.md'
       - 'docs/**'
@@ -22,6 +23,7 @@ on:
 
 jobs:
   build-agent:
+      if: ${{ !github.event.pull_request.draft }}
       runs-on: ubuntu-22.04
       steps:
       - name: Checkout code
@@ -36,6 +38,7 @@ jobs:
         run: make host-agent-binaries
 
   test:
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-22.04
     steps:
     - name: Check Docker Version
