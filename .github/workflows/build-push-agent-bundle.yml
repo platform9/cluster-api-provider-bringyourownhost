@@ -17,6 +17,12 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
 
+      - name: Report pending commit status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: bash .ci/report-commit-status.sh pending build-push-agent-bundle "Agent bundle build in progress"
+
       - name: Download agent binary artifact
         if: ${{ github.event_name == 'workflow_run' }}
         uses: actions/download-artifact@v4
@@ -46,3 +52,10 @@ jobs:
         env:
           SKIP_BUILD: ${{ github.event_name == 'workflow_run' && '1' || '' }}
         run: bash .ci/build-push-agent-deb.sh
+
+      - name: Report final commit status
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: bash .ci/report-commit-status.sh "${{ job.status == 'success' && 'success' || 'failure' }}" build-push-agent-bundle "Agent bundle build ${{ job.status }}"

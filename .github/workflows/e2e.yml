@@ -18,6 +18,12 @@ jobs:
       with:
         ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
+    - name: Report pending commit status
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      run: bash .ci/report-commit-status.sh pending e2e-suite "e2e tests in progress"
+
     - name: Download controller manager image artifact
       if: ${{ github.event_name == 'workflow_run' }}
       uses: actions/download-artifact@v4
@@ -51,3 +57,10 @@ jobs:
       env:
         SKIP_BUILD: ${{ github.event_name == 'workflow_run' && '1' || '' }}
       run: yes | GINKGO_NODES=7 make test-e2e
+
+    - name: Report final commit status
+      if: always()
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      run: bash .ci/report-commit-status.sh "${{ job.status == 'success' && 'success' || 'failure' }}" e2e-suite "e2e tests ${{ job.status }}"

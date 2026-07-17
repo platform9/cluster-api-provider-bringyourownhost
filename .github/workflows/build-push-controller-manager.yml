@@ -17,6 +17,12 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
 
+      - name: Report pending commit status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: bash .ci/report-commit-status.sh pending build-push-controller-manager "Controller manager build in progress"
+
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
@@ -48,3 +54,10 @@ jobs:
           name: controller-manager-image
           path: controller-manager-image.tar
           retention-days: 1
+
+      - name: Report final commit status
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: bash .ci/report-commit-status.sh "${{ job.status == 'success' && 'success' || 'failure' }}" build-push-controller-manager "Controller manager build ${{ job.status }}"
