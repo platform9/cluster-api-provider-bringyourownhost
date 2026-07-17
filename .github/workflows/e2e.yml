@@ -18,12 +18,21 @@ jobs:
       with:
         ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
-    - name: Pull published controller-manager image
+    - name: Download controller manager image artifact
+      if: ${{ github.event_name == 'workflow_run' }}
+      uses: actions/download-artifact@v4
+      with:
+        name: controller-manager-image
+        path: .
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        run-id: ${{ github.event.workflow_run.id }}
+
+    - name: Load controller manager image
       if: ${{ github.event_name == 'workflow_run' }}
       run: |
+        docker load -i controller-manager-image.tar
         TAG=$(make tag)
         IMAGE=quay.io/platform9/cluster-api-provider-bringyourownhost/controller-manager
-        docker pull "${IMAGE}:${TAG}"
         docker tag "${IMAGE}:${TAG}" "${IMAGE}:dev"
 
     - name: Set up Go

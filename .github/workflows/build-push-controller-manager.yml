@@ -36,3 +36,15 @@ jobs:
         env:
           USE_SYSTEM_GO: "1"
         run: bash .ci/build-push-controller.sh
+
+      - name: Save controller manager image artifact
+        run: |
+          TAG=$(make tag)
+          docker save "quay.io/platform9/cluster-api-provider-bringyourownhost/controller-manager:${TAG}" -o controller-manager-image.tar
+
+      - name: Upload controller manager image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: controller-manager-image
+          path: controller-manager-image.tar
+          retention-days: 1
