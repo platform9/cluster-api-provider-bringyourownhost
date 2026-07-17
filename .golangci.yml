@@ -63,13 +63,14 @@ linters:
     goheader:
       values:
         const:
-          COMPANY: VMware, Inc.
           LICENSE: Apache-2.0
         regexp:
           YEAR: 20\d*-*\d*
+          COMPANY: (VMware|Platform9), Inc\.
+          PLATFORM9-COPYRIGHT: (Copyright 20\d*-*\d* Platform9, Inc\. All Rights Reserved\.\n)?
       template: |-
         Copyright {{ YEAR }} {{ COMPANY }} All Rights Reserved.
-        SPDX-License-Identifier: {{ LICENSE }}
+        {{ PLATFORM9-COPYRIGHT }}SPDX-License-Identifier: {{ LICENSE }}
     govet:
       enable:
         - shadow
