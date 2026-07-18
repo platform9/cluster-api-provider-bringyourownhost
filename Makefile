@@ -31,6 +31,10 @@ GINKGO_NODES  ?= 1
 E2E_CONF_FILE  ?= ${REPO_ROOT}/test/e2e/config/provider.yaml
 ARTIFACTS ?= ${REPO_ROOT}/_artifacts
 SKIP_RESOURCE_CLEANUP ?= false
+# SKIP_BUILD lets CI reuse an image/binary already obtained from a sibling
+# workflow run instead of rebuilding it; unset by default so local dev and
+# other CI paths keep rebuilding exactly as before.
+SKIP_BUILD ?=
 USE_EXISTING_CLUSTER ?= false
 EXISTING_CLUSTER_BYOHOSTCONFIG_PATH ?=
 GINKGO_NOCOLOR ?= false
@@ -119,10 +123,22 @@ run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./main.go
 
 docker-build: ## Build docker image with the manager.
+ifdef SKIP_BUILD
+	@echo "SKIP_BUILD set; skipping docker build for ${IMG}"
+else
 	docker build -t ${IMG} .
+endif
 
 docker-push: ## Push docker image with the manager.
 	docker push ${IMG}
+
+IMGPKG_VERSION ?= v0.43.1
+BYOH_AGENT_BUNDLE_IMAGE ?= quay.io/platform9/cluster-api-provider-bringyourownhost/agent
+
+push-agent-bundle: ## Push the built agent .deb bundle to the registry via imgpkg. Requires build-host-agent-deb to have already run.
+	curl -sL -o /tmp/imgpkg "https://github.com/carvel-dev/imgpkg/releases/download/$(IMGPKG_VERSION)/imgpkg-linux-amd64"
+	chmod +x /tmp/imgpkg
+	/tmp/imgpkg push -f build/pf9-byohost/debsrc/ -i $(BYOH_AGENT_BUNDLE_IMAGE):$(TAG)
 
 prepare-byoh-docker-host-image:
 	docker build test/e2e -f test/e2e/BYOHDockerFile -t ${BYOH_BASE_IMG}
@@ -233,6 +249,9 @@ host-agent-binaries: ## Builds the binaries for the host-agent
 	HOST_AGENT_DIR=./$(HOST_AGENT_DIR) $(MAKE) host-agent-binary
 
 host-agent-binary: $(RELEASE_DIR)
+ifdef SKIP_BUILD
+	@echo "SKIP_BUILD set; skipping host-agent binary build"
+else
 	docker run \
 		--rm \
 		-e CGO_ENABLED=0 \
@@ -243,6 +262,7 @@ host-agent-binary: $(RELEASE_DIR)
 		golang:1.26.2 \
 		go build -buildvcs=false -a -ldflags "$(GOLDFLAGS)" \
 		-o ./bin/$(notdir $(RELEASE_BINARY))-$(GOOS)-$(GOARCH) $(HOST_AGENT_DIR)
+endif
 
 
 ##@ Release
@@ -353,3 +373,10 @@ GOBIN=$(PROJECT_DIR)/bin go install $(2) ;\
 rm -rf $$TMP_DIR ;\
 }
 endef
+
+.PHONY: ci
+ci: ## Push a ci-<tag> git tag to force every CI check (including publish steps) to run against the current commit, bypassing the normal main-only gate.
+	@TAG_NAME="ci-$$(make --no-print-directory tag)" && \
+	echo "Creating git tag: $$TAG_NAME" && \
+	git tag "$$TAG_NAME" && \
+	git push origin "$$TAG_NAME"
