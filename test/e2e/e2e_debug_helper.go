@@ -17,10 +17,15 @@ import (
 const (
 	// DefaultFileMode the default file mode of files created for tests
 	DefaultFileMode fs.FileMode = 0777
+)
+
+// Suffixed with the test binary's PID so concurrent Ginkgo nodes (GINKGO_NODES>1)
+// don't race on the same debug-script path.
+var (
 	// ReadByohControllerManagerLogShellFile location of script to read the controller manager log
-	ReadByohControllerManagerLogShellFile string = "/tmp/read-byoh-controller-manager-log.sh"
+	ReadByohControllerManagerLogShellFile = fmt.Sprintf("/tmp/read-byoh-controller-manager-log-%d.sh", os.Getpid())
 	// ReadAllPodsShellFile location of script to read all pods logs
-	ReadAllPodsShellFile string = "/tmp/read-all-pods.sh"
+	ReadAllPodsShellFile = fmt.Sprintf("/tmp/read-all-pods-%d.sh", os.Getpid())
 )
 
 // WriteDockerLog redirects the docker logs to the given file
