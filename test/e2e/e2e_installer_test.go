@@ -35,10 +35,10 @@ var _ = Describe("When BYOH joins existing cluster [Installer]", func() {
 		dockerClient        *client.Client
 		err                 error
 		byohostContainerIDs []string
-		agentLogFile1       = "/tmp/host-agent1.log"
-		agentLogFile2       = "/tmp/host-agent2.log"
-		byoHostName1        = "byohost1"
-		byoHostName2        = "byohost2"
+		agentLogFile1       = fmt.Sprintf("/tmp/host-agent1-%s.log", util.RandomString(6))
+		agentLogFile2       = fmt.Sprintf("/tmp/host-agent2-%s.log", util.RandomString(6))
+		byoHostName1        = fmt.Sprintf("byohost1-%s", util.RandomString(6))
+		byoHostName2        = fmt.Sprintf("byohost2-%s", util.RandomString(6))
 	)
 
 	BeforeEach(func() {
