@@ -26,8 +26,8 @@ main() {
     if [[ -n "${run_id}" ]]; then
       local job_conclusion
       # shellcheck disable=SC2016 # single-quoted on purpose: $name is a jq var bound via --arg, not a shell expansion
-      job_conclusion=$(gh run view "${run_id}" --repo "${GITHUB_REPOSITORY}" --json jobs \
-        --jq --arg name "${job_name}" '.jobs[] | select(.name == $name) | .conclusion // empty')
+      job_conclusion=$(gh run view "${run_id}" --repo "${GITHUB_REPOSITORY}" --json jobs |
+        jq -r --arg name "${job_name}" '.jobs[] | select(.name == $name) | .conclusion // empty')
 
       case "${job_conclusion}" in
       success)
