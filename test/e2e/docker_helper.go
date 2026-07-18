@@ -27,9 +27,8 @@ import (
 )
 
 const (
-	kindImage           = "byoh/node:e2e"
-	TempKubeconfigPath  = "/tmp/mgmt.conf"
-	bootstrapKubeconfig = "/tmp/boostrap-kubeconfig"
+	kindImage          = "byoh/node:e2e"
+	TempKubeconfigPath = "/tmp/mgmt.conf"
 	// ipv4OctetCount is the number of dot-separated octets in an IPv4 subnet (e.g. "10.0.0.0/24").
 	ipv4OctetCount = 4
 	// kubeconfigFileMode restricts the temp kubeconfig to owner-only access (it contains cluster credentials).
@@ -58,6 +57,17 @@ type ByoHostRunner struct {
 	Port                    string
 	KubeconfigFile          string
 	BootstrapKubeconfigData string
+}
+
+// uniqueTempFilePath returns a fresh path from os.CreateTemp without leaving the file open,
+// so concurrent Ginkgo nodes staging a kubeconfig don't race on one hardcoded /tmp path.
+func uniqueTempFilePath(pattern string) (string, error) {
+	f, err := os.CreateTemp("", pattern)
+	if err != nil {
+		return "", err
+	}
+	path := f.Name()
+	return path, f.Close()
 }
 
 func resolveLocalPath(localPath string) (absPath string, err error) {
@@ -279,10 +289,18 @@ func (r *ByoHostRunner) copyKubeconfig(config cpConfig, listopt types.ContainerL
 		bootstrapKubeconfigFileData, err := clientcmd.Load(kubeconfig)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = clientcmd.WriteToFile(*bootstrapKubeconfigFileData, bootstrapKubeconfig)
+		bootstrapKubeconfigPath, err := uniqueTempFilePath("bootstrap-kubeconfig-*")
+		Expect(err).NotTo(HaveOccurred())
+		defer func() {
+			if removeErr := os.Remove(bootstrapKubeconfigPath); removeErr != nil {
+				Showf("error removing temp kubeconfig file %s: %v", bootstrapKubeconfigPath, removeErr)
+			}
+		}()
+
+		err = clientcmd.WriteToFile(*bootstrapKubeconfigFileData, bootstrapKubeconfigPath)
 		Expect(err).ShouldNot(HaveOccurred())
 
-		config.sourcePath = bootstrapKubeconfig
+		config.sourcePath = bootstrapKubeconfigPath
 	}
 	err := copyToContainer(r.Context, r.DockerClient, config)
 	return err
