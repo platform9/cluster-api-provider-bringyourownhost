@@ -2,9 +2,9 @@
 SHELL:=/usr/bin/env bash
 
 # Define registries
-STAGING_REGISTRY ?= gcr.io/k8s-staging-cluster-api
+STAGING_REGISTRY ?= quay.io/platform9/cluster-api-provider-bringyourownhost
 
-IMAGE_NAME ?= cluster-api-byoh-controller
+IMAGE_NAME ?= controller-manager
 TAG ?= dev
 RELEASE_DIR := _dist
 
