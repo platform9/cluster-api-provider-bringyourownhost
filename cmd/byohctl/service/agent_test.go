@@ -264,7 +264,7 @@ func TestSetupAgent(t *testing.T) {
 	origEnsureRequiredPackages := ensureRequiredPackages
 	origDownloadDebianPackage := downloadDebianPackage
 	origInstallDebianPackage := installDebianPackage
-	
+
 	defer func() {
 		execCommand = origExecCommand
 		execLookPath = origExecLookPath
@@ -277,23 +277,23 @@ func TestSetupAgent(t *testing.T) {
 	execLookPath = func(file string) (string, error) {
 		return "/usr/bin/" + file, nil
 	}
-	
+
 	execCommand = func(command string, args ...string) *exec.Cmd {
 		return mockCommand(command)
 	}
-	
+
 	// Mock ensureRequiredPackages to succeed
 	ensureRequiredPackages = func() error {
 		return nil
 	}
-	
+
 	// Mock downloadDebianPackage to create a mock package file
 	downloadDebianPackage = func(tempDir string) (string, error) {
 		packagePath := filepath.Join(tempDir, ByohAgentDebPackageFilename)
 		os.WriteFile(packagePath, []byte("mock package"), 0644)
 		return packagePath, nil
 	}
-	
+
 	// Mock installDebianPackage to succeed
 	installDebianPackage = func(packagePath string) error {
 		return nil
@@ -444,7 +444,7 @@ func TestDownloadDebianPackage(t *testing.T) {
 	defer func() {
 		downloadDebianPackage = oldDownloadDebianPackage
 	}()
-	
+
 	// Mock downloadDebianPackage to succeed and create a mock file
 	downloadDebianPackage = func(tempDir string) (string, error) {
 		packagePath := filepath.Join(tempDir, ByohAgentDebPackageFilename)
@@ -524,19 +524,19 @@ func TestDownloadDebianPackageErrors(t *testing.T) {
 				t.Fatalf("Failed to create temp dir: %v", err)
 			}
 			defer os.RemoveAll(tempDir)
-			
+
 			// Setup and get the cleanup function
 			cleanup := tc.setupMock()
 			defer cleanup()
-			
+
 			// Call the function being tested
 			_, err = downloadDebianPackage(tempDir)
-			
+
 			// Verify error was returned
 			if err == nil {
 				t.Fatalf("Expected error but got nil")
 			}
-			
+
 			// Verify the error message
 			if !strings.Contains(err.Error(), tc.expectedError) {
 				t.Errorf("Expected error about %s, got: %v", tc.expectedError, err)
@@ -565,9 +565,9 @@ func TestInstallDebianPackage(t *testing.T) {
 	defer func() {
 		installDebianPackage = oldInstallDebianPackage
 	}()
-	
+
 	installDebianPackage = func(debFilePath string) error {
-		// Just verify the file exists 
+		// Just verify the file exists
 		if _, err := os.Stat(debFilePath); os.IsNotExist(err) {
 			return fmt.Errorf("package file does not exist: %v", err)
 		}
@@ -637,15 +637,15 @@ func TestInstallDebianPackageErrors(t *testing.T) {
 			// Setup and get the cleanup function
 			cleanup := tc.setupMock()
 			defer cleanup()
-			
+
 			// Call the function being tested
 			err := installDebianPackage(packagePath)
-			
+
 			// Verify error was returned
 			if err == nil {
 				t.Fatalf("Expected error but got nil")
 			}
-			
+
 			// Verify the error message
 			if !strings.Contains(err.Error(), tc.expectedError) {
 				t.Errorf("Expected error about %s, got: %v", tc.expectedError, err)
@@ -664,7 +664,7 @@ func mockDownloadDebianPackage(outputDir string) (string, error) {
 
 	// Use a buffer to capture the command output
 	var outputBuffer bytes.Buffer
-	pullCmd := execCommand(imgpkgPath, "pull", "-i", ByohAgentDebPackageURL, "-o", outputDir)
+	pullCmd := execCommand(imgpkgPath, "pull", "-i", byohAgentBundleURL(), "-o", outputDir)
 	pullCmd.Stdout = &outputBuffer
 	pullCmd.Stderr = &outputBuffer
 
@@ -956,26 +956,26 @@ func TestAgentSetupProcess(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tempDir)
-	
+
 	// Save the original functions and restore after test
 	origEnsureRequiredPackages := ensureRequiredPackages
 	origDownloadDebianPackage := downloadDebianPackage
 	origInstallDebianPackage := installDebianPackage
-	
-	defer func() { 
+
+	defer func() {
 		ensureRequiredPackages = origEnsureRequiredPackages
 		downloadDebianPackage = origDownloadDebianPackage
 		installDebianPackage = origInstallDebianPackage
 	}()
-	
+
 	// Mock the required functions
 	packageInstalled := false
-	
+
 	// Mock package installation checks
 	ensureRequiredPackages = func() error {
 		return nil // Succeed with no errors
 	}
-	
+
 	// Mock package download
 	downloadDebianPackage = func(outputDir string) (string, error) {
 		// Create a dummy package file
@@ -984,21 +984,21 @@ func TestAgentSetupProcess(t *testing.T) {
 		os.WriteFile(packagePath, []byte("mock package"), 0644)
 		return packagePath, nil
 	}
-	
+
 	// Mock package installation
 	installDebianPackage = func(debFilePath string) error {
 		packageInstalled = true
 		return nil
 	}
-	
+
 	// Call the function under test
 	err = SetupAgent(tempDir)
-	
+
 	// Check results
 	if err != nil {
 		t.Errorf("SetupAgent returned error: %v", err)
 	}
-	
+
 	// Verify the package was "installed"
 	if !packageInstalled {
 		t.Errorf("The package installation was not called")
@@ -1071,7 +1071,7 @@ func TestAgentSetupFailures(t *testing.T) {
 			expectedErrContains: "failed to install Debian package",
 		},
 	}
-	
+
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Create a temporary directory for each test
@@ -1080,31 +1080,31 @@ func TestAgentSetupFailures(t *testing.T) {
 				t.Fatalf("Failed to create temp dir: %v", err)
 			}
 			defer os.RemoveAll(tempDir)
-			
+
 			// Save original functions
 			origEnsureRequiredPackages := ensureRequiredPackages
 			origDownloadDebianPackage := downloadDebianPackage
 			origInstallDebianPackage := installDebianPackage
-			
-			defer func() { 
+
+			defer func() {
 				ensureRequiredPackages = origEnsureRequiredPackages
 				downloadDebianPackage = origDownloadDebianPackage
 				installDebianPackage = origInstallDebianPackage
 			}()
-			
+
 			// Set up the mocks for this test case
 			ensureRequiredPackages = tc.mockEnsurePackages
 			downloadDebianPackage = tc.mockDownloadPackage
 			installDebianPackage = tc.mockInstallPackage
-			
+
 			// Call the function under test
 			err = SetupAgent(tempDir)
-			
+
 			// Verify we got the expected error
 			if err == nil {
 				t.Fatalf("Expected error but got nil")
 			}
-			
+
 			if !strings.Contains(err.Error(), tc.expectedErrContains) {
 				t.Errorf("Expected error to contain '%s', got: %v", tc.expectedErrContains, err)
 			}
