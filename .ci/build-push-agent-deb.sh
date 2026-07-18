@@ -1,26 +1,22 @@
-set -ex
-export BUILD_NUMBER
-export MAJOR_MINOR_VERSION=0.1
-export BYOH_DEB_VERSION=${MAJOR_MINOR_VERSION}.${BUILD_NUMBER}
+#!/usr/bin/env bash
+set -Eeuo pipefail
 
-echo 'alias shasum="sha512sum"' >> ~/.bashrc
-source ~/.bashrc
+main() {
+  export BYOH_DEB_VERSION=${BYOH_DEB_VERSION:-$(make tag)}
 
-echo "removing build/ if already present"
-rm -rf build/
-echo "started building byoh-agent binary"
-make build-host-agent-binary
+  echo 'alias shasum="sha512sum"' >>~/.bashrc
+  # shellcheck disable=SC1090 # sourcing the user's own ~/.bashrc, not a repo file shellcheck can resolve
+  source ~/.bashrc
 
-echo "started building deb package for byoh-agent"
-make build-host-agent-deb
+  echo "removing build/ if already present"
+  rm -rf build/
+  echo "started building byoh-agent binary"
+  make build-host-agent-binary
 
-echo "created deb package under build/pf9-byohost/debsrc/ "
+  echo "started building deb package for byoh-agent"
+  make build-host-agent-deb
 
-echo "installing imgpkg"
-curl -LO https://github.com/carvel-dev/imgpkg/releases/download/v0.43.1/imgpkg-linux-amd64
-mv imgpkg-linux-amd64 imgpkg
-chmod +x imgpkg
+  echo "created deb package under build/pf9-byohost/debsrc/ "
+}
 
-echo "pushing deb bundle to quay.io/platform9/byoh-deb:$BYOH_DEB_VERSION"
-./imgpkg push -f build/pf9-byohost/debsrc/ -i quay.io/platform9/byoh-agent-deb:$BYOH_DEB_VERSION
-
+main "$@"
