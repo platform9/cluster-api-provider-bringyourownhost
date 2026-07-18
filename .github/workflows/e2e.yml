@@ -1,40 +1,55 @@
 name: e2e-suite
 
 on:
-  workflow_run:
-    workflows: ["Build and Publish Controller Manager"]
-    types: [completed]
+  push:
+    branches: [ main ]
+    tags: [ 'ci-*' ]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - 'NOTICE'
+      - 'PROJECT'
+      - 'SECURITY_CONTACTS'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - 'NOTICE'
+      - 'PROJECT'
+      - 'SECURITY_CONTACTS'
   workflow_dispatch: {}
 
 jobs:
   e2e:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-22.04
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
-      with:
-        ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
-    - name: Report pending commit status
+    - name: Wait for controller manager image build
+      if: ${{ github.event_name != 'workflow_dispatch' }}
+      id: wait
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
-      run: bash .ci/report-commit-status.sh pending e2e-suite "e2e tests in progress"
+      run: bash .ci/wait-for-job.sh build-controller-manager.yml build-controller-manager "${{ github.event.pull_request.head.sha || github.sha }}"
 
     - name: Download controller manager image artifact
-      if: ${{ github.event_name == 'workflow_run' }}
+      if: ${{ github.event_name != 'workflow_dispatch' }}
       uses: actions/download-artifact@v4
       with:
         name: controller-manager-image
         path: .
         github-token: ${{ secrets.GITHUB_TOKEN }}
-        run-id: ${{ github.event.workflow_run.id }}
+        run-id: ${{ steps.wait.outputs.run_id }}
 
     - name: Load controller manager image
-      if: ${{ github.event_name == 'workflow_run' }}
+      if: ${{ github.event_name != 'workflow_dispatch' }}
       run: |
         docker load -i controller-manager-image.tar
         TAG=$(make tag)
@@ -55,12 +70,5 @@ jobs:
 
     - name: Run e2e tests
       env:
-        SKIP_BUILD: ${{ github.event_name == 'workflow_run' && '1' || '' }}
+        SKIP_BUILD: ${{ github.event_name != 'workflow_dispatch' && '1' || '' }}
       run: yes | GINKGO_NODES=7 make test-e2e
-
-    - name: Report final commit status
-      if: always()
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
-      run: bash .ci/report-commit-status.sh "${{ job.status == 'success' && 'success' || 'failure' }}" e2e-suite "e2e tests ${{ job.status }}"

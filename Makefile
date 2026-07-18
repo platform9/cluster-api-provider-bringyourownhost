@@ -134,6 +134,14 @@ endif
 docker-push: ## Push docker image with the manager.
 	docker push ${IMG}
 
+IMGPKG_VERSION ?= v0.43.1
+BYOH_AGENT_BUNDLE_IMAGE ?= quay.io/platform9/cluster-api-provider-bringyourownhost/agent
+
+push-agent-bundle: ## Push the built agent .deb bundle to the registry via imgpkg. Requires build-host-agent-deb to have already run.
+	curl -sL -o /tmp/imgpkg "https://github.com/carvel-dev/imgpkg/releases/download/$(IMGPKG_VERSION)/imgpkg-linux-amd64"
+	chmod +x /tmp/imgpkg
+	/tmp/imgpkg push -f build/pf9-byohost/debsrc/ -i $(BYOH_AGENT_BUNDLE_IMAGE):$(TAG)
+
 prepare-byoh-docker-host-image:
 	docker build test/e2e -f test/e2e/BYOHDockerFile -t ${BYOH_BASE_IMG}
 
@@ -367,3 +375,10 @@ GOBIN=$(PROJECT_DIR)/bin go install $(2) ;\
 rm -rf $$TMP_DIR ;\
 }
 endef
+
+.PHONY: ci
+ci: ## Push a ci-<tag> git tag to force every CI check (including publish steps) to run against the current commit, bypassing the normal main-only gate.
+	@TAG_NAME="ci-$$(make --no-print-directory tag)" && \
+	echo "Creating git tag: $$TAG_NAME" && \
+	git tag "$$TAG_NAME" && \
+	git push origin "$$TAG_NAME"
