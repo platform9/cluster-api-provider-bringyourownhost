@@ -358,7 +358,7 @@ func generateBootstrapKubeconfig(ctx context.Context, clusterProxy framework.Clu
 			return nil
 		}
 		return createdBootstrapKubeconfig.Status.BootstrapKubeconfigData
-	}).ShouldNot(BeNil())
+	}, e2eConfig.GetIntervals("", "wait-controllers")...).ShouldNot(BeNil())
 
 	return *createdBootstrapKubeconfig.Status.BootstrapKubeconfigData
 }
