@@ -296,10 +296,15 @@ func setupSpecNamespace(ctx context.Context, specName string, clusterProxy frame
 }
 
 func dumpSpecResourcesAndCleanup(ctx context.Context, specName string, clusterProxy framework.ClusterProxy, artifactFolder string, namespace *corev1.Namespace, cancelWatches context.CancelFunc, cluster *clusterv1.Cluster, intervalsGetter func(spec, key string) []interface{}, skipCleanup bool) {
-	Byf("Dumping logs from the %q workload cluster", cluster.Name)
+	// cluster is nil when the spec failed before ApplyClusterTemplateAndWait ever ran (e.g. an
+	// early Fail() call) -- skip the cluster-specific log collection below rather than crash on
+	// a nil pointer, since there's nothing captured under cluster.Name to actually dump.
+	if cluster != nil {
+		Byf("Dumping logs from the %q workload cluster", cluster.Name)
 
-	// Dump all the logs from the workload cluster before deleting them.
-	clusterProxy.CollectWorkloadClusterLogs(ctx, cluster.Namespace, cluster.Name, filepath.Join(artifactFolder, "clusters", cluster.Name, "machines"))
+		// Dump all the logs from the workload cluster before deleting them.
+		clusterProxy.CollectWorkloadClusterLogs(ctx, cluster.Namespace, cluster.Name, filepath.Join(artifactFolder, "clusters", cluster.Name, "machines"))
+	}
 
 	Byf("Dumping all the Cluster API resources in the %q namespace", namespace.Name)
 
@@ -311,7 +316,7 @@ func dumpSpecResourcesAndCleanup(ctx context.Context, specName string, clusterPr
 	})
 
 	if !skipCleanup {
-		Byf("Deleting cluster %s/%s", cluster.Namespace, cluster.Name)
+		Byf("Deleting cluster resources in namespace %q", namespace.Name)
 		// While https://github.com/kubernetes-sigs/cluster-api/issues/2955 is addressed in future iterations, there is a chance
 		// that cluster variable is not set even if the cluster exists, so we are calling DeleteAllClustersAndWait
 		// instead of DeleteClusterAndWait
