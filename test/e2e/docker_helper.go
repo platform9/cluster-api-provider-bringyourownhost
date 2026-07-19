@@ -1,14 +1,17 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package e2e
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/docker/cli/cli/command"
@@ -20,6 +23,7 @@ import (
 	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/docker/pkg/system"
 	"github.com/docker/go-units"
+	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega" //nolint: staticcheck
 	"github.com/pkg/errors"
 	"k8s.io/client-go/tools/clientcmd"
@@ -351,6 +355,24 @@ func (r *ByoHostRunner) ExecByoDockerHost(byohost *container.CreateResponse) (ty
 	return output, byohost.ID, err
 }
 
+// controlPlaneEndpointIPBaseOctet is the lowest last-octet value handed out for a control-plane
+// endpoint IP (process 1 gets this value, process 2 gets this+1, and so on). It's a static IP in
+// the kind network's subnet but outside its DHCP range.
+const controlPlaneEndpointIPBaseOctet = 151
+
+// controlPlaneEndpointIP derives a control-plane endpoint IP from the kind network's subnet,
+// offset by processIndex so that concurrently running Ginkgo processes (GINKGO_NODES>1) each get
+// their own unique endpoint IP instead of colliding on the same static address.
+func controlPlaneEndpointIP(subnet string, processIndex int) (string, error) {
+	ipOctets := strings.Split(subnet, ".")
+	if len(ipOctets) < ipv4OctetCount {
+		return "", fmt.Errorf("unexpected subnet format: %s", subnet)
+	}
+
+	ipOctets[3] = strconv.Itoa(controlPlaneEndpointIPBaseOctet + processIndex - 1)
+	return strings.Join(ipOctets[:ipv4OctetCount], "."), nil
+}
+
 func setControlPlaneIP(ctx context.Context, dockerClient *client.Client) {
 	_, ok := os.LookupEnv("CONTROL_PLANE_ENDPOINT_IP")
 	if ok {
@@ -367,16 +389,11 @@ func setControlPlaneIP(ctx context.Context, dockerClient *client.Client) {
 		}
 	}
 	Expect(ipv4Subnet).NotTo(BeEmpty(), "no IPv4 subnet found in kind network IPAM config")
-	ipOctets := strings.Split(ipv4Subnet, ".")
 
-	// The ControlPlaneEndpoint is a static IP that is in the hosts'
-	// subnet but outside of its DHCP range. We believe 151 is a pretty
-	// high number and we have < 10 containers being spun up, so we
-	// can safely use this IP for the ControlPlaneEndpoint
-	Expect(len(ipOctets)).To(BeNumerically(">=", ipv4OctetCount), "unexpected subnet format: %s", ipv4Subnet)
-	ipOctets[3] = "151"
-	ip := strings.Join(ipOctets, ".")
-	err := os.Setenv("CONTROL_PLANE_ENDPOINT_IP", ip)
+	ip, err := controlPlaneEndpointIP(ipv4Subnet, ginkgo.GinkgoParallelProcess())
+	Expect(err).NotTo(HaveOccurred())
+
+	err = os.Setenv("CONTROL_PLANE_ENDPOINT_IP", ip)
 	if err != nil {
 		Expect(err).NotTo(HaveOccurred())
 	}

@@ -1,4 +1,5 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 // nolint: testpackage
@@ -96,6 +97,46 @@ func TestE2E(t *testing.T) {
 	RunSpecs(t, "Controller Suite")
 }
 
+// sharedSuiteData is the state the "run once" SynchronizedBeforeSuite closure hands to the
+// "run on every ParallelNode" closure. Every field here must be read by more than one Ginkgo
+// process under GINKGO_NODES>1, so it has to cross the process boundary via this struct rather
+// than a plain package-level assignment.
+type sharedSuiteData struct {
+	artifactFolder        string
+	configPath            string
+	clusterctlConfigPath  string
+	kubeconfigPath        string
+	clusterConName        string
+	pathToHostAgentBinary string
+}
+
+func formatSharedSuiteData(d *sharedSuiteData) []byte {
+	return []byte(strings.Join([]string{
+		d.artifactFolder,
+		d.configPath,
+		d.clusterctlConfigPath,
+		d.kubeconfigPath,
+		d.clusterConName,
+		d.pathToHostAgentBinary,
+	}, ","))
+}
+
+func parseSharedSuiteData(data []byte) (sharedSuiteData, error) {
+	parts := strings.Split(string(data), ",")
+	if len(parts) != 6 {
+		return sharedSuiteData{}, fmt.Errorf("expected 6 comma-separated fields in shared suite data, got %d", len(parts))
+	}
+
+	return sharedSuiteData{
+		artifactFolder:        parts[0],
+		configPath:            parts[1],
+		clusterctlConfigPath:  parts[2],
+		kubeconfigPath:        parts[3],
+		clusterConName:        parts[4],
+		pathToHostAgentBinary: parts[5],
+	}, nil
+}
+
 // Using a SynchronizedBeforeSuite for controlling how to create resources shared across ParallelNodes (~ginkgo threads).
 // The local clusterctl repository & the bootstrap cluster are created once and shared across all the tests.
 var _ = SynchronizedBeforeSuite(func() []byte {
@@ -130,27 +171,28 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	Expect(err).NotTo(HaveOccurred())
 
 	clusterConName = e2eConfig.ManagementClusterName
-	return []byte(
-		strings.Join([]string{
-			artifactFolder,
-			configPath,
-			clusterctlConfigPath,
-			bootstrapClusterProxy.GetKubeconfigPath(),
-		}, ","),
-	)
+	return formatSharedSuiteData(&sharedSuiteData{
+		artifactFolder:        artifactFolder,
+		configPath:            configPath,
+		clusterctlConfigPath:  clusterctlConfigPath,
+		kubeconfigPath:        bootstrapClusterProxy.GetKubeconfigPath(),
+		clusterConName:        clusterConName,
+		pathToHostAgentBinary: pathToHostAgentBinary,
+	})
 }, func(data []byte) {
 	// Before each ParallelNode.
 
-	parts := strings.Split(string(data), ",")
-	Expect(parts).To(HaveLen(4))
+	shared, err := parseSharedSuiteData(data)
+	Expect(err).NotTo(HaveOccurred())
 
-	artifactFolder = parts[0]
-	configPath = parts[1]
-	clusterctlConfigPath = parts[2]
-	kubeconfigPath := parts[3]
+	artifactFolder = shared.artifactFolder
+	configPath = shared.configPath
+	clusterctlConfigPath = shared.clusterctlConfigPath
+	clusterConName = shared.clusterConName
+	pathToHostAgentBinary = shared.pathToHostAgentBinary
 
 	e2eConfig = loadE2EConfig(configPath)
-	bootstrapClusterProxy = framework.NewClusterProxy("bootstrap", kubeconfigPath, initScheme(), framework.WithMachineLogCollector(framework.DockerLogCollector{}))
+	bootstrapClusterProxy = framework.NewClusterProxy("bootstrap", shared.kubeconfigPath, initScheme(), framework.WithMachineLogCollector(framework.DockerLogCollector{}))
 })
 
 // Using a SynchronizedAfterSuite for controlling how to delete resources shared across ParallelNodes (~ginkgo threads).
