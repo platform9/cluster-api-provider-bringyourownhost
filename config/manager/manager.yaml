@@ -35,6 +35,12 @@ spec:
         - "--metrics-bind-addr=127.0.0.1:8080"
         image: gcr.io/k8s-staging-cluster-api/cluster-api-byoh-controller:dev
         name: manager
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
         resources:
           limits:
             cpu: 200m
