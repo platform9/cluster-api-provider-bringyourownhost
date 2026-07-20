@@ -98,7 +98,7 @@ GOLANGCI_LINT = $(shell pwd)/bin/golangci-lint
 lint: golangci-lint
 	${GOLANGCI_LINT} run
 golangci-lint:
-	[ -e ${GOLANGCI_LINT} ] || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(shell pwd)/bin v1.64.8
+	$(call go-get-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2)
 
 ##@ Build
 
