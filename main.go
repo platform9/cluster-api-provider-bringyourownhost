@@ -1,4 +1,5 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package main
@@ -20,6 +21,7 @@ import (
 	clientset "k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
@@ -32,6 +34,7 @@ import (
 	//+kubebuilder:scaffold:imports
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/controllers/clustercache"
+	"sigs.k8s.io/cluster-api/controllers/remote"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 )
 
@@ -86,9 +89,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	tracker, err := clustercache.SetupWithManager(context.TODO(), mgr, clustercache.Options{
-		SecretClient: mgr.GetClient(),
-	}, concurrency(0))
+	tracker, err := clustercache.SetupWithManager(context.TODO(), mgr, clusterCacheOptions(mgr.GetClient()), concurrency(0))
 	if err != nil {
 		setupLog.Error(err, "unable to create cluster cache")
 		os.Exit(1)
@@ -189,4 +190,16 @@ func main() {
 
 func concurrency(c int) controller.Options {
 	return controller.Options{MaxConcurrentReconciles: c}
+}
+
+// clusterCacheOptions builds the options for clustercache.SetupWithManager. Client.UserAgent
+// is required as of CAPI v1.13 (clustercache.SetupWithManager rejects an empty one and the
+// manager exits), so it must always be set here.
+func clusterCacheOptions(secretClient client.Reader) clustercache.Options {
+	return clustercache.Options{
+		SecretClient: secretClient,
+		Client: clustercache.ClientOptions{
+			UserAgent: remote.DefaultClusterAPIUserAgent("cluster-api-provider-byoh-manager"),
+		},
+	}
 }
