@@ -14,12 +14,10 @@ BYOH_BASE_IMG = byoh/node:e2e
 BYOH_BASE_IMG_DEV = byoh/node:dev
 # Produce CRDs that work back to Kubernetes 1.11 (no version conversion)
 
-# GIT_VERSION is the single, predictable version string for every
-# agent-side artifact built from a commit (agent bundle, byohctl) --
-# matches kaapi's git-tag-based versioning philosophy
-# (~/pf9/kaapi/Makefile). Distinct from TAG above, which is the
-# controller-manager image tag (still static "dev" by default); unifying
-# that is separate follow-up work.
+# GIT_VERSION is the single, predictable version string for every agent-side
+# artifact built from a commit (agent bundle, byohctl) – Distinct from TAG
+# above, which is the controller-manager image tag (still static "dev" by
+# default); unifying that is separate follow-up work.
 GIT_VERSION := $(shell git describe --abbrev=8 --dirty --tags --match='v*' 2>/dev/null || echo "v0.0.0-$(shell git rev-parse --short=8 HEAD)")
 
 .PHONY: tag

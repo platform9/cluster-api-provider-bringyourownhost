@@ -9,12 +9,10 @@
 
 SHELL := /usr/bin/env bash
 
-# Version information
-# VERSION defaults to the root Makefile's `make tag` target -- the single
-# source of truth every agent-side artifact (byohctl, the agent bundle)
-# derives its version from, so they always agree without either side
-# hardcoding or independently recomputing anything.
-# Override for one-off local testing: `make build VERSION=v9.9.9-test`.
+# VERSION defaults to the root Makefile's `make tag` target – the single source
+# of truth every agent-side artifact (byohctl, the agent bundle) derives its
+# version from, so they always agree without either side hardcoding or
+# independently recomputing anything.
 REPO_ROOT := $(shell git rev-parse --show-toplevel)
 VERSION ?= $(shell $(MAKE) --no-print-directory -C $(REPO_ROOT) tag)
 
