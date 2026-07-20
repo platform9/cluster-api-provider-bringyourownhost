@@ -15,8 +15,8 @@ const (
 	// DefaultFilePerms is the default file permission
 	DefaultFilePerms = 0644
 
-	// byohAgentDebRepo is the OCI repo that holds the agent deb bundle.
-	// The tag is resolved at runtime by byohAgentBundleURL, not hardcoded.
+	// byohAgentDebRepo is the OCI repo that holds the agent deb bundle. The tag is resolved at
+	// runtime by byohAgentBundleURL.
 	byohAgentDebRepo = "quay.io/platform9/cluster-api-provider-bringyourownhost/agent"
 	// ByohAgentDebPackageFilename is the filename of the agent package
 	ByohAgentDebPackageFilename = "pf9-byohost-agent.deb"
@@ -44,11 +44,9 @@ const (
 	PcdKaapiRegionKey = "pcd-kaapi.pf9.io/region"
 )
 
-// byohAgentBundleURL returns the OCI bundle reference for the agent deb
-// package matching byohctl's own build version. byohctl and the agent
-// bundle are published from the same commit under the same
-// git-describe tag (see .github/workflows/build-push-agent-bundle.yml),
-// so there is no separate agent version to track by hand.
+// byohAgentBundleURL returns the OCI bundle reference for the agent deb package matching byohctl's
+// own build version. byohctl and the agent bundle are always published from the same commit under
+// the same git-describe tag.
 func byohAgentBundleURL() string {
 	return fmt.Sprintf("%s:%s", byohAgentDebRepo, version.GetVersion())
 }
