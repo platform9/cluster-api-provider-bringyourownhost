@@ -8,7 +8,7 @@ require (
 	github.com/docker/cli v24.0.7+incompatible
 	github.com/docker/docker v24.0.7+incompatible
 	github.com/docker/go-units v0.5.0
-	github.com/go-logr/logr v1.4.3
+	github.com/go-logr/logr v1.4.4
 	github.com/jackpal/gateway v1.2.0
 	github.com/kube-vip/kube-vip v0.5.5
 	github.com/maxbrunsfeld/counterfeiter/v6 v6.6.1
