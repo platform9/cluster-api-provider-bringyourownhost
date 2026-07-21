@@ -133,6 +133,7 @@ var _ = Describe("Clusterclass upgrade test [K8s-Upgrade-ClusterClass]", func() 
 			DNSImageTag:                          coreDNSUpgradeVersion,
 			MachineDeployments:                   clusterResources.MachineDeployments,
 			KubernetesUpgradeVersion:             kubernetesVersionUpgradeTo,
+			WaitForControlPlaneToBeUpgraded:      e2eConfig.GetIntervals(specName, "wait-machine-upgrade"),
 			WaitForMachineDeploymentToBeUpgraded: e2eConfig.GetIntervals(specName, "wait-machine-upgrade"),
 			WaitForKubeProxyUpgrade:              e2eConfig.GetIntervals(specName, "wait-machine-upgrade"),
 			WaitForDNSUpgrade:                    e2eConfig.GetIntervals(specName, "wait-machine-upgrade"),
