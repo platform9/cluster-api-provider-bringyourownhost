@@ -77,4 +77,4 @@ jobs:
     - name: Run e2e tests
       env:
         SKIP_BUILD: ${{ github.event_name != 'workflow_dispatch' && '1' || '' }}
-      run: yes | GINKGO_NODES=7 make test-e2e
+      run: yes | GINKGO_NODES=4 make test-e2e
