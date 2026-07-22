@@ -53,9 +53,14 @@ func (w FileWriter) WriteToFile(file *Files) error {
 		initPermission = stats.Mode()
 	}
 
-	flag := os.O_WRONLY | os.O_CREATE
+	// Default to truncating an existing file so a shorter new content fully
+	// replaces the old one. Without O_TRUNC, writing content that is shorter
+	// than a pre-existing file (e.g. on a recycled host) leaves stale trailing
+	// bytes behind, corrupting the file. When Append is set we must not
+	// truncate, matching cloud-init write_files semantics.
+	flag := os.O_WRONLY | os.O_CREATE | os.O_TRUNC
 	if file.Append {
-		flag |= os.O_APPEND
+		flag = os.O_WRONLY | os.O_CREATE | os.O_APPEND
 	}
 
 	f, err := os.OpenFile(file.Path, flag, initPermission)
