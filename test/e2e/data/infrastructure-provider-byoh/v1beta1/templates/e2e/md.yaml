@@ -20,6 +20,18 @@ metadata:
 spec:
   template:
     spec:
+      # Every byohost container's /etc/resolv.conf points at Docker's embedded
+      # per-container DNS proxy (127.0.0.11), which loops back to the pod's own
+      # CoreDNS instance and fatals CoreDNS's self-check ("plugin/loop"). Write
+      # a separate resolv-conf with a real nameserver and point kubelet at it
+      # (see kubeletExtraArgs.resolv-conf below), leaving the node's own
+      # /etc/resolv.conf untouched.
+      preKubeadmCommands:
+        - |
+          cat <<'EOF' > /etc/kubernetes/resolv.conf
+          nameserver 8.8.8.8
+          nameserver 8.8.4.4
+          EOF
       joinConfiguration:
         nodeRegistration:
           ignorePreflightErrors:
@@ -30,6 +42,7 @@ spec:
           kubeletExtraArgs:
             cgroup-driver: systemd
             eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
+            resolv-conf: /etc/kubernetes/resolv.conf
 ---
 apiVersion: cluster.x-k8s.io/v1beta1
 kind: MachineDeployment
