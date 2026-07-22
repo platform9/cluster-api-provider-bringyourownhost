@@ -76,7 +76,6 @@ var _ = Describe("When BYOH joins existing cluster [Installer]", func() {
 				agentFlagBootstrapKubeconfig: bootstrapConfPath,
 				agentFlagNamespace:           namespace.Name,
 				agentFlagVerbosity:           "1",
-				"--use-installer-controller": "true",
 			},
 		}
 
