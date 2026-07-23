@@ -1,4 +1,5 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 // nolint: testpackage
@@ -22,7 +23,7 @@ import (
 	"sigs.k8s.io/cluster-api/util"
 )
 
-var _ = Describe("When testing MachineDeployment scale out/in", func() {
+var _ = Describe("When testing MachineDeployment scale out/in [MD-Scale]", func() {
 
 	var (
 		ctx                    context.Context
@@ -88,7 +89,7 @@ var _ = Describe("When testing MachineDeployment scale out/in", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// read the log of host agent container in backend, and write it
-			agentLogFile := fmt.Sprintf("/tmp/host-agent-%d.log", i)
+			agentLogFile := fmt.Sprintf("/tmp/host-agent-%s.log", byoHostName)
 
 			f := WriteDockerLog(output, agentLogFile)
 			defer func() {
