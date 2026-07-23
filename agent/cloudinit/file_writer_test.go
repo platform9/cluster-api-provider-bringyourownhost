@@ -73,6 +73,35 @@ var _ = Describe("FileWriter", func() {
 
 	})
 
+	It("Should truncate a pre-existing longer file when overwriting with shorter content", func() {
+		// Regression: on a recycled host a file (e.g. /etc/frpc.toml) may already
+		// exist with longer content. Overwriting without truncation left stale
+		// trailing bytes behind, corrupting the file. The new content must fully
+		// replace the old one.
+		fileOriginContent := "old-and-much-longer-file-content-that-should-be-gone"
+		file := cloudinit.Files{
+			Path:        path.Join(workDir, "file2.txt"),
+			Encoding:    "",
+			Owner:       "",
+			Permissions: "",
+			Content:     "new-short-content",
+			Append:      false,
+		}
+
+		err := cloudinit.FileWriter{}.MkdirIfNotExists(workDir)
+		Expect(err).NotTo(HaveOccurred())
+
+		err = os.WriteFile(file.Path, []byte(fileOriginContent), 0644)
+		Expect(err).NotTo(HaveOccurred())
+
+		err = cloudinit.FileWriter{}.WriteToFile(&file)
+		Expect(err).NotTo(HaveOccurred())
+
+		buffer, err := os.ReadFile(file.Path)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(buffer)).To(Equal(file.Content))
+	})
+
 	It("Should append content to file when append mode is enabled", func() {
 		fileOriginContent := "some-file-content-1"
 		file := cloudinit.Files{
