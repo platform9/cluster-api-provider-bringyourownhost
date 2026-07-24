@@ -229,6 +229,7 @@ func resetOnboardGlobals() {
 	verbosity = ""
 	regionName = ""
 	configFile = ""
+	caCertPath = ""
 }
 
 func TestConfigFilePrecedence(t *testing.T) {
@@ -363,6 +364,43 @@ func TestConfigFileAndCLIDefaultFallback(t *testing.T) {
 	}
 }
 
+func TestCACertFlagAndConfig(t *testing.T) {
+	t.Run("flag sets caCertPath", func(t *testing.T) {
+		resetOnboardGlobals()
+		testCmd := createTestCommand()
+		testCmd.SetArgs([]string{
+			"--username", "testuser",
+			"--url", "test.platform9.com",
+			"--client-token", "testtoken",
+			"--region", "test-region",
+			"--ca-cert", "/tmp/du.crt",
+		})
+		if err := testCmd.Execute(); err != nil {
+			t.Fatalf("Expected no error, got: %v", err)
+		}
+		if caCertPath != "/tmp/du.crt" {
+			t.Errorf("Expected caCertPath '/tmp/du.crt', got '%s'", caCertPath)
+		}
+	})
+
+	t.Run("config fills caCertPath when flag unset", func(t *testing.T) {
+		resetOnboardGlobals()
+		mergeConfigWithFlags(&OnboardConfig{CACert: "/etc/du.crt"})
+		if caCertPath != "/etc/du.crt" {
+			t.Errorf("Expected caCertPath '/etc/du.crt' from config, got '%s'", caCertPath)
+		}
+	})
+
+	t.Run("flag takes precedence over config", func(t *testing.T) {
+		resetOnboardGlobals()
+		caCertPath = "/flag/du.crt"
+		mergeConfigWithFlags(&OnboardConfig{CACert: "/config/du.crt"})
+		if caCertPath != "/flag/du.crt" {
+			t.Errorf("Expected flag value to win, got '%s'", caCertPath)
+		}
+	})
+}
+
 // Helper function to create a test command with the same flag setup as onboardCmd
 func createTestCommand() *cobra.Command {
 	testCmd := &cobra.Command{
@@ -400,7 +438,7 @@ func createTestCommand() *cobra.Command {
 	AddOnboardFlags(
 		testCmd,
 		&fqdn, &username, &password, &passwordInteractive,
-		&clientToken, &domain, &tenant, &verbosity, &regionName, &configFile,
+		&clientToken, &domain, &tenant, &verbosity, &regionName, &configFile, &caCertPath,
 	)
 
 	return testCmd

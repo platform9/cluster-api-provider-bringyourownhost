@@ -28,6 +28,7 @@ var (
 	verbosity           string
 	regionName          string
 	configFile          string
+	caCertPath          string
 )
 
 var onboardCmd = &cobra.Command{
@@ -52,7 +53,7 @@ func init() {
 	AddOnboardFlags(
 		onboardCmd,
 		&fqdn, &username, &password, &passwordInteractive,
-		&clientToken, &domain, &tenant, &verbosity, &regionName, &configFile,
+		&clientToken, &domain, &tenant, &verbosity, &regionName, &configFile, &caCertPath,
 	)
 	rootCmd.AddCommand(onboardCmd)
 }
@@ -60,7 +61,7 @@ func init() {
 // AddOnboardFlags adds all flags for the onboard command to the given cobra.Command.
 func AddOnboardFlags(cmd *cobra.Command,
 	fqdn *string, username *string, password *string, passwordInteractive *bool,
-	clientToken *string, domain *string, tenant *string, verbosity *string, regionName *string, configFile *string,
+	clientToken *string, domain *string, tenant *string, verbosity *string, regionName *string, configFile *string, caCertPath *string,
 ) {
 	cmd.Flags().StringVarP(fqdn, "url", "u", "", "Platform9 FQDN")
 	cmd.Flags().StringVarP(username, "username", "e", "", "Platform9 username")
@@ -73,6 +74,7 @@ func AddOnboardFlags(cmd *cobra.Command,
 	cmd.MarkFlagsMutuallyExclusive("password", "password-interactive")
 	cmd.Flags().StringVarP(regionName, "region", "r", "", "Platform9 region where you want to onboard this host")
 	cmd.Flags().StringVarP(configFile, "config", "f", "", "Path to onboarding config YAML file")
+	cmd.Flags().StringVar(caCertPath, "ca-cert", "", "Path to the management plane CA certificate to trust (auto-fetched if omitted and the CA is not already trusted)")
 }
 
 // Check if running on Ubuntu
@@ -96,6 +98,7 @@ type OnboardConfig struct {
 	Tenant      string `yaml:"tenant"`
 	Verbosity   string `yaml:"verbosity"`
 	Region      string `yaml:"region"`
+	CACert      string `yaml:"ca-cert"`
 }
 
 func LoadOnboardConfig(path string) (*OnboardConfig, error) {
@@ -135,6 +138,9 @@ func mergeConfigWithFlags(cfg *OnboardConfig) {
 	}
 	if regionName == "" {
 		regionName = cfg.Region
+	}
+	if caCertPath == "" {
+		caCertPath = cfg.CACert
 	}
 }
 
@@ -225,9 +231,18 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	utils.LogDebug("Using FQDN: %s, Domain: %s, Tenant: %s", fqdn, domain, tenant)
 	utils.LogDebug("Verbosity level set to: %s", verbosity)
 
+	// Ensure the management plane's CA is trusted before any HTTPS call. This is a no-op
+	// (returns a nil pool) when the CA is already trusted; otherwise it installs the CA
+	// into the system trust store and returns a pool for this run's HTTP clients.
+	caPool, err := service.EnsureCATrust(fqdn, caCertPath)
+	if err != nil {
+		utils.LogError("Failed to establish trust with management plane %s: %v", fqdn, err)
+		os.Exit(1)
+	}
+
 	// Get authentication token
 	utils.LogDebug("Getting authentication token for user %s", username)
-	authClient := client.NewAuthClient(fqdn, clientToken)
+	authClient := client.NewAuthClient(fqdn, clientToken, caPool)
 	token, err := authClient.GetToken(username, password)
 	if err != nil {
 		utils.LogError("Failed to get authentication token: %v", err)
@@ -235,7 +250,7 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	}
 
 	// Create Kubernetes client
-	k8sClient := client.NewK8sClient(fqdn, domain, tenant, token, regionName)
+	k8sClient := client.NewK8sClient(fqdn, domain, tenant, token, regionName, caPool)
 
 	// Prepare directories
 	utils.LogInfo("Preparing directory structure for BYOH agent")

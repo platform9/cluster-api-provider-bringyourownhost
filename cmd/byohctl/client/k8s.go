@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -53,10 +54,11 @@ type Client struct {
 	DynamicClient dynamic.Interface
 }
 
-// NewK8sClient creates a new Kubernetes client with provided credentials
-func NewK8sClient(fqdn, domain, tenant, token, regionName string) *K8sClient {
+// NewK8sClient creates a new Kubernetes client with provided credentials. When rootCAs is
+// non-nil the HTTP client trusts that pool; pass nil to use the default system trust store.
+func NewK8sClient(fqdn, domain, tenant, token, regionName string, rootCAs *x509.CertPool) *K8sClient {
 	client := &K8sClient{
-		client:      &http.Client{Timeout: DefaultTimeout},
+		client:      newHTTPClient(DefaultTimeout, rootCAs),
 		fqdn:        fqdn,
 		domain:      domain,
 		tenant:      tenant,

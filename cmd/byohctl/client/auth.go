@@ -1,6 +1,8 @@
 package client
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,12 +21,27 @@ type AuthClient struct {
 	clientToken string
 }
 
-func NewAuthClient(fqdn, clientToken string) *AuthClient {
+// NewAuthClient creates an AuthClient. When rootCAs is non-nil the HTTP client trusts that
+// pool in addition to (in place of, for this client) the default system roots; pass nil to
+// use the default system trust store.
+func NewAuthClient(fqdn, clientToken string, rootCAs *x509.CertPool) *AuthClient {
 	return &AuthClient{
-		client:      &http.Client{Timeout: 30 * time.Second},
+		client:      newHTTPClient(30*time.Second, rootCAs),
 		fqdn:        fqdn,
 		clientToken: clientToken,
 	}
+}
+
+// newHTTPClient builds an *http.Client with the given timeout, applying a custom RootCAs
+// pool when one is provided.
+func newHTTPClient(timeout time.Duration, rootCAs *x509.CertPool) *http.Client {
+	c := &http.Client{Timeout: timeout}
+	if rootCAs != nil {
+		c.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{RootCAs: rootCAs},
+		}
+	}
+	return c
 }
 
 func (c *AuthClient) GetToken(username, password string) (string, error) {
