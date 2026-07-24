@@ -3,6 +3,7 @@ package client
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +15,25 @@ import (
 
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/types"
 )
+
+// TestNewAuthClientRootCAs verifies that a non-nil pool is wired into the client's
+// transport, and that a nil pool leaves the default transport untouched.
+func TestNewAuthClientRootCAs(t *testing.T) {
+	pool := x509.NewCertPool()
+	c := NewAuthClient("fqdn.test.com", "token", pool)
+	tr, ok := c.client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("expected *http.Transport, got %T", c.client.Transport)
+	}
+	if tr.TLSClientConfig == nil || tr.TLSClientConfig.RootCAs != pool {
+		t.Errorf("expected transport RootCAs to be the provided pool")
+	}
+
+	cNil := NewAuthClient("fqdn.test.com", "token", nil)
+	if cNil.client.Transport != nil {
+		t.Errorf("expected nil transport (default) when no pool is provided, got %T", cNil.client.Transport)
+	}
+}
 
 func TestNewAuthClient(t *testing.T) {
 	// Use HTTP server instead of HTTPS

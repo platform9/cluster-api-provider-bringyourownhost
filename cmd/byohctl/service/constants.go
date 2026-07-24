@@ -38,11 +38,19 @@ const (
 
 	// pcd-kaapi region key
 	PcdKaapiRegionKey = "pcd-kaapi.pf9.io/region"
+
+	// UpdateCACertsCmd is the command that refreshes the Ubuntu system CA trust store
+	// after a new CA certificate is dropped into CACertDir.
+	UpdateCACertsCmd = "update-ca-certificates"
 )
 
 var (
 	HomeDir, _ = os.UserHomeDir()
 	ByohDir    = filepath.Join(HomeDir, ByohConfigDir)
+
+	// CACertDir is the Ubuntu system anchor directory for extra trusted CA certificates.
+	// Declared as a var so tests can point it at a temp directory.
+	CACertDir = "/usr/local/share/ca-certificates"
 
 	KubeconfigFilePath = filepath.Join(ByohDir, "config")
 

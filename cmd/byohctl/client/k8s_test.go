@@ -21,7 +21,7 @@ import (
 // Test client initialization with options
 func TestNewK8sClient(t *testing.T) {
 	t.Run("default values", func(t *testing.T) {
-		client := NewK8sClient("fqdn.test.com", "domain", "tenant", "token", "region")
+		client := NewK8sClient("fqdn.test.com", "domain", "tenant", "token", "region", nil)
 
 		// No more containerd or agent image to test
 		if client.fqdn != "fqdn.test.com" {
@@ -44,7 +44,7 @@ func TestNewK8sClient(t *testing.T) {
 
 // Test namespace generation
 func TestGetNamespace(t *testing.T) {
-	client := NewK8sClient("api.test.platform9.io", "test-domain", "test-tenant", "token", "region")
+	client := NewK8sClient("api.test.platform9.io", "test-domain", "test-tenant", "token", "region", nil)
 	namespace := client.getNamespace()
 
 	expectedPrefix := "api-"
@@ -96,7 +96,7 @@ func TestGetSecret(t *testing.T) {
 		},
 	}
 
-	client := NewK8sClient(host, "test-domain", "test-tenant", "test-token", "region")
+	client := NewK8sClient(host, "test-domain", "test-tenant", "test-token", "region", nil)
 	client.client = httpClient
 
 	// Test GetSecret
@@ -182,7 +182,7 @@ func TestSaveKubeConfig(t *testing.T) {
 				},
 			}
 
-			client := NewK8sClient(host, "test-domain", "test-tenant", "test-token", "region")
+			client := NewK8sClient(host, "test-domain", "test-tenant", "test-token", "region", nil)
 			client.client = httpClient
 
 			// Test SaveKubeConfig
@@ -242,7 +242,7 @@ func TestIntegration(t *testing.T) {
 	}
 
 	// Create a test client
-	client := NewK8sClient("example.com", "test-domain", "test-tenant", "test-token", "region")
+	client := NewK8sClient("example.com", "test-domain", "test-tenant", "test-token", "region", nil)
 
 	// Test that DNS resolution works
 	t.Run("DNS resolution", func(t *testing.T) {
