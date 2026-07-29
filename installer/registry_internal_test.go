@@ -1,4 +1,5 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package installer
@@ -109,13 +110,17 @@ var _ = Describe("Byohost Installer Tests", func() {
 
 		It("Should match with the supported os and k8s versions", func() {
 			osFilters, osBundles := r.ListOS()
-			Expect(osFilters).To(ContainElements("Ubuntu_20.04.*_x86-64", "Ubuntu_22.04.*_x86-64"))
-			Expect(osFilters).To(HaveLen(2))
-			Expect(osBundles).To(ContainElements("Ubuntu_20.04.1_x86-64", "Ubuntu_22.04_x86-64"))
-			Expect(osBundles).To(HaveLen(2))
+			Expect(osFilters).To(ContainElements("Ubuntu_20.04.*_x86-64", "Ubuntu_22.04.*_x86-64", "Ubuntu_24.04.*_x86-64"))
+			Expect(osFilters).To(HaveLen(3))
+			Expect(osBundles).To(ContainElements("Ubuntu_20.04.1_x86-64", "Ubuntu_22.04_x86-64", "Ubuntu_24.04_x86-64"))
+			Expect(osBundles).To(HaveLen(3))
 
 			osBundleResult := r.ListK8s("Ubuntu_20.04.1_x86-64")
 			Expect(osBundleResult).To(ContainElements("v1.31.*"))
+			Expect(osBundleResult).To(HaveLen(1))
+
+			osBundleResult = r.ListK8s("Ubuntu_24.04_x86-64")
+			Expect(osBundleResult).To(ContainElements("v1.3*"))
 			Expect(osBundleResult).To(HaveLen(1))
 		})
 	})
