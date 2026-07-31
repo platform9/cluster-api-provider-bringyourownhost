@@ -1,4 +1,4 @@
-# Copyright 2023 Platform9 Systems, Inc.
+# Copyright 2026 Platform9 Systems, Inc.
 #
 # Usage:
 # make              # builds the binary for current platform
@@ -48,6 +48,22 @@ build-all: $(BUILD_DIR)
 	CGO_ENABLED=$(CGO_ENABLED) GOOS=darwin GOARCH=amd64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 -ldflags "$(LDFLAGS)"
 	CGO_ENABLED=$(CGO_ENABLED) GOOS=darwin GOARCH=arm64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 -ldflags "$(LDFLAGS)"
 
+# imgpkg is used to publish built binaries to Quay as an OCI artifact.
+# Pinned by SHA256 (not sha256sums.txt fetched at runtime) so a compromised
+# upstream release can't swap the binary CI executes without a second,
+# reviewable commit to this repo.
+IMGPKG_VERSION ?= v0.43.1
+IMGPKG_SHA256 ?= d36ccfcc54143d2475cf09b0247c88bccf24a7aeb062bd9bb8cab7cb58135fcf
+BYOHCTL_IMAGE ?= quay.io/platform9/cluster-api-provider-bringyourownhost/byohctl
+
+# Push built byohctl binaries to the registry via imgpkg. Requires build-all to have already run.
+.PHONY: push-byohctl
+push-byohctl:
+	curl -fsSL -o /tmp/imgpkg-byohctl-download "https://github.com/carvel-dev/imgpkg/releases/download/$(IMGPKG_VERSION)/imgpkg-linux-amd64"
+	echo "$(IMGPKG_SHA256)  /tmp/imgpkg-byohctl-download" | sha256sum -c -
+	install -m 0755 /tmp/imgpkg-byohctl-download /tmp/imgpkg-byohctl
+	/tmp/imgpkg-byohctl push -f $(BUILD_DIR) -i $(BYOHCTL_IMAGE):$(VERSION)
+
 # Format code
 .PHONY: format
 format:
@@ -70,6 +86,7 @@ help:
 	@echo "Available targets:"
 	@echo "  build       - Build for specified GOOS/GOARCH (default: linux/amd64)"
 	@echo "  build-all   - Build for multiple platforms"
+	@echo "  push-byohctl - Push built binaries to Quay via imgpkg (requires build-all)"
 	@echo "  clean       - Remove build artifacts"
 	@echo "  format      - Format Go code"
 	@echo "  test        - Run tests"
