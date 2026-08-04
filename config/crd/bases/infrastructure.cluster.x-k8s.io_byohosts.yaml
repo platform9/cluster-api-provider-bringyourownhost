@@ -252,14 +252,15 @@ spec:
                       type: string
                   type: object
                 lastHeartbeatTime:
-                  description: LastHeartbeatTime is the last time the agent sent a heartbeat.
-                  format: date-time
-                  type: string
-                connected:
-                  description: Connected defines if the heartbeat is successfully received from the agent.
-                  type: boolean
-                lastHeartbeatCheckTime:
-                  description: LastHeartbeatCheckTime is the last time the controller checked for heartbeat.
+                  description: |-
+                    LastHeartbeatTime is the last time the agent running on this host
+                    confirmed it was alive. clusterv1.Condition has no per-condition
+                    heartbeat/last-probe-time field (unlike corev1.NodeCondition), so this
+                    is tracked as a top-level status field rather than as part of the
+                    AgentConnected condition below. The management-cluster ByoHostReconciler
+                    compares this against its configured HeartbeatTimeoutPeriod to compute
+                    AgentConnected; it does not read or write this field itself — only the
+                    host agent does.
                   format: date-time
                   type: string
                 machineRef:

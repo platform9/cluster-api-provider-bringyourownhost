@@ -10,7 +10,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -103,17 +102,12 @@ func (r *ByoHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ 
 	// Check if last heartbeat timeout is within the HeartbeatTimeoutPeriod
 	if byoHost.Status.LastHeartbeatTime != nil && time.Since(byoHost.Status.LastHeartbeatTime.Time) < r.HeartbeatTimeoutPeriod {
 		logger.Info("Heartbeat within timeout period")
-		byoHost.Status.Connected = true
-		conditions.MarkTrue(byoHost, infrastructurev1beta1.AgentConnectedCondition)
+		conditions.MarkTrue(byoHost, infrastructurev1beta1.AgentConnected)
 	} else {
 		logger.Info("Heartbeat timeout detected", "HeartbeatTimeoutPeriod", r.HeartbeatTimeoutPeriod)
-		byoHost.Status.Connected = false
-		conditions.MarkFalse(byoHost, infrastructurev1beta1.AgentConnectedCondition, infrastructurev1beta1.HeartbeatTimeoutReason, clusterv1.ConditionSeverityWarning, "Heartbeat timeout detected")
+		conditions.MarkFalse(byoHost, infrastructurev1beta1.AgentConnected, infrastructurev1beta1.HeartbeatTimeoutReason, clusterv1.ConditionSeverityWarning, "Heartbeat timeout detected")
 	}
 
-	// Update the ByoHost LastHeartbeatCheckTime
-	now := metav1.Now()
-	byoHost.Status.LastHeartbeatCheckTime = &now
 	err := retry.RetryOnConflict(DefaultRetry, func() error {
 		return r.Client.Status().Update(ctx, byoHost)
 	})
