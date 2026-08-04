@@ -13,6 +13,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
@@ -31,18 +32,15 @@ type ByoHostReconciler struct {
 	// considered to be disconnected.  Its value can be overridden at start-up
 	// via the --byohostagent-heartbeat-timeout flag in main.go.
 	HeartbeatTimeoutPeriod time.Duration
+	Recorder               record.EventRecorder
 }
-
-const (
-	// ByohHostReconcilePeriod is the duration to wait before requeueing the ByoHost.
-	ByohHostReconcilePeriod = 60 * time.Second
-)
 
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=byohosts,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=byohosts/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=byohosts/finalizers,verbs=update
 //+kubebuilder:rbac:groups=certificates.k8s.io,resources=certificatesigningrequests,verbs=create;get;watch
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;delete
+//+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 func (r *ByoHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reterr error) {
 	logger := log.FromContext(ctx)
@@ -91,6 +89,7 @@ func (r *ByoHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ 
 	}
 
 	// Check if last heartbeat timeout is within the HeartbeatTimeoutPeriod
+	wasConnected := conditions.IsTrue(byoHost, infrastructurev1beta1.AgentConnected)
 	if byoHost.Status.LastHeartbeatTime != nil && time.Since(byoHost.Status.LastHeartbeatTime.Time) < r.HeartbeatTimeoutPeriod {
 		logger.Info("Heartbeat within timeout period")
 		conditions.MarkTrue(byoHost, infrastructurev1beta1.AgentConnected)
@@ -98,9 +97,18 @@ func (r *ByoHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ 
 		logger.Info("Heartbeat timeout detected", "HeartbeatTimeoutPeriod", r.HeartbeatTimeoutPeriod)
 		conditions.MarkFalse(byoHost, infrastructurev1beta1.AgentConnected, infrastructurev1beta1.HeartbeatTimeoutReason, clusterv1.ConditionSeverityWarning, "Heartbeat timeout detected")
 	}
+	if r.Recorder != nil {
+		isConnectedNow := conditions.IsTrue(byoHost, infrastructurev1beta1.AgentConnected)
+		switch {
+		case isConnectedNow && !wasConnected:
+			r.Recorder.Event(byoHost, corev1.EventTypeNormal, "AgentConnected", "agent heartbeat received")
+		case !isConnectedNow && wasConnected:
+			r.Recorder.Event(byoHost, corev1.EventTypeWarning, "AgentDisconnected", "agent heartbeat not received within timeout period")
+		}
+	}
 
 	logger.Info("Reconcile request received")
-	return ctrl.Result{RequeueAfter: ByohHostReconcilePeriod}, nil
+	return ctrl.Result{RequeueAfter: r.HeartbeatTimeoutPeriod}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
