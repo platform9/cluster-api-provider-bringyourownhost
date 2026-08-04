@@ -1,4 +1,5 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package controllers
@@ -12,8 +13,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/util/retry"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
@@ -34,15 +33,6 @@ type ByoHostReconciler struct {
 	HeartbeatTimeoutPeriod time.Duration
 }
 
-// DefaultRetry is the recommended retry for a conflict where multiple clients ( byomachine in this case )
-// are making changes to the same resource.
-var DefaultRetry = wait.Backoff{
-	Steps:    5,
-	Duration: 10 * time.Millisecond,
-	Factor:   1.0,
-	Jitter:   0.1,
-}
-
 const (
 	// ByohHostReconcilePeriod is the duration to wait before requeueing the ByoHost.
 	ByohHostReconcilePeriod = 60 * time.Second
@@ -61,6 +51,16 @@ func (r *ByoHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ 
 	if err := r.Get(ctx, req.NamespacedName, byoHost); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+
+	helper, err := patch.NewHelper(byoHost, r.Client)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	defer func() {
+		if patchErr := helper.Patch(ctx, byoHost); patchErr != nil && reterr == nil {
+			reterr = patchErr
+		}
+	}()
 
 	// Delete the uninstall secret once the agent has completed cleanup.
 	// The agent removes the cleanup annotation as its final step, so absence of
@@ -86,16 +86,7 @@ func (r *ByoHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ 
 			logger.Info("deleted uninstallation secret", "secret", secret.Name)
 		}
 
-		// Clear the stale reference so re-used hosts get a fresh uninstall secret
-		// on their next machine assignment.
-		helper, patchErr := patch.NewHelper(byoHost, r.Client)
-		if patchErr != nil {
-			return ctrl.Result{}, patchErr
-		}
 		byoHost.Spec.UninstallationSecret = nil
-		if patchErr = helper.Patch(ctx, byoHost); patchErr != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to clear uninstallationSecret reference on ByoHost: %w", patchErr)
-		}
 		logger.Info("cleared uninstallationSecret reference on ByoHost")
 	}
 
@@ -106,14 +97,6 @@ func (r *ByoHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ 
 	} else {
 		logger.Info("Heartbeat timeout detected", "HeartbeatTimeoutPeriod", r.HeartbeatTimeoutPeriod)
 		conditions.MarkFalse(byoHost, infrastructurev1beta1.AgentConnected, infrastructurev1beta1.HeartbeatTimeoutReason, clusterv1.ConditionSeverityWarning, "Heartbeat timeout detected")
-	}
-
-	err := retry.RetryOnConflict(DefaultRetry, func() error {
-		return r.Client.Status().Update(ctx, byoHost)
-	})
-	if err != nil {
-		logger.Error(err, "Failed to update ByoHost status")
-		return ctrl.Result{}, err
 	}
 
 	logger.Info("Reconcile request received")
