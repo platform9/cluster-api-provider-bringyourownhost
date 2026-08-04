@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -105,6 +106,77 @@ var _ = Describe("Byohost Agent Tests", func() {
 				Reason:   infrastructurev1beta1.WaitingForMachineRefReason,
 				Severity: clusterv1.ConditionSeverityInfo,
 			}))
+		})
+
+		Context("heartbeat", func() {
+			BeforeEach(func() {
+				// metav1.Time only round-trips at whole-second precision
+				// through the real API server (RFC3339, no sub-second
+				// component), so the interval must be large enough that
+				// sleeping past it is guaranteed to cross at least one
+				// whole-second boundary regardless of where in the current
+				// second the test happens to start — anything under ~1s
+				// risked both stamps truncating to the same second and
+				// looking identical even though the code updated the value
+				// correctly.
+				hostReconciler.HeartbeatInterval = 1300 * time.Millisecond
+			})
+
+			It("stamps LastHeartbeatTime on a fresh host and requeues after HeartbeatInterval", func() {
+				result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
+					NamespacedName: byoHostLookupKey,
+				})
+				Expect(reconcilerErr).ToNot(HaveOccurred())
+				Expect(result.RequeueAfter).To(Equal(1300 * time.Millisecond))
+
+				updatedByoHost := &infrastructurev1beta1.ByoHost{}
+				Expect(k8sClient.Get(ctx, byoHostLookupKey, updatedByoHost)).ToNot(HaveOccurred())
+				Expect(updatedByoHost.Status.LastHeartbeatTime).ToNot(BeNil())
+			})
+
+			It("does not rewrite LastHeartbeatTime on a second reconcile within HeartbeatInterval", func() {
+				_, err := hostReconciler.Reconcile(ctx, controllerruntime.Request{NamespacedName: byoHostLookupKey})
+				Expect(err).ToNot(HaveOccurred())
+
+				first := &infrastructurev1beta1.ByoHost{}
+				Expect(k8sClient.Get(ctx, byoHostLookupKey, first)).ToNot(HaveOccurred())
+				Expect(first.Status.LastHeartbeatTime).ToNot(BeNil())
+				firstStamp := *first.Status.LastHeartbeatTime
+				firstResourceVersion := first.ResourceVersion
+
+				// Second reconcile, no time elapsed — this is the direct
+				// regression test for the reconcile-storm bug this PR fixed
+				// on the agent side: a call within HeartbeatInterval must not
+				// re-stamp (and hence must not bump resourceVersion).
+				_, err = hostReconciler.Reconcile(ctx, controllerruntime.Request{NamespacedName: byoHostLookupKey})
+				Expect(err).ToNot(HaveOccurred())
+
+				second := &infrastructurev1beta1.ByoHost{}
+				Expect(k8sClient.Get(ctx, byoHostLookupKey, second)).ToNot(HaveOccurred())
+				Expect(second.Status.LastHeartbeatTime.Time).To(Equal(firstStamp.Time))
+				Expect(second.ResourceVersion).To(Equal(firstResourceVersion))
+			})
+
+			It("refreshes LastHeartbeatTime once HeartbeatInterval has elapsed", func() {
+				_, err := hostReconciler.Reconcile(ctx, controllerruntime.Request{NamespacedName: byoHostLookupKey})
+				Expect(err).ToNot(HaveOccurred())
+
+				first := &infrastructurev1beta1.ByoHost{}
+				Expect(k8sClient.Get(ctx, byoHostLookupKey, first)).ToNot(HaveOccurred())
+				firstStamp := *first.Status.LastHeartbeatTime
+
+				// Sleep comfortably more than one full second past the
+				// interval so the truncated-to-whole-seconds stamp is
+				// guaranteed to differ, regardless of alignment.
+				time.Sleep(hostReconciler.HeartbeatInterval + 1200*time.Millisecond)
+
+				_, err = hostReconciler.Reconcile(ctx, controllerruntime.Request{NamespacedName: byoHostLookupKey})
+				Expect(err).ToNot(HaveOccurred())
+
+				second := &infrastructurev1beta1.ByoHost{}
+				Expect(k8sClient.Get(ctx, byoHostLookupKey, second)).ToNot(HaveOccurred())
+				Expect(second.Status.LastHeartbeatTime.Time.After(firstStamp.Time)).To(BeTrue())
+			})
 		})
 
 		Context("When MachineRef is set", func() {

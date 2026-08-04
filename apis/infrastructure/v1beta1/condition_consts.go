@@ -77,6 +77,26 @@ const (
 	InstallationSecretNotAvailableReason = "InstallationSecretNotAvailable"
 )
 
+// Conditions and Reasons defined on ByoHost, set by the management-cluster
+// ByoHostReconciler based on agent heartbeats — as opposed to the ByoHost
+// conditions above, which are set by the host agent itself.
+const (
+	// AgentConnected reports whether the host agent has sent a heartbeat
+	// (ByoHost.Status.LastHeartbeatTime) within HeartbeatTimeoutPeriod.
+	AgentConnected clusterv1.ConditionType = "AgentConnected"
+
+	// HeartbeatTimeoutReason is used when a heartbeat has not been received
+	// within HeartbeatTimeoutPeriod (or has never been received at all).
+	//
+	// IMPORTANT: always pass a static message to conditions.MarkFalse for
+	// this reason — never a dynamic message (e.g. embedding elapsed time).
+	// conditions.Set's hasSameState check compares Message too, so a
+	// dynamic message would make every reconcile look like a real state
+	// change, defeating patch.Helper's no-op diffing and causing a real
+	// write every HeartbeatTimeoutPeriod even while steadily disconnected.
+	HeartbeatTimeoutReason = "HeartbeatTimeout"
+)
+
 // Reasons common to all Byo Resources
 const (
 
@@ -84,16 +104,4 @@ const (
 	// Spec.Paused field on the cluster is set to true
 	// or the resource is marked with Paused annotation
 	ClusterOrResourcePausedReason = "ClusterOrResourcePaused"
-)
-
-// AgentConnectedCondition is a condition that indicates whether the agent
-// on the host is connected and sending heartbeats.
-const (
-	AgentConnectedCondition clusterv1.ConditionType = "AgentConnected"
-
-	// HeartbeatReceivedReason is used when a heartbeat is received within the timeout.
-	HeartbeatReceivedReason string = "HeartbeatReceived"
-
-	// HeartbeatTimeoutReason is used when a heartbeat is not received within the timeout.
-	HeartbeatTimeoutReason string = "HeartbeatTimeout"
 )

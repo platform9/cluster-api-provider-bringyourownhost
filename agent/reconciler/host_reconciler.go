@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/cloudinit"
@@ -23,7 +24,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
@@ -38,6 +38,10 @@ type HostReconciler struct {
 	Recorder            record.EventRecorder
 	SkipK8sInstallation bool
 	DownloadPath        string
+	// HeartbeatInterval is the minimum time between LastHeartbeatTime writes,
+	// and the interval this reconciler self-requeues on. Wired from the
+	// --heartbeat-interval flag in agent/main.go.
+	HeartbeatInterval time.Duration
 }
 
 const (
@@ -68,10 +72,6 @@ func (r *HostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctr
 		}
 	}()
 
-	// Update the ByoHost LastHeartbeatTime
-	now := metav1.Now()
-	byoHost.Status.LastHeartbeatTime = &now
-
 	// Check for host cleanup annotation
 	hostAnnotations := byoHost.GetAnnotations()
 	_, ok := hostAnnotations[infrastructurev1beta1.HostCleanupAnnotation]
@@ -87,13 +87,24 @@ func (r *HostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctr
 	if !byoHost.DeletionTimestamp.IsZero() {
 		return r.reconcileDelete(ctx, byoHost)
 	}
-	return r.reconcileNormal(ctx, byoHost)
+
+	result, err := r.reconcileNormal(ctx, byoHost)
+	if err == nil {
+		result.RequeueAfter = r.HeartbeatInterval
+	}
+	return result, err
 }
 
 func (r *HostReconciler) reconcileNormal(ctx context.Context, byoHost *infrastructurev1beta1.ByoHost) (ctrl.Result, error) {
 	logger := ctrl.LoggerFrom(ctx)
 	logger = logger.WithValues("ByoHost", byoHost.Name)
 	logger.Info("reconcile normal")
+
+	now := metav1.Now()
+	if byoHost.Status.LastHeartbeatTime == nil || now.Sub(byoHost.Status.LastHeartbeatTime.Time) >= r.HeartbeatInterval {
+		byoHost.Status.LastHeartbeatTime = &now
+	}
+
 	if byoHost.Status.MachineRef == nil {
 		logger.Info("Machine ref not yet set")
 		conditions.MarkFalse(byoHost, infrastructurev1beta1.K8sNodeBootstrapSucceeded, infrastructurev1beta1.WaitingForMachineRefReason, clusterv1.ConditionSeverityInfo, "")
@@ -223,7 +234,6 @@ func (r *HostReconciler) SetupWithManager(ctx context.Context, mgr manager.Manag
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&infrastructurev1beta1.ByoHost{}).
 		WithEventFilter(predicates.ResourceNotPaused(ctrl.LoggerFrom(ctx))).
-		WithEventFilter(predicate.ResourceVersionChangedPredicate{}).
 		Complete(r)
 }
 

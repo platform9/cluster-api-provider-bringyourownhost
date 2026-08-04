@@ -1,4 +1,5 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package controllers
@@ -10,11 +11,9 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/util/retry"
+	"k8s.io/client-go/tools/record"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
@@ -33,27 +32,15 @@ type ByoHostReconciler struct {
 	// considered to be disconnected.  Its value can be overridden at start-up
 	// via the --byohostagent-heartbeat-timeout flag in main.go.
 	HeartbeatTimeoutPeriod time.Duration
+	Recorder               record.EventRecorder
 }
-
-// DefaultRetry is the recommended retry for a conflict where multiple clients ( byomachine in this case )
-// are making changes to the same resource.
-var DefaultRetry = wait.Backoff{
-	Steps:    5,
-	Duration: 10 * time.Millisecond,
-	Factor:   1.0,
-	Jitter:   0.1,
-}
-
-const (
-	// ByohHostReconcilePeriod is the duration to wait before requeueing the ByoHost.
-	ByohHostReconcilePeriod = 60 * time.Second
-)
 
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=byohosts,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=byohosts/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=byohosts/finalizers,verbs=update
 //+kubebuilder:rbac:groups=certificates.k8s.io,resources=certificatesigningrequests,verbs=create;get;watch
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;delete
+//+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 func (r *ByoHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reterr error) {
 	logger := log.FromContext(ctx)
@@ -62,6 +49,16 @@ func (r *ByoHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ 
 	if err := r.Get(ctx, req.NamespacedName, byoHost); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+
+	helper, err := patch.NewHelper(byoHost, r.Client)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	defer func() {
+		if patchErr := helper.Patch(ctx, byoHost); patchErr != nil && reterr == nil {
+			reterr = patchErr
+		}
+	}()
 
 	// Delete the uninstall secret once the agent has completed cleanup.
 	// The agent removes the cleanup annotation as its final step, so absence of
@@ -87,43 +84,41 @@ func (r *ByoHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ 
 			logger.Info("deleted uninstallation secret", "secret", secret.Name)
 		}
 
-		// Clear the stale reference so re-used hosts get a fresh uninstall secret
-		// on their next machine assignment.
-		helper, patchErr := patch.NewHelper(byoHost, r.Client)
-		if patchErr != nil {
-			return ctrl.Result{}, patchErr
-		}
 		byoHost.Spec.UninstallationSecret = nil
-		if patchErr = helper.Patch(ctx, byoHost); patchErr != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to clear uninstallationSecret reference on ByoHost: %w", patchErr)
-		}
 		logger.Info("cleared uninstallationSecret reference on ByoHost")
 	}
 
-	// Check if last heartbeat timeout is within the HeartbeatTimeoutPeriod
-	if byoHost.Status.LastHeartbeatTime != nil && time.Since(byoHost.Status.LastHeartbeatTime.Time) < r.HeartbeatTimeoutPeriod {
-		logger.Info("Heartbeat within timeout period")
-		byoHost.Status.Connected = true
-		conditions.MarkTrue(byoHost, infrastructurev1beta1.AgentConnectedCondition)
-	} else {
-		logger.Info("Heartbeat timeout detected", "HeartbeatTimeoutPeriod", r.HeartbeatTimeoutPeriod)
-		byoHost.Status.Connected = false
-		conditions.MarkFalse(byoHost, infrastructurev1beta1.AgentConnectedCondition, infrastructurev1beta1.HeartbeatTimeoutReason, clusterv1.ConditionSeverityWarning, "Heartbeat timeout detected")
-	}
-
-	// Update the ByoHost LastHeartbeatCheckTime
-	now := metav1.Now()
-	byoHost.Status.LastHeartbeatCheckTime = &now
-	err := retry.RetryOnConflict(DefaultRetry, func() error {
-		return r.Client.Status().Update(ctx, byoHost)
-	})
-	if err != nil {
-		logger.Error(err, "Failed to update ByoHost status")
-		return ctrl.Result{}, err
-	}
+	r.reconcileHeartbeat(ctx, byoHost)
 
 	logger.Info("Reconcile request received")
-	return ctrl.Result{RequeueAfter: ByohHostReconcilePeriod}, nil
+	return ctrl.Result{RequeueAfter: r.HeartbeatTimeoutPeriod}, nil
+}
+
+// reconcileHeartbeat evaluates whether the host agent's last heartbeat is
+// within HeartbeatTimeoutPeriod, sets AgentConnected accordingly, and emits
+// an Event only on an actual connect/disconnect transition.
+func (r *ByoHostReconciler) reconcileHeartbeat(ctx context.Context, byoHost *infrastructurev1beta1.ByoHost) {
+	logger := log.FromContext(ctx)
+
+	wasConnected := conditions.IsTrue(byoHost, infrastructurev1beta1.AgentConnected)
+	if byoHost.Status.LastHeartbeatTime != nil && time.Since(byoHost.Status.LastHeartbeatTime.Time) < r.HeartbeatTimeoutPeriod {
+		logger.Info("Heartbeat within timeout period")
+		conditions.MarkTrue(byoHost, infrastructurev1beta1.AgentConnected)
+	} else {
+		logger.Info("Heartbeat timeout detected", "HeartbeatTimeoutPeriod", r.HeartbeatTimeoutPeriod)
+		conditions.MarkFalse(byoHost, infrastructurev1beta1.AgentConnected, infrastructurev1beta1.HeartbeatTimeoutReason, clusterv1.ConditionSeverityWarning, "Heartbeat timeout detected")
+	}
+
+	if r.Recorder == nil {
+		return
+	}
+	isConnectedNow := conditions.IsTrue(byoHost, infrastructurev1beta1.AgentConnected)
+	switch {
+	case isConnectedNow && !wasConnected:
+		r.Recorder.Event(byoHost, corev1.EventTypeNormal, "AgentConnected", "agent heartbeat received")
+	case !isConnectedNow && wasConnected:
+		r.Recorder.Event(byoHost, corev1.EventTypeWarning, "AgentDisconnected", "agent heartbeat not received within timeout period")
+	}
 }
 
 // SetupWithManager sets up the controller with the Manager.

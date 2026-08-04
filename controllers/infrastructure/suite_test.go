@@ -1,4 +1,5 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package controllers_test
@@ -8,6 +9,7 @@ import (
 	"go/build"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
@@ -54,6 +56,7 @@ var (
 	byoAdmissionReconciler                *controllers.ByoAdmissionReconciler
 	k8sInstallerConfigReconciler          *controllers.K8sInstallerConfigReconciler
 	bootstrapKubeconfigReconciler         *controllers.BootstrapKubeconfigReconciler
+	byoHostReconciler                     *controllers.ByoHostReconciler
 	recorder                              *record.FakeRecorder
 	byoCluster                            *infrastructurev1beta1.ByoCluster
 	capiCluster                           *clusterv1.Cluster
@@ -162,6 +165,19 @@ var _ = BeforeSuite(func() {
 		Client: k8sManager.GetClient(),
 	}
 	err = bootstrapKubeconfigReconciler.SetupWithManager(k8sManager)
+	Expect(err).NotTo(HaveOccurred())
+
+	byoHostReconciler = &controllers.ByoHostReconciler{
+		Client: k8sManager.GetClient(),
+		Scheme: scheme.Scheme,
+		// Long enough that this controller's own safety-net RequeueAfter
+		// never fires during a test run — heartbeat-specific tests in
+		// byohost_controller_test.go set their own short value directly on
+		// this struct where needed.
+		HeartbeatTimeoutPeriod: 10 * time.Minute,
+		Recorder:               record.NewFakeRecorder(32),
+	}
+	err = byoHostReconciler.SetupWithManager(k8sManager)
 	Expect(err).NotTo(HaveOccurred())
 
 	go func() {

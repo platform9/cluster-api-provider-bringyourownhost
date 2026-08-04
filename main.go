@@ -34,6 +34,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 )
 
+// DefaultHeartbeatTimeout is the duration after which a ByoHost is
+// considered disconnected if no agent heartbeat has been received, unless
+// overridden via the --byohostagent-heartbeat-timeout flag.
+const DefaultHeartbeatTimeout = 120 * time.Second
+
 var (
 	scheme                       = runtime.NewScheme()
 	setupLog                     = ctrl.Log.WithName("setup")
@@ -61,7 +66,7 @@ func setFlags() {
 	flag.BoolVar(&enableLeaderElection, "enable-leader-election", false,
 		"Enable leader election for controller manager. Enabling this will ensure there is only one active controller manager.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
-	flag.DurationVar(&byohostAgentHeartbeatTimeout, "byohostagent-heartbeat-timeout", 120*time.Second, "The duration after which the agent is considered to be disconnected.")
+	flag.DurationVar(&byohostAgentHeartbeatTimeout, "byohostagent-heartbeat-timeout", DefaultHeartbeatTimeout, "The duration after which the agent is considered to be disconnected.")
 	flag.Parse()
 }
 
@@ -117,6 +122,7 @@ func main() {
 		Client:                 mgr.GetClient(),
 		Scheme:                 mgr.GetScheme(),
 		HeartbeatTimeoutPeriod: byohostAgentHeartbeatTimeout,
+		Recorder:               mgr.GetEventRecorderFor("byohost-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ByoHost")
 		os.Exit(1)
