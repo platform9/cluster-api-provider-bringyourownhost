@@ -95,6 +95,7 @@ func setupflags() {
 	flag.BoolVar(&skipInstallation, "skip-installation", false, "If you want to skip installation of the kubernetes component binaries")
 	flag.BoolVar(&printVersion, "version", false, "Print the version of the agent")
 	flag.StringVar(&bootstrapKubeConfig, "bootstrap-kubeconfig", "", "Provide bootstrap kubeconfig for bootstrap token workflow")
+	flag.DurationVar(&heartbeatInterval, "heartbeat-interval", 30*time.Second, "How often the agent refreshes its ByoHost heartbeat timestamp")
 
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	hiddenFlags := []string{"log-flush-frequency", "alsologtostderr", "log-backtrace-at", "log-dir", "logtostderr", "stderrthreshold", "vmodule", "azure-container-registry-config",
@@ -129,6 +130,7 @@ var (
 	printVersion        bool
 	bootstrapKubeConfig string
 	certExpiryDuration  int64
+	heartbeatInterval   time.Duration
 )
 
 // TODO - fix logging
@@ -216,6 +218,7 @@ func main() {
 		Recorder:            mgr.GetEventRecorderFor("hostagent-controller"),
 		SkipK8sInstallation: skipInstallation,
 		DownloadPath:        downloadpath,
+		HeartbeatInterval:   heartbeatInterval,
 	}
 	if err = hostReconciler.SetupWithManager(context.TODO(), mgr); err != nil {
 		logger.Error(err, "unable to create controller")
