@@ -1,10 +1,12 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package reconciler_test
 
 import (
 	"go/build"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -24,11 +26,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
-func TestReconciler(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "Reconciler Suite")
-}
-
 var (
 	cfg                *rest.Config
 	k8sClient          client.Client
@@ -41,7 +38,10 @@ var (
 	fakeTemplateParser *cloudinitfakes.FakeITemplateParser
 )
 
-var _ = BeforeSuite(func() {
+// TestMain bootstraps envtest once for the entire package, making k8sClient
+// and other package-level vars available to both Ginkgo tests (via TestReconciler)
+// and Go-native TestXxx functions.
+func TestMain(m *testing.M) {
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
 			filepath.Join("..", "..", "config", "crd", "bases"),
@@ -52,33 +52,44 @@ var _ = BeforeSuite(func() {
 
 	var err error
 	cfg, err = testEnv.Start()
-	Expect(err).ToNot(HaveOccurred())
-	Expect(cfg).ToNot(BeNil())
+	if err != nil || cfg == nil {
+		panic("failed to start envtest: " + err.Error())
+	}
 
 	scheme := runtime.NewScheme()
-
-	err = infrastructurev1beta1.AddToScheme(scheme)
-	Expect(err).NotTo(HaveOccurred())
-
-	err = corev1.AddToScheme(scheme)
-	Expect(err).NotTo(HaveOccurred())
-
-	err = clusterv1.AddToScheme(scheme)
-	Expect(err).NotTo(HaveOccurred())
+	if err = infrastructurev1beta1.AddToScheme(scheme); err != nil {
+		panic(err)
+	}
+	if err = corev1.AddToScheme(scheme); err != nil {
+		panic(err)
+	}
+	if err = clusterv1.AddToScheme(scheme); err != nil {
+		panic(err)
+	}
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme})
-	Expect(err).ToNot(HaveOccurred())
-	Expect(k8sClient).ToNot(BeNil())
+	if err != nil || k8sClient == nil {
+		panic("failed to create k8sClient")
+	}
 
 	k8sManager, err = ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:             scheme,
 		MetricsBindAddress: ":6090",
 	})
-	Expect(err).ToNot(HaveOccurred())
-	Expect(k8sManager).ToNot(BeNil())
-})
+	if err != nil || k8sManager == nil {
+		panic("failed to create k8sManager")
+	}
 
-var _ = AfterSuite(func() {
-	err := testEnv.Stop()
-	Expect(err).ToNot(HaveOccurred())
-})
+	code := m.Run()
+
+	if err = testEnv.Stop(); err != nil {
+		panic(err)
+	}
+
+	os.Exit(code)
+}
+
+func TestReconciler(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "Reconciler Suite")
+}

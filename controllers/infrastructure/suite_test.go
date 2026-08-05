@@ -7,6 +7,7 @@ package controllers_test
 import (
 	"context"
 	"go/build"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -75,19 +76,13 @@ var (
 	cancel                                context.CancelFunc
 )
 
-func TestAPIs(t *testing.T) {
-	RegisterFailHandler(Fail)
-
-	RunSpecsWithDefaultAndCustomReporters(t,
-		"Controller Suite",
-		[]Reporter{})
-}
-
-var _ = BeforeSuite(func() {
-	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
+// TestMain bootstraps envtest once for the entire package, making k8sManager
+// and all other package-level vars available to both Ginkgo tests (via TestAPIs)
+// and Go-native TestXxx functions.
+func TestMain(m *testing.M) {
+	logf.SetLogger(zap.New(zap.UseDevMode(true)))
 	ctx, cancel = context.WithCancel(context.TODO())
 
-	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
 			filepath.Join("..", "..", "config", "crd", "bases"),
@@ -99,40 +94,43 @@ var _ = BeforeSuite(func() {
 
 	var err error
 	cfg, err = testEnv.Start()
-	Expect(err).NotTo(HaveOccurred())
-	Expect(cfg).NotTo(BeNil())
+	if err != nil || cfg == nil {
+		panic("failed to start envtest: " + err.Error())
+	}
 
-	err = infrastructurev1beta1.AddToScheme(scheme.Scheme)
-	Expect(err).NotTo(HaveOccurred())
-
-	err = clusterv1.AddToScheme(scheme.Scheme)
-	Expect(err).NotTo(HaveOccurred())
-
-	err = bootstrapv1.AddToScheme(scheme.Scheme)
-	Expect(err).NotTo(HaveOccurred())
-
-	//+kubebuilder:scaffold:scheme
+	if err = infrastructurev1beta1.AddToScheme(scheme.Scheme); err != nil {
+		panic(err)
+	}
+	if err = clusterv1.AddToScheme(scheme.Scheme); err != nil {
+		panic(err)
+	}
+	if err = bootstrapv1.AddToScheme(scheme.Scheme); err != nil {
+		panic(err)
+	}
 
 	k8sManager, err = ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:             scheme.Scheme,
 		MetricsBindAddress: ":6080",
 	})
-	Expect(err).NotTo(HaveOccurred())
+	if err != nil {
+		panic(err)
+	}
 
 	byoCluster = builder.ByoCluster(defaultNamespace, defaultClusterName).
 		WithBundleBaseRegistry("projects.registry.vmware.com/cluster_api_provider_bringyourownhost").
 		WithBundleTag("1.0").
 		Build()
-	Expect(k8sManager.GetClient().Create(context.Background(), byoCluster)).Should(Succeed())
+	if err = k8sManager.GetClient().Create(context.Background(), byoCluster); err != nil {
+		panic(err)
+	}
 
 	capiCluster = builder.Cluster(defaultNamespace, defaultClusterName).WithInfrastructureRef(byoCluster).Build()
-	Expect(k8sManager.GetClient().Create(context.Background(), capiCluster)).Should(Succeed())
+	if err = k8sManager.GetClient().Create(context.Background(), capiCluster); err != nil {
+		panic(err)
+	}
 
 	node := builder.Node(defaultNamespace, defaultNodeName).Build()
-	clientFake = fake.NewClientBuilder().WithObjects(
-		capiCluster,
-		node,
-	).Build()
+	clientFake = fake.NewClientBuilder().WithObjects(capiCluster, node).Build()
 
 	recorder = record.NewFakeRecorder(32)
 	reconciler = &controllers.ByoMachineReconciler{
@@ -140,32 +138,29 @@ var _ = BeforeSuite(func() {
 		Tracker:  remote.NewTestClusterCacheTracker(logr.New(logf.NullLogSink{}), clientFake, scheme.Scheme, client.ObjectKey{Name: capiCluster.Name, Namespace: capiCluster.Namespace}),
 		Recorder: recorder,
 	}
-	err = reconciler.SetupWithManager(context.TODO(), k8sManager)
-	Expect(err).NotTo(HaveOccurred())
-
-	byoClusterReconciler = &controllers.ByoClusterReconciler{
-		Client: k8sManager.GetClient(),
+	if err = reconciler.SetupWithManager(context.TODO(), k8sManager); err != nil {
+		panic(err)
 	}
-	err = byoClusterReconciler.SetupWithManager(context.TODO(), k8sManager)
-	Expect(err).NotTo(HaveOccurred())
 
-	byoAdmissionReconciler = &controllers.ByoAdmissionReconciler{
-		ClientSet: clientSetFake,
+	byoClusterReconciler = &controllers.ByoClusterReconciler{Client: k8sManager.GetClient()}
+	if err = byoClusterReconciler.SetupWithManager(context.TODO(), k8sManager); err != nil {
+		panic(err)
 	}
-	err = byoAdmissionReconciler.SetupWithManager(k8sManager)
-	Expect(err).NotTo(HaveOccurred())
 
-	k8sInstallerConfigReconciler = &controllers.K8sInstallerConfigReconciler{
-		Client: k8sManager.GetClient(),
+	byoAdmissionReconciler = &controllers.ByoAdmissionReconciler{ClientSet: clientSetFake}
+	if err = byoAdmissionReconciler.SetupWithManager(k8sManager); err != nil {
+		panic(err)
 	}
-	err = k8sInstallerConfigReconciler.SetupWithManager(k8sManager)
-	Expect(err).NotTo(HaveOccurred())
 
-	bootstrapKubeconfigReconciler = &controllers.BootstrapKubeconfigReconciler{
-		Client: k8sManager.GetClient(),
+	k8sInstallerConfigReconciler = &controllers.K8sInstallerConfigReconciler{Client: k8sManager.GetClient()}
+	if err = k8sInstallerConfigReconciler.SetupWithManager(k8sManager); err != nil {
+		panic(err)
 	}
-	err = bootstrapKubeconfigReconciler.SetupWithManager(k8sManager)
-	Expect(err).NotTo(HaveOccurred())
+
+	bootstrapKubeconfigReconciler = &controllers.BootstrapKubeconfigReconciler{Client: k8sManager.GetClient()}
+	if err = bootstrapKubeconfigReconciler.SetupWithManager(k8sManager); err != nil {
+		panic(err)
+	}
 
 	byoHostReconciler = &controllers.ByoHostReconciler{
 		Client: k8sManager.GetClient(),
@@ -177,24 +172,38 @@ var _ = BeforeSuite(func() {
 		HeartbeatTimeoutPeriod: 10 * time.Minute,
 		Recorder:               record.NewFakeRecorder(32),
 	}
-	err = byoHostReconciler.SetupWithManager(k8sManager)
-	Expect(err).NotTo(HaveOccurred())
+	if err = byoHostReconciler.SetupWithManager(k8sManager); err != nil {
+		panic(err)
+	}
 
 	go func() {
-		err = k8sManager.GetCache().Start(ctx)
-		Expect(err).NotTo(HaveOccurred())
+		if err = k8sManager.GetCache().Start(ctx); err != nil {
+			panic(err)
+		}
 	}()
 
-	Expect(k8sManager.GetCache().WaitForCacheSync(context.TODO())).To(BeTrue())
+	if !k8sManager.GetCache().WaitForCacheSync(context.TODO()) {
+		panic("cache never synced")
+	}
 
-})
+	// Run all tests (both Ginkgo's TestAPIs and Go-native TestXxx functions).
+	code := m.Run()
 
-var _ = AfterSuite(func() {
 	cancel()
-	By("tearing down the test environment")
-	err := testEnv.Stop()
-	Expect(err).NotTo(HaveOccurred())
-})
+	if err = testEnv.Stop(); err != nil {
+		panic(err)
+	}
+
+	os.Exit(code)
+}
+
+func TestAPIs(t *testing.T) {
+	RegisterFailHandler(Fail)
+
+	RunSpecsWithDefaultAndCustomReporters(t,
+		"Controller Suite",
+		[]Reporter{})
+}
 
 func WaitForObjectsToBePopulatedInCache(objects ...client.Object) {
 	for _, object := range objects {
@@ -209,16 +218,21 @@ func WaitForObjectsToBePopulatedInCache(objects ...client.Object) {
 	}
 }
 
+// WaitForObjectToBeUpdatedInCache polls until the object in the manager's cache
+// satisfies testObjectUpdatedFunc. It uses a plain polling loop so it works in
+// both Ginkgo tests and Go-native TestXxx functions (Gomega's Eventually
+// requires RegisterFailHandler which is only set up inside TestAPIs).
 func WaitForObjectToBeUpdatedInCache(object client.Object, testObjectUpdatedFunc func(client.Object) bool) {
 	objectCopy := object.DeepCopyObject().(client.Object)
 	key := client.ObjectKeyFromObject(object)
-	Eventually(func() (done bool) {
-		if err := reconciler.Client.Get(context.TODO(), key, objectCopy); err != nil {
-			return false
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := reconciler.Client.Get(context.TODO(), key, objectCopy); err == nil {
+			if testObjectUpdatedFunc(objectCopy) {
+				return
+			}
 		}
-		if testObjectUpdatedFunc(objectCopy) {
-			return true
-		}
-		return false
-	}).Should(BeTrue())
+		time.Sleep(50 * time.Millisecond)
+	}
+	panic("WaitForObjectToBeUpdatedInCache: condition not met within 10s for " + key.String())
 }
