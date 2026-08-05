@@ -959,7 +959,7 @@ func TestHostReconciler_Heartbeat(t *testing.T) {
 		second := &infrastructurev1beta1.ByoHost{}
 		require.NoError(t, k8sClient.Get(context.TODO(), key, second))
 		require.NotNil(t, second.Status.LastHeartbeatTime)
-		assert.True(t, second.Status.LastHeartbeatTime.Time.After(first.Status.LastHeartbeatTime.Time),
+		assert.True(t, second.Status.LastHeartbeatTime.After(first.Status.LastHeartbeatTime.Time),
 			"LastHeartbeatTime should advance after interval elapsed")
 	})
 }

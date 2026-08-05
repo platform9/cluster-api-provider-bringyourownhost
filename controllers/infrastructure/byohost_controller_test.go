@@ -60,9 +60,6 @@ func TestByohostController_UninstallSecretCleanup(t *testing.T) {
 		Namespace: uninstallSecret.Namespace,
 	}
 	require.NoError(t, helper.Patch(context.Background(), byoHost))
-	WaitForObjectToBeUpdatedInCache(byoHost, func(obj client.Object) bool {
-		return obj.(*infrastructurev1beta1.ByoHost).Spec.UninstallationSecret != nil
-	})
 
 	t.Run("deletes secret and clears ref when MachineRef is nil and no cleanup annotation", func(t *testing.T) {
 		_, err := byoHostReconciler.Reconcile(context.Background(), reconcile.Request{NamespacedName: byoHostLookupKey})
@@ -81,9 +78,10 @@ func TestByohostController_UninstallSecretCleanup(t *testing.T) {
 	})
 }
 
-func TestByohostController_Heartbeat(t *testing.T) {
-	// Shared reconciler config for all heartbeat subtests.
-	// Each subtest creates its own ByoHost since they mutate different state.
+// setupHeartbeatReconciler sets HeartbeatTimeoutPeriod=3s and a fresh
+// FakeRecorder on the shared byoHostReconciler, restoring originals on cleanup.
+func setupHeartbeatReconciler(t *testing.T) {
+	t.Helper()
 	origTimeout := byoHostReconciler.HeartbeatTimeoutPeriod
 	origRecorder := byoHostReconciler.Recorder
 	byoHostReconciler.HeartbeatTimeoutPeriod = 3 * time.Second
@@ -92,6 +90,55 @@ func TestByohostController_Heartbeat(t *testing.T) {
 		byoHostReconciler.HeartbeatTimeoutPeriod = origTimeout
 		byoHostReconciler.Recorder = origRecorder
 	})
+}
+
+// patchHeartbeatTime sets LastHeartbeatTime=now on byoHost via a status patch.
+// byoHostReconciler uses a direct client so no cache sync is needed before
+// calling Reconcile.
+func patchHeartbeatTime(t *testing.T, byoHost *infrastructurev1beta1.ByoHost) {
+	t.Helper()
+	helper, err := patch.NewHelper(byoHost, k8sManager.GetClient())
+	require.NoError(t, err)
+	now := metav1.Now()
+	byoHost.Status.LastHeartbeatTime = &now
+	require.NoError(t, helper.Patch(context.Background(), byoHost))
+}
+
+// testHeartbeatRecovery is the subtest body for the recovery case — extracted
+// to keep TestByohostController_Heartbeat within funlen limits.
+func testHeartbeatRecovery(t *testing.T) {
+	t.Helper()
+	byoHost := newByoHostForTest(t, "heartbeat-recover")
+	key := types.NamespacedName{Name: byoHost.Name, Namespace: byoHost.Namespace}
+	fakeRecorder := record.NewFakeRecorder(32)
+	byoHostReconciler.Recorder = fakeRecorder
+
+	// First reconcile with no heartbeat — host goes disconnected.
+	_, err := byoHostReconciler.Reconcile(context.Background(), reconcile.Request{NamespacedName: key})
+	require.NoError(t, err)
+
+	// Agent "comes back" — patch a fresh heartbeat directly in the API server.
+	updated := &infrastructurev1beta1.ByoHost{}
+	require.NoError(t, k8sManager.GetClient().Get(context.Background(), key, updated))
+	patchHeartbeatTime(t, updated)
+
+	// Second reconcile — direct client reads the fresh heartbeat immediately.
+	_, err = byoHostReconciler.Reconcile(context.Background(), reconcile.Request{NamespacedName: key})
+	require.NoError(t, err)
+
+	final := &infrastructurev1beta1.ByoHost{}
+	require.NoError(t, k8sManager.GetClient().Get(context.Background(), key, final))
+	assert.True(t, conditions.IsTrue(final, infrastructurev1beta1.AgentConnected))
+
+	events := eventutils.CollectEvents(fakeRecorder.Events)
+	assert.Contains(t, events, "Normal AgentConnected agent heartbeat received")
+}
+
+func TestByohostController_Heartbeat(t *testing.T) {
+	// Shared reconciler config — each subtest creates its own ByoHost.
+	// byoHostReconciler uses a direct client, so patches are visible to
+	// Reconcile immediately without any cache sync wait.
+	setupHeartbeatReconciler(t)
 
 	t.Run("marks AgentConnected=False and requeues at half-timeout when no heartbeat", func(t *testing.T) {
 		byoHost := newByoHostForTest(t, "heartbeat-never")
@@ -100,10 +147,6 @@ func TestByohostController_Heartbeat(t *testing.T) {
 		result, err := byoHostReconciler.Reconcile(context.Background(), reconcile.Request{NamespacedName: key})
 		require.NoError(t, err)
 		assert.Equal(t, 1500*time.Millisecond, result.RequeueAfter)
-
-		WaitForObjectToBeUpdatedInCache(byoHost, func(obj client.Object) bool {
-			return conditions.IsFalse(obj.(*infrastructurev1beta1.ByoHost), infrastructurev1beta1.AgentConnected)
-		})
 
 		updated := &infrastructurev1beta1.ByoHost{}
 		require.NoError(t, k8sManager.GetClient().Get(context.Background(), key, updated))
@@ -118,42 +161,23 @@ func TestByohostController_Heartbeat(t *testing.T) {
 	t.Run("marks AgentConnected=True when a recent heartbeat is present", func(t *testing.T) {
 		byoHost := newByoHostForTest(t, "heartbeat-recent")
 		key := types.NamespacedName{Name: byoHost.Name, Namespace: byoHost.Namespace}
+		patchHeartbeatTime(t, byoHost)
 
-		helper, err := patch.NewHelper(byoHost, k8sManager.GetClient())
-		require.NoError(t, err)
-		now := metav1.Now()
-		byoHost.Status.LastHeartbeatTime = &now
-		require.NoError(t, helper.Patch(context.Background(), byoHost))
-		WaitForObjectToBeUpdatedInCache(byoHost, func(obj client.Object) bool {
-			return obj.(*infrastructurev1beta1.ByoHost).Status.LastHeartbeatTime != nil
-		})
-
-		_, err = byoHostReconciler.Reconcile(context.Background(), reconcile.Request{NamespacedName: key})
+		_, err := byoHostReconciler.Reconcile(context.Background(), reconcile.Request{NamespacedName: key})
 		require.NoError(t, err)
 
-		WaitForObjectToBeUpdatedInCache(byoHost, func(obj client.Object) bool {
-			return conditions.IsTrue(obj.(*infrastructurev1beta1.ByoHost), infrastructurev1beta1.AgentConnected)
-		})
+		updated := &infrastructurev1beta1.ByoHost{}
+		require.NoError(t, k8sManager.GetClient().Get(context.Background(), key, updated))
+		assert.True(t, conditions.IsTrue(updated, infrastructurev1beta1.AgentConnected))
 	})
 
 	t.Run("does not bump resourceVersion on a no-op reconcile", func(t *testing.T) {
 		byoHost := newByoHostForTest(t, "heartbeat-noop")
 		key := types.NamespacedName{Name: byoHost.Name, Namespace: byoHost.Namespace}
+		patchHeartbeatTime(t, byoHost)
 
-		helper, err := patch.NewHelper(byoHost, k8sManager.GetClient())
+		_, err := byoHostReconciler.Reconcile(context.Background(), reconcile.Request{NamespacedName: key})
 		require.NoError(t, err)
-		now := metav1.Now()
-		byoHost.Status.LastHeartbeatTime = &now
-		require.NoError(t, helper.Patch(context.Background(), byoHost))
-		WaitForObjectToBeUpdatedInCache(byoHost, func(obj client.Object) bool {
-			return obj.(*infrastructurev1beta1.ByoHost).Status.LastHeartbeatTime != nil
-		})
-
-		_, err = byoHostReconciler.Reconcile(context.Background(), reconcile.Request{NamespacedName: key})
-		require.NoError(t, err)
-		WaitForObjectToBeUpdatedInCache(byoHost, func(obj client.Object) bool {
-			return conditions.IsTrue(obj.(*infrastructurev1beta1.ByoHost), infrastructurev1beta1.AgentConnected)
-		})
 
 		first := &infrastructurev1beta1.ByoHost{}
 		require.NoError(t, k8sManager.GetClient().Get(context.Background(), key, first))
@@ -162,33 +186,22 @@ func TestByohostController_Heartbeat(t *testing.T) {
 		_, err = byoHostReconciler.Reconcile(context.Background(), reconcile.Request{NamespacedName: key})
 		require.NoError(t, err)
 
-		assert.Never(t, func() bool {
-			second := &infrastructurev1beta1.ByoHost{}
-			require.NoError(t, k8sManager.GetClient().Get(context.Background(), key, second))
-			return second.ResourceVersion != firstRV
-		}, 500*time.Millisecond, 50*time.Millisecond, "resourceVersion should not change on a no-op reconcile")
+		second := &infrastructurev1beta1.ByoHost{}
+		require.NoError(t, k8sManager.GetClient().Get(context.Background(), key, second))
+		assert.Equal(t, firstRV, second.ResourceVersion, "resourceVersion should not change on a no-op reconcile")
 	})
+
+	t.Run("recovers to AgentConnected=True and emits Normal event when heartbeat resumes after timeout", testHeartbeatRecovery)
 
 	t.Run("records Warning event only on transition into disconnected", func(t *testing.T) {
 		byoHost := newByoHostForTest(t, "heartbeat-event")
 		key := types.NamespacedName{Name: byoHost.Name, Namespace: byoHost.Namespace}
 		fakeRecorder := record.NewFakeRecorder(32)
 		byoHostReconciler.Recorder = fakeRecorder
+		patchHeartbeatTime(t, byoHost)
 
-		helper, err := patch.NewHelper(byoHost, k8sManager.GetClient())
+		_, err := byoHostReconciler.Reconcile(context.Background(), reconcile.Request{NamespacedName: key})
 		require.NoError(t, err)
-		now := metav1.Now()
-		byoHost.Status.LastHeartbeatTime = &now
-		require.NoError(t, helper.Patch(context.Background(), byoHost))
-		WaitForObjectToBeUpdatedInCache(byoHost, func(obj client.Object) bool {
-			return obj.(*infrastructurev1beta1.ByoHost).Status.LastHeartbeatTime != nil
-		})
-
-		_, err = byoHostReconciler.Reconcile(context.Background(), reconcile.Request{NamespacedName: key})
-		require.NoError(t, err)
-		WaitForObjectToBeUpdatedInCache(byoHost, func(obj client.Object) bool {
-			return conditions.IsTrue(obj.(*infrastructurev1beta1.ByoHost), infrastructurev1beta1.AgentConnected)
-		})
 
 		time.Sleep(byoHostReconciler.HeartbeatTimeoutPeriod + 50*time.Millisecond)
 
