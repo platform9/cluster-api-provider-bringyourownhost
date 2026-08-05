@@ -91,7 +91,7 @@ func (r *ByoHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ 
 	r.reconcileHeartbeat(ctx, byoHost)
 
 	logger.Info("Reconcile request received")
-	return ctrl.Result{RequeueAfter: r.HeartbeatTimeoutPeriod}, nil
+	return ctrl.Result{RequeueAfter: r.HeartbeatTimeoutPeriod / 2}, nil
 }
 
 // reconcileHeartbeat evaluates whether the host agent's last heartbeat is
@@ -102,7 +102,6 @@ func (r *ByoHostReconciler) reconcileHeartbeat(ctx context.Context, byoHost *inf
 
 	wasConnected := conditions.IsTrue(byoHost, infrastructurev1beta1.AgentConnected)
 	if byoHost.Status.LastHeartbeatTime != nil && time.Since(byoHost.Status.LastHeartbeatTime.Time) < r.HeartbeatTimeoutPeriod {
-		logger.Info("Heartbeat within timeout period")
 		conditions.MarkTrue(byoHost, infrastructurev1beta1.AgentConnected)
 	} else {
 		logger.Info("Heartbeat timeout detected", "HeartbeatTimeoutPeriod", r.HeartbeatTimeoutPeriod)

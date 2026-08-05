@@ -100,6 +100,10 @@ func (r *HostReconciler) reconcileNormal(ctx context.Context, byoHost *infrastru
 	logger = logger.WithValues("ByoHost", byoHost.Name)
 	logger.Info("reconcile normal")
 
+	// NOTE: LastHeartbeatTime is written by the agent (host clock) and evaluated
+	// by the management controller (manager clock). Clock skew between the two
+	// will affect perceived liveness. NTP (or equivalent) synchronization is
+	// assumed on both the host and management nodes.
 	now := metav1.Now()
 	if byoHost.Status.LastHeartbeatTime == nil || now.Sub(byoHost.Status.LastHeartbeatTime.Time) >= r.HeartbeatInterval {
 		byoHost.Status.LastHeartbeatTime = &now

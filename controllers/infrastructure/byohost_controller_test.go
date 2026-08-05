@@ -116,7 +116,7 @@ var _ = Describe("Controllers/ByohostController", func() {
 		It("marks AgentConnected=False on a host that has never sent a heartbeat", func() {
 			result, err := byoHostReconciler.Reconcile(context.Background(), reconcile.Request{NamespacedName: byoHostLookupKey})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(3 * time.Second))
+			Expect(result.RequeueAfter).To(Equal(1500 * time.Millisecond))
 
 			WaitForObjectToBeUpdatedInCache(byoHost, func(obj client.Object) bool {
 				return conditions.IsFalse(obj.(*infrastructurev1beta1.ByoHost), infrastructurev1beta1.AgentConnected)
