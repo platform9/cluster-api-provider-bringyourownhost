@@ -1,4 +1,5 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package controllers
@@ -6,11 +7,15 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -23,6 +28,11 @@ import (
 type ByoHostReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+	// HeartbeatTimeoutPeriod defines the duration after which the agent is
+	// considered to be disconnected.  Its value can be overridden at start-up
+	// via the --byohostagent-heartbeat-timeout flag in main.go.
+	HeartbeatTimeoutPeriod time.Duration
+	Recorder               record.EventRecorder
 }
 
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=byohosts,verbs=get;list;watch;create;update;patch;delete
@@ -30,6 +40,7 @@ type ByoHostReconciler struct {
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=byohosts/finalizers,verbs=update
 //+kubebuilder:rbac:groups=certificates.k8s.io,resources=certificatesigningrequests,verbs=create;get;watch
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;delete
+//+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 func (r *ByoHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reterr error) {
 	logger := log.FromContext(ctx)
@@ -38,6 +49,16 @@ func (r *ByoHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ 
 	if err := r.Get(ctx, req.NamespacedName, byoHost); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+
+	helper, err := patch.NewHelper(byoHost, r.Client)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	defer func() {
+		if patchErr := helper.Patch(ctx, byoHost); patchErr != nil && reterr == nil {
+			reterr = patchErr
+		}
+	}()
 
 	// Delete the uninstall secret once the agent has completed cleanup.
 	// The agent removes the cleanup annotation as its final step, so absence of
@@ -63,20 +84,40 @@ func (r *ByoHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ 
 			logger.Info("deleted uninstallation secret", "secret", secret.Name)
 		}
 
-		// Clear the stale reference so re-used hosts get a fresh uninstall secret
-		// on their next machine assignment.
-		helper, patchErr := patch.NewHelper(byoHost, r.Client)
-		if patchErr != nil {
-			return ctrl.Result{}, patchErr
-		}
 		byoHost.Spec.UninstallationSecret = nil
-		if patchErr = helper.Patch(ctx, byoHost); patchErr != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to clear uninstallationSecret reference on ByoHost: %w", patchErr)
-		}
 		logger.Info("cleared uninstallationSecret reference on ByoHost")
 	}
 
-	return ctrl.Result{}, nil
+	r.reconcileHeartbeat(ctx, byoHost)
+
+	logger.Info("Reconcile request received")
+	return ctrl.Result{RequeueAfter: r.HeartbeatTimeoutPeriod / 2}, nil
+}
+
+// reconcileHeartbeat evaluates whether the host agent's last heartbeat is
+// within HeartbeatTimeoutPeriod, sets AgentConnected accordingly, and emits
+// an Event only on an actual connect/disconnect transition.
+func (r *ByoHostReconciler) reconcileHeartbeat(ctx context.Context, byoHost *infrastructurev1beta1.ByoHost) {
+	logger := log.FromContext(ctx)
+
+	wasConnected := conditions.IsTrue(byoHost, infrastructurev1beta1.AgentConnected)
+	if byoHost.Status.LastHeartbeatTime != nil && time.Since(byoHost.Status.LastHeartbeatTime.Time) < r.HeartbeatTimeoutPeriod {
+		conditions.MarkTrue(byoHost, infrastructurev1beta1.AgentConnected)
+	} else {
+		logger.Info("Heartbeat timeout detected", "HeartbeatTimeoutPeriod", r.HeartbeatTimeoutPeriod)
+		conditions.MarkFalse(byoHost, infrastructurev1beta1.AgentConnected, infrastructurev1beta1.HeartbeatTimeoutReason, clusterv1.ConditionSeverityWarning, "Heartbeat timeout detected")
+	}
+
+	if r.Recorder == nil {
+		return
+	}
+	isConnectedNow := conditions.IsTrue(byoHost, infrastructurev1beta1.AgentConnected)
+	switch {
+	case isConnectedNow && !wasConnected:
+		r.Recorder.Event(byoHost, corev1.EventTypeNormal, "AgentConnected", "agent heartbeat received")
+	case !isConnectedNow && wasConnected:
+		r.Recorder.Event(byoHost, corev1.EventTypeWarning, "AgentDisconnected", "agent heartbeat not received within timeout period")
+	}
 }
 
 // SetupWithManager sets up the controller with the Manager.

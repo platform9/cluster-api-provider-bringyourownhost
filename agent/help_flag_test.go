@@ -20,6 +20,7 @@ var _ = Describe("Help flag for host agent", func() {
 				"--bootstrap-kubeconfig string",
 				"--certExpiryDuration int",
 				"--downloadpath string",
+				"--heartbeat-interval duration",
 				"--kubeconfig string",
 				"--label labelFlags",
 				"--metricsbindaddress string",

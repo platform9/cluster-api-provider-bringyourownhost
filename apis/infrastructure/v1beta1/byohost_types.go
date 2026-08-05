@@ -82,6 +82,17 @@ type ByoHostStatus struct {
 	// network interfaces.
 	// +optional
 	Network []NetworkStatus `json:"network,omitempty"`
+
+	// LastHeartbeatTime is the last time the agent running on this host
+	// confirmed it was alive. clusterv1.Condition has no per-condition
+	// heartbeat/last-probe-time field (unlike corev1.NodeCondition), so this
+	// is tracked as a top-level status field rather than as part of the
+	// AgentConnected condition below. The management-cluster ByoHostReconciler
+	// compares this against its configured HeartbeatTimeoutPeriod to compute
+	// AgentConnected; it does not read or write this field itself — only the
+	// host agent does.
+	// +optional
+	LastHeartbeatTime *metav1.Time `json:"lastHeartbeatTime,omitempty"`
 }
 
 //+kubebuilder:object:root=true

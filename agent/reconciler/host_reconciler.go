@@ -7,12 +7,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/cloudinit"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/registration"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/common"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
@@ -36,6 +38,10 @@ type HostReconciler struct {
 	Recorder            record.EventRecorder
 	SkipK8sInstallation bool
 	DownloadPath        string
+	// HeartbeatInterval is the minimum time between LastHeartbeatTime writes,
+	// and the interval this reconciler self-requeues on. Wired from the
+	// --heartbeat-interval flag in agent/main.go.
+	HeartbeatInterval time.Duration
 }
 
 const (
@@ -56,6 +62,7 @@ func (r *HostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctr
 		logger.Error(err, "error getting ByoHost")
 		return ctrl.Result{}, err
 	}
+
 	helper, _ := patch.NewHelper(byoHost, r.Client)
 	defer func() {
 		err = helper.Patch(ctx, byoHost)
@@ -80,13 +87,28 @@ func (r *HostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctr
 	if !byoHost.DeletionTimestamp.IsZero() {
 		return r.reconcileDelete(ctx, byoHost)
 	}
-	return r.reconcileNormal(ctx, byoHost)
+
+	result, err := r.reconcileNormal(ctx, byoHost)
+	if err == nil {
+		result.RequeueAfter = r.HeartbeatInterval
+	}
+	return result, err
 }
 
 func (r *HostReconciler) reconcileNormal(ctx context.Context, byoHost *infrastructurev1beta1.ByoHost) (ctrl.Result, error) {
 	logger := ctrl.LoggerFrom(ctx)
 	logger = logger.WithValues("ByoHost", byoHost.Name)
 	logger.Info("reconcile normal")
+
+	// NOTE: LastHeartbeatTime is written by the agent (host clock) and evaluated
+	// by the management controller (manager clock). Clock skew between the two
+	// will affect perceived liveness. NTP (or equivalent) synchronization is
+	// assumed on both the host and management nodes.
+	now := metav1.Now()
+	if byoHost.Status.LastHeartbeatTime == nil || now.Sub(byoHost.Status.LastHeartbeatTime.Time) >= r.HeartbeatInterval {
+		byoHost.Status.LastHeartbeatTime = &now
+	}
+
 	if byoHost.Status.MachineRef == nil {
 		logger.Info("Machine ref not yet set")
 		conditions.MarkFalse(byoHost, infrastructurev1beta1.K8sNodeBootstrapSucceeded, infrastructurev1beta1.WaitingForMachineRefReason, clusterv1.ConditionSeverityInfo, "")

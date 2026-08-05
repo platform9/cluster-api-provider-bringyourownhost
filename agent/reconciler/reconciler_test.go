@@ -1,4 +1,5 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package reconciler_test
@@ -7,9 +8,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/cloudinit/cloudinitfakes"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/reconciler"
 	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
@@ -24,6 +29,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -864,3 +870,96 @@ runCmd:
 		})
 	})
 })
+
+// newHostReconcilerForHeartbeatTest builds a minimal HostReconciler wired to the
+// shared envtest k8sClient with SkipK8sInstallation=true so reconcile only
+// exercises the heartbeat path without attempting real k8s installation.
+func newHostReconcilerForHeartbeatTest(t *testing.T, interval time.Duration) *reconciler.HostReconciler {
+	t.Helper()
+	return &reconciler.HostReconciler{
+		Client:              k8sClient,
+		CmdRunner:           &cloudinitfakes.FakeICmdRunner{},
+		FileWriter:          &cloudinitfakes.FakeIFileWriter{},
+		TemplateParser:      &cloudinitfakes.FakeITemplateParser{},
+		Recorder:            record.NewFakeRecorder(32),
+		SkipK8sInstallation: true,
+		HeartbeatInterval:   interval,
+	}
+}
+
+// newByoHostInAPIServer creates a ByoHost in the envtest API server and
+// registers a t.Cleanup to delete it when the test ends.
+func newByoHostInAPIServer(t *testing.T, name string) (*infrastructurev1beta1.ByoHost, types.NamespacedName) {
+	t.Helper()
+	byoHost := builder.ByoHost("default", name).Build()
+	require.NoError(t, k8sClient.Create(context.TODO(), byoHost))
+	t.Cleanup(func() {
+		_ = client.IgnoreNotFound(k8sClient.Delete(context.TODO(), byoHost))
+	})
+	return byoHost, types.NamespacedName{Name: byoHost.Name, Namespace: byoHost.Namespace}
+}
+
+func TestHostReconciler_Heartbeat(t *testing.T) {
+	t.Run("stamps LastHeartbeatTime and requeues at HeartbeatInterval", func(t *testing.T) {
+		r := newHostReconcilerForHeartbeatTest(t, 1300*time.Millisecond)
+		_, key := newByoHostInAPIServer(t, "heartbeat-stamps")
+
+		result, err := r.Reconcile(context.TODO(), controllerruntime.Request{NamespacedName: key})
+		require.NoError(t, err)
+		assert.Equal(t, 1300*time.Millisecond, result.RequeueAfter)
+
+		updated := &infrastructurev1beta1.ByoHost{}
+		require.NoError(t, k8sClient.Get(context.TODO(), key, updated))
+		assert.NotNil(t, updated.Status.LastHeartbeatTime)
+	})
+
+	t.Run("does not re-stamp within the interval", func(t *testing.T) {
+		r := newHostReconcilerForHeartbeatTest(t, 1300*time.Millisecond)
+		_, key := newByoHostInAPIServer(t, "heartbeat-nowrite")
+
+		// First reconcile — stamps the time
+		_, err := r.Reconcile(context.TODO(), controllerruntime.Request{NamespacedName: key})
+		require.NoError(t, err)
+
+		first := &infrastructurev1beta1.ByoHost{}
+		require.NoError(t, k8sClient.Get(context.TODO(), key, first))
+		require.NotNil(t, first.Status.LastHeartbeatTime)
+		firstRV := first.ResourceVersion
+		firstStamp := first.Status.LastHeartbeatTime.Time
+
+		// Second reconcile immediately — within interval, must not re-stamp
+		_, err = r.Reconcile(context.TODO(), controllerruntime.Request{NamespacedName: key})
+		require.NoError(t, err)
+
+		second := &infrastructurev1beta1.ByoHost{}
+		require.NoError(t, k8sClient.Get(context.TODO(), key, second))
+		assert.Equal(t, firstRV, second.ResourceVersion, "resourceVersion must not change on a no-op heartbeat")
+		assert.Equal(t, firstStamp, second.Status.LastHeartbeatTime.Time, "LastHeartbeatTime must not change within interval")
+	})
+
+	t.Run("refreshes LastHeartbeatTime after interval elapses", func(t *testing.T) {
+		interval := 1300 * time.Millisecond
+		r := newHostReconcilerForHeartbeatTest(t, interval)
+		_, key := newByoHostInAPIServer(t, "heartbeat-refresh")
+
+		_, err := r.Reconcile(context.TODO(), controllerruntime.Request{NamespacedName: key})
+		require.NoError(t, err)
+
+		first := &infrastructurev1beta1.ByoHost{}
+		require.NoError(t, k8sClient.Get(context.TODO(), key, first))
+		require.NotNil(t, first.Status.LastHeartbeatTime)
+
+		// metav1.Time has second-precision through the API server; sleep enough
+		// to cross a whole-second boundary regardless of test start alignment.
+		time.Sleep(interval + 1200*time.Millisecond)
+
+		_, err = r.Reconcile(context.TODO(), controllerruntime.Request{NamespacedName: key})
+		require.NoError(t, err)
+
+		second := &infrastructurev1beta1.ByoHost{}
+		require.NoError(t, k8sClient.Get(context.TODO(), key, second))
+		require.NotNil(t, second.Status.LastHeartbeatTime)
+		assert.True(t, second.Status.LastHeartbeatTime.After(first.Status.LastHeartbeatTime.Time),
+			"LastHeartbeatTime should advance after interval elapsed")
+	})
+}
