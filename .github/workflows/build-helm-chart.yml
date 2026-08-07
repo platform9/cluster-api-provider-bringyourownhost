@@ -39,7 +39,7 @@ jobs:
           go-version: 1.26.2
           cache: true
       - name: Generate helm chart
-        run: make helm
+        run: make helm IMG="quay.io/platform9/cluster-api-provider-bringyourownhost/controller-manager:$(make tag)"
       - name: Package helm chart
         run: make helm-package
       - name: Upload helm chart artifact
