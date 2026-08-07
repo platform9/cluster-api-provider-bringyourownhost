@@ -191,6 +191,9 @@ helm: kustomize yq helm-binary ## Generate the byoh helm chart under charts/ (ch
 helm-package: helm ## Package the generated chart into a .tgz.
 	PATH="$(shell pwd)/bin:$$PATH" helm package ./charts
 
+helm-login: helm-binary ## Log in to the Quay OCI registry for helm push (reads QUAY_USERNAME/QUAY_TOKEN from the environment).
+	echo "$$QUAY_TOKEN" | PATH="$(shell pwd)/bin:$$PATH" helm registry login --username "$$QUAY_USERNAME" --password-stdin quay.io
+
 helm-push: helm-package ## Push the packaged helm chart to Quay via OCI.
 	PATH="$(shell pwd)/bin:$$PATH" helm push charts-$(GIT_VERSION).tgz oci://$(BYOH_HELM_CHART_IMAGE)
 
