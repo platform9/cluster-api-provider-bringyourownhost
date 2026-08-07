@@ -195,7 +195,7 @@ helm-login: helm-binary ## Log in to the Quay OCI registry for helm push (reads 
 	echo "$$QUAY_TOKEN" | PATH="$(shell pwd)/bin:$$PATH" helm registry login --username "$$QUAY_USERNAME" --password-stdin quay.io
 
 helm-push: helm-package ## Push the packaged helm chart to Quay via OCI.
-	PATH="$(shell pwd)/bin:$$PATH" helm push charts-$(GIT_VERSION).tgz oci://$(BYOH_HELM_CHART_IMAGE)
+	PATH="$(shell pwd)/bin:$$PATH" helm push byoh-chart-$(GIT_VERSION).tgz oci://$(BYOH_HELM_CHART_IMAGE)
 
 prepare-byoh-docker-host-image:
 	docker build test/e2e -f test/e2e/BYOHDockerFile -t ${BYOH_BASE_IMG}
