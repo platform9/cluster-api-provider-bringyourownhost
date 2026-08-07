@@ -15,7 +15,7 @@ script=$(realpath "$0")
 scriptpath=$(dirname "$script")
 REPO="$scriptpath/.."
 BIN_PATH="$REPO/build/bin"
-WORKLOAD_CHART="byoh-chart"
+WORKLOAD_CHART="charts"
 log::info() { echo -e "${BLUE}[INFO] $*${NC}" >&2; }
 log::warn() { echo -e "${YELLOW}[WARN] $*${NC}" >&2; }
 log::fatal() { echo -e "${RED}[FATAL] $*${NC}" >&2 && exit 1; }

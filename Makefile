@@ -167,7 +167,7 @@ HELM_SHA256_linux_amd64 := 15e041a93a590dce8100f39385cd98c84a765c9e36aeeb9e2dc6f
 HELM_SHA256 := $(HELM_SHA256_$(HELM_OS)_$(HELM_ARCH))
 
 HELM = $(shell pwd)/bin/helm
-BYOH_HELM_CHART_IMAGE ?= quay.io/platform9/cluster-api-provider-bringyourownhost/charts
+BYOH_HELM_CHART_IMAGE ?= quay.io/platform9/cluster-api-provider-bringyourownhost
 
 helm-binary: ## Download the pinned helm CLI locally if necessary.
 	@if [ -z "$(HELM_SHA256)" ]; then \
@@ -192,7 +192,7 @@ helm-package: helm ## Package the generated chart into a .tgz.
 	PATH="$(shell pwd)/bin:$$PATH" helm package ./charts
 
 helm-push: helm-package ## Push the packaged helm chart to Quay via OCI.
-	PATH="$(shell pwd)/bin:$$PATH" helm push byoh-chart-$(GIT_VERSION).tgz oci://$(BYOH_HELM_CHART_IMAGE)
+	PATH="$(shell pwd)/bin:$$PATH" helm push charts-$(GIT_VERSION).tgz oci://$(BYOH_HELM_CHART_IMAGE)
 
 prepare-byoh-docker-host-image:
 	docker build test/e2e -f test/e2e/BYOHDockerFile -t ${BYOH_BASE_IMG}

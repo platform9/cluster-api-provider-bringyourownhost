@@ -46,7 +46,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: byoh-helm-chart
-          path: byoh-chart-*.tgz
+          path: charts-*.tgz
           retention-days: 1
 
       - name: Log in to Quay
