@@ -15,7 +15,6 @@ script=$(realpath "$0")
 scriptpath=$(dirname "$script")
 REPO="$scriptpath/.."
 BIN_PATH="$REPO/build/bin"
-WORKLOAD_CHART="charts"
 log::info() { echo -e "${BLUE}[INFO] $*${NC}" >&2; }
 log::warn() { echo -e "${YELLOW}[WARN] $*${NC}" >&2; }
 log::fatal() { echo -e "${RED}[FATAL] $*${NC}" >&2 && exit 1; }
@@ -121,6 +120,17 @@ drop_namespace_from_yaml() {
   done
   rm -rf file_*.yml
 }
+
+update_version() {
+  local template_file="$1"
+  local target_file="$2"
+  local version="$3"
+
+  cp "${template_file}" "${target_file}"
+  sed -i.bak "s/FIXME_WITH_TAG/${version}/g" "${target_file}"
+  rm -f "${target_file}.bak"
+}
+
 stage_byoh_template() {
   version=$1
   if [ ! -z "$(ls -A $BIN_PATH)" ]; then
@@ -129,7 +139,12 @@ stage_byoh_template() {
 
   workload_chart_dir="$REPO/charts"
   helm create $workload_chart_dir
-  
+
+  # `helm create` unconditionally overwrites .helmignore with its default scaffold on every
+  # run, dropping any customization. Re-append the exclusion for the *.template source files
+  # (Chart.yaml.template, values.yaml.template) so they never end up inside the packaged .tgz.
+  echo '*.template' >> $workload_chart_dir/.helmignore
+
   rm -rf $workload_chart_dir/templates/*.yaml $workload_chart_dir/templates/NOTES.txt $workload_chart_dir/templates/tests
 
   kustomize build --enable-helm $REPO/chart-generator/byoh-chart > $workload_chart_dir/templates/workload.yaml
@@ -137,10 +152,7 @@ stage_byoh_template() {
   # Copy extra templates
   # cp $REPO/chart-generator/templates/* $workload_chart_dir/templates/.
 
-  yq -i '.name="'$WORKLOAD_CHART'"' $workload_chart_dir/Chart.yaml
-  yq -i '.description="A helm chart for deploying Byoh Manager"' $workload_chart_dir/Chart.yaml
-  yq -i '.version="'$version'"' $workload_chart_dir/Chart.yaml
-  yq -i '.appVersion="'$version'"' $workload_chart_dir/Chart.yaml
+  update_version "$REPO/charts/Chart.yaml.template" "$workload_chart_dir/Chart.yaml" "$version"
 
   pushd $workload_chart_dir/templates
   drop_namespace_from_yaml workload.yaml
@@ -174,7 +186,7 @@ main() {
   stage_byoh_template $release_version
   log::info "Generating chart values.yaml"
 
-  sed -e "s|__CONTROLLER_IMAGE__|${byoh_image}|g"  $REPO/chart-generator/sample-values.yaml > $REPO/charts/values.yaml
+  sed -e "s|__CONTROLLER_IMAGE__|${byoh_image}|g"  $REPO/charts/values.yaml.template > $REPO/charts/values.yaml
 
   log::info "Publishing helm version"
   echo -n "${release_version}" > "${REPO}/helm-chart-version"

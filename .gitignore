@@ -18,8 +18,14 @@ _dist
 
 # Packaged helm chart artifact (output of `make helm-package`) and the
 # version-stamp file chart-generator.sh writes alongside it (output of `make helm`)
-byoh-chart-*.tgz
+charts-*.tgz
 helm-chart-version
+
+# Generated helm chart files (output of `make helm`, stamped from the
+# .template files in charts/ by chart-generator.sh) — never track the live
+# version-stamped files, only their .template sources.
+charts/Chart.yaml
+charts/values.yaml
 
 # Kubernetes Generated files - skip generated files, except for vendored files
 
