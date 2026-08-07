@@ -22,10 +22,11 @@ log::fatal() { echo -e "${RED}[FATAL] $*${NC}" >&2 && exit 1; }
 log::error() { echo -e "${RED}[ERROR] $*${NC}" >&2; }
 
 usage() {
-  echo "$0 <-r release-version> <-e byoh-image>"
+  echo "$0 <-e byoh-image>"
   echo "Environment variables:"
-  echo "INSTALL_BINARIES=1 : If this environment variable is set then this script will **attempt** to install relevant binaries"
-  echo "DEBUG=1            : To enable debug"
+  echo "VERSION=v0.1.0-abcdef : Required. Chart version/appVersion to stamp into Chart.yaml."
+  echo "INSTALL_BINARIES=1   : If this environment variable is set then this script will **attempt** to install relevant binaries"
+  echo "DEBUG=1              : To enable debug"
   exit 1
 }
 
@@ -126,7 +127,7 @@ stage_byoh_template() {
     export PATH="$BIN_PATH/:$PATH"
   fi
 
-  workload_chart_dir="$REPO/$WORKLOAD_CHART"
+  workload_chart_dir="$REPO/charts"
   helm create $workload_chart_dir
   
   rm -rf $workload_chart_dir/templates/*.yaml $workload_chart_dir/templates/NOTES.txt $workload_chart_dir/templates/tests
@@ -147,9 +148,6 @@ stage_byoh_template() {
 }
 
 main() {
-  major_minor_version=${BYOH_VERSION:-0.1}
-  build_number=${BUILD_NUMBER:-0}
-  release_version="$major_minor_version.$build_number"
   byoh_image="byoh-controller-manager:local"
 
   while getopts ":h:e:o:" opt; do
@@ -165,13 +163,18 @@ main() {
       ;;
   esac
   done
-  
+
+  if [ -z "${VERSION:-}" ]; then
+    log::fatal "VERSION environment variable is required (chart version/appVersion), e.g. VERSION=v0.1.0-abcdef"
+  fi
+  release_version="$VERSION"
+
   prereqs
-  log::info "Generating charts with version: release_version"
+  log::info "Generating charts with version: $release_version"
   stage_byoh_template $release_version
   log::info "Generating chart values.yaml"
 
-  sed -e "s|__CONTROLLER_IMAGE__|${byoh_image}|g"  $REPO/chart-generator/sample-values.yaml > $REPO/$WORKLOAD_CHART/values.yaml
+  sed -e "s|__CONTROLLER_IMAGE__|${byoh_image}|g"  $REPO/chart-generator/sample-values.yaml > $REPO/charts/values.yaml
 
   log::info "Publishing helm version"
   echo -n "${release_version}" > "${REPO}/helm-chart-version"
