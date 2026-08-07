@@ -41,7 +41,7 @@ jobs:
       - name: Generate helm chart
         run: make helm TAG=$(make tag)
       - name: Package helm chart
-        run: make helm-package
+        run: make helm-package TAG=$(make tag)
       - name: Upload helm chart artifact
         uses: actions/upload-artifact@v4
         with:
@@ -58,4 +58,4 @@ jobs:
 
       - name: Push helm chart
         if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/ci-') }}
-        run: make helm-push
+        run: make helm-push TAG=$(make tag)
