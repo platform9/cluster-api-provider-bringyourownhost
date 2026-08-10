@@ -1,0 +1,17 @@
+[Unit]
+Description=Platform9 Kubernetes Management Agent Service
+ConditionPathExists=/binary/byoh-hostagent-linux-amd64
+After=network.target
+StartLimitIntervalSec=5s
+StartLimitBurst=2
+
+[Service]
+Type=simple
+RestartSec=5s
+Restart=always
+EnvironmentFile=/etc/byohost-agent.service.d/byohost-agent.conf
+ExecStart=/bin/bash -c "/binary/byoh-hostagent-linux-amd64 --bootstrap-kubeconfig \"$BOOTSTRAP_KUBECONFIG\" --namespace \"$NAMESPACE\" --label \"$REGION\" >> /var/log/byoh/byoh-agent.log 2>&1"
+User=root
+Group=root
+[Install]
+WantedBy=multi-user.target

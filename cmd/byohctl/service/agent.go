@@ -246,7 +246,7 @@ var PurgeDebianPackage = func() error {
 		return fmt.Errorf("failed to purge package: %v\nOutput: %s", err, outputStr)
 	}
 
-	utils.LogSuccess("Successfully purged Debian package pf9-byohost-agent")
+	utils.LogSuccess("Successfully purged Debian package %s", ByohAgentServiceName)
 	return nil
 }
 

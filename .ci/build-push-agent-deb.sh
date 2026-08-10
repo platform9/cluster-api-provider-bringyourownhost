@@ -14,7 +14,7 @@ make build-host-agent-binary
 echo "started building deb package for byoh-agent"
 make build-host-agent-deb
 
-echo "created deb package under build/pf9-byohost/debsrc/ "
+echo "created deb package under build/byohost-agent/debsrc/ "
 
 echo "installing imgpkg"
 curl -LO https://github.com/carvel-dev/imgpkg/releases/download/v0.43.1/imgpkg-linux-amd64
@@ -22,5 +22,5 @@ mv imgpkg-linux-amd64 imgpkg
 chmod +x imgpkg
 
 echo "pushing deb bundle to quay.io/platform9/byoh-deb:$BYOH_DEB_VERSION"
-./imgpkg push -f build/pf9-byohost/debsrc/ -i quay.io/platform9/byoh-agent-deb:$BYOH_DEB_VERSION
+./imgpkg push -f build/byohost-agent/debsrc/ -i quay.io/platform9/byoh-agent-deb:$BYOH_DEB_VERSION
 

@@ -71,7 +71,7 @@ func PerformHostOperation(operationType HostOperationType, namespace string) err
 
 		// If its here, the operationType is deauthorise
 		// For deathorise byoHost object must be present in the management cluster
-		return fmt.Errorf("Cannot proceed ahead with the deauthorisation. Either restart the pf9-byohost-agent service or decommission and re-onboard.")
+		return fmt.Errorf("Cannot proceed ahead with the deauthorisation. Either restart the %s service or decommission and re-onboard.", service.ByohAgentServiceName)
 	}
 
 	utils.LogSuccess("Successfully retrieved ByoHosts object from the management plane")

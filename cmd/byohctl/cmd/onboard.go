@@ -197,7 +197,7 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	if err != nil {
 		utils.LogSuccess("Byoh service is not installed, proceeding with onboarding")
 	} else if strings.Contains(out, service.ByohAgentServiceName) {
-		utils.LogError("pf9-byohost-agent service is already installed on this host. Host already onboarded in some tenant.")
+		utils.LogError("%s service is already installed on this host. Host already onboarded in some tenant.", service.ByohAgentServiceName)
 		os.Exit(1)
 	}
 
@@ -281,7 +281,7 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	// Save region name in a temp file in byohDir
 	/*
 		Agent deb will read this file in a agent-after-install script, export the region label variable,
-		then it will be passed as a label flag to the pf9-byohost-agent binary.
+		then it will be passed as a label flag to the byohost-agent binary.
 		This file will be removed as a part of agent-before-remove script.
 	*/
 	regionFile := filepath.Join(byohDir, "region")
@@ -313,5 +313,5 @@ func runOnboard(cmd *cobra.Command, args []string) {
 
 	utils.LogSuccess("BYOH Agent Service logs are available at:")
 	utils.LogSuccess("   - Agent service logs: %s", service.ByohAgentLogPath)
-	utils.LogSuccess("   - Check service status: sudo systemctl status pf9-byohost-agent.service")
+	utils.LogSuccess("   - Check service status: sudo systemctl status %s.service", service.ByohAgentServiceName)
 }

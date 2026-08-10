@@ -15,11 +15,11 @@ const (
 	// ByohAgentDebPackageURL is the URL to download the agent package
 	ByohAgentDebPackageURL = "quay.io/platform9/byoh-agent-deb:0.1.461"
 	// ByohAgentDebPackageFilename is the filename of the agent package
-	ByohAgentDebPackageFilename = "pf9-byohost-agent.deb"
+	ByohAgentDebPackageFilename = "byohost-agent.deb"
 	// ByohAgentServiceName is the name of the agent service
-	ByohAgentServiceName = "pf9-byohost-agent"
+	ByohAgentServiceName = "byohost-agent"
 	// ByohAgentLogPath is the path to the BYOH agent log file
-	ByohAgentLogPath = "/var/log/pf9/byoh/byoh-agent.log"
+	ByohAgentLogPath = "/var/log/byoh/byoh-agent.log"
 	// ByohConfigDir is the directory for BYOH configuration
 	ByohConfigDir = ".byoh"
 

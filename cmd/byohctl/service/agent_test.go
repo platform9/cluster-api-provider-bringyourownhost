@@ -73,7 +73,7 @@ func setupMockExecEnvironment() func() {
 						outputDir = args[i+1]
 						// Create the directory and mock package file
 						os.MkdirAll(outputDir, 0755)
-						mockFile := filepath.Join(outputDir, "pf9-byohost-agent.deb")
+						mockFile := filepath.Join(outputDir, "byohost-agent.deb")
 						os.WriteFile(mockFile, []byte("mock package"), 0644)
 						break
 					}
@@ -169,7 +169,7 @@ func TestHelperProcess(t *testing.T) {
 					// Create a mock file in the output directory
 					if outputDir != "" {
 						os.MkdirAll(outputDir, 0755)
-						mockFile := filepath.Join(outputDir, "pf9-byohost-agent.deb")
+						mockFile := filepath.Join(outputDir, "byohost-agent.deb")
 						os.WriteFile(mockFile, []byte("mock package"), 0644)
 					}
 					break
@@ -555,7 +555,7 @@ func TestInstallDebianPackage(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create a mock package file
-	packageFile := filepath.Join(tempDir, "pf9-byohost-agent.deb")
+	packageFile := filepath.Join(tempDir, "byohost-agent.deb")
 	if err := os.WriteFile(packageFile, []byte("mock package"), 0644); err != nil {
 		t.Fatalf("Failed to create mock package file: %v", err)
 	}
@@ -593,7 +593,7 @@ func TestInstallDebianPackageErrors(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create a mock package file
-	packagePath := filepath.Join(tempDir, "pf9-byohost-agent.deb")
+	packagePath := filepath.Join(tempDir, "byohost-agent.deb")
 	if err := os.WriteFile(packagePath, []byte("mock package"), 0644); err != nil {
 		t.Fatalf("Failed to create mock package file: %v", err)
 	}

@@ -269,64 +269,65 @@ BUILD_DIR=$(shell pwd)/build
 $(BUILD_DIR):
 	mkdir -p $@
 
-PF9_BYOHOST_SRCDIR := $(BUILD_DIR)/pf9-byohost
-$(PF9_BYOHOST_SRCDIR):
-	echo "make PF9_BYOHOST_SRCDIR $(PF9_BYOHOST_SRCDIR)"
+BYOHOST_SRCDIR := $(BUILD_DIR)/byohost-agent
+$(BYOHOST_SRCDIR):
+	echo "make BYOHOST_SRCDIR $(BYOHOST_SRCDIR)"
 	rm -fr $@
 	mkdir -p $@
 
 AGENT_SRC_DIR := $(REPO_ROOT)
-RPM_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/rpmsrc
-DEB_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/debsrc
-COMMON_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/common
-PF9_BYOHOST_DEB_FILE := $(PF9_BYOHOST_SRCDIR)/debsrc/pf9-byohost-agent.deb
-RPMBUILD_DIR := $(PF9_BYOHOST_SRCDIR)/rpmsrc
-PF9_BYOHOST_RPM_FILE := $(PF9_BYOHOST_SRCDIR)/rpmsrc/pf9-byohost-agent.rpm
+RPM_SRC_ROOT := $(BYOHOST_SRCDIR)/rpmsrc
+DEB_SRC_ROOT := $(BYOHOST_SRCDIR)/debsrc
+COMMON_SRC_ROOT := $(BYOHOST_SRCDIR)/common
+BYOHOST_DEB_FILE := $(BYOHOST_SRCDIR)/debsrc/byohost-agent.deb
+RPMBUILD_DIR := $(BYOHOST_SRCDIR)/rpmsrc
+BYOHOST_RPM_FILE := $(BYOHOST_SRCDIR)/rpmsrc/pf9-byohost-agent.rpm
 
 $(RPM_SRC_ROOT): | $(COMMON_SRC_ROOT)
 	echo "make RPM_SRC_ROOT: $(RPM_SRC_ROOT)"
 	cp -a $(COMMON_SRC_ROOT) $(RPM_SRC_ROOT)
 
-$(PF9_BYOHOST_RPM_FILE): |$(RPM_SRC_ROOT)
-	echo "make PF9_BYOHOST_RPM_FILE $(PF9_BYOHOST_RPM_FILE) "
+$(BYOHOST_RPM_FILE): |$(RPM_SRC_ROOT)
+	echo "make BYOHOST_RPM_FILE $(BYOHOST_RPM_FILE) "
 	rpmbuild -bb \
 	    --define "_topdir $(RPMBUILD_DIR)"  \
 	    --define "_src_dir $(RPM_SRC_ROOT)"  \
-	    --define "_githash $(GITHASH)" $(AGENT_SRC_DIR)/scripts/pf9-byohost.spec 
-	./$(AGENT_SRC_DIR)/scripts/sign_packages.sh $(PF9_BYOHOST_RPM_FILE)
-	md5sum $(PF9_BYOHOST_RPM_FILE) | cut -d' ' -f 1  > $(PF9_BYOHOST_RPM_FILE).md5
+	    --define "_githash $(GITHASH)" $(AGENT_SRC_DIR)/scripts/pf9-byohost.spec
+	./$(AGENT_SRC_DIR)/scripts/sign_packages.sh $(BYOHOST_RPM_FILE)
+	md5sum $(BYOHOST_RPM_FILE) | cut -d' ' -f 1  > $(BYOHOST_RPM_FILE).md5
 
-build-host-agent-rpm:  $(PF9_BYOHOST_RPM_FILE)
-	echo "make agent-rpm pf9_byohost_rpm_file = $(PF9_BYOHOST_RPM_FILE)"
+build-host-agent-rpm:  $(BYOHOST_RPM_FILE)
+	echo "make agent-rpm byohost_rpm_file = $(BYOHOST_RPM_FILE)"
 
 #########################################################################
 $(COMMON_SRC_ROOT): build-host-agent-binary
 	echo "Building COMMON_SRC_ROOT"
 	mkdir -p $(COMMON_SRC_ROOT)
-	echo "BUILDING COMMON_SRC_ROOT/binary COPING binary pf9-byoh-hostagent-linux-amd64"
+	echo "BUILDING COMMON_SRC_ROOT/binary COPING binary byoh-hostagent-linux-amd64"
 	mkdir -p $(COMMON_SRC_ROOT)/binary
-	cp $(RELEASE_DIR)/byoh-hostagent-linux-amd64 $(COMMON_SRC_ROOT)/binary/pf9-byoh-hostagent-linux-amd64
-	echo "BUILDING dir for pf9-byohost-service , COPING service pf9-byoh-agent.service "
+	cp $(RELEASE_DIR)/byoh-hostagent-linux-amd64 $(COMMON_SRC_ROOT)/binary/byoh-hostagent-linux-amd64
+	echo "BUILDING dir for byohost-agent service, COPING service byohost-agent.service "
 	mkdir -p $(COMMON_SRC_ROOT)/lib/systemd/system/
-	cp $(AGENT_SRC_DIR)/service/pf9-byohostagent.service $(COMMON_SRC_ROOT)/lib/systemd/system/pf9-byohost-agent.service
+	cp $(AGENT_SRC_DIR)/service/byohost-agent.service $(COMMON_SRC_ROOT)/lib/systemd/system/byohost-agent.service
 
 $(DEB_SRC_ROOT): | $(COMMON_SRC_ROOT)
 	cp -a  $(COMMON_SRC_ROOT) $(DEB_SRC_ROOT)
 
-$(PF9_BYOHOST_DEB_FILE): $(DEB_SRC_ROOT)
-	fpm -t deb -s dir -n pf9-byohost-agent \
+$(BYOHOST_DEB_FILE): $(DEB_SRC_ROOT)
+	fpm -t deb -s dir -n byohost-agent \
 	 --description "Platform9 Bring Your Own Host deb package" \
 	 --license "Commercial" --architecture all --url "http://www.platform9.net" --vendor Platform9 \
 	 -d socat -d ethtool -d ebtables -d conntrack \
-	 --after-install $(AGENT_SRC_DIR)/scripts/pf9-byohost-agent-after-install.sh \
-	 --before-remove $(AGENT_SRC_DIR)/scripts/pf9-byohost-agent-before-remove.sh \
-	 --after-remove $(AGENT_SRC_DIR)/scripts/pf9-byohost-agent-after-remove.sh \
-	 -p $(PF9_BYOHOST_DEB_FILE) \
+	 --replaces pf9-byohost-agent --conflicts pf9-byohost-agent --provides pf9-byohost-agent \
+	 --after-install $(AGENT_SRC_DIR)/scripts/byohost-agent-after-install.sh \
+	 --before-remove $(AGENT_SRC_DIR)/scripts/byohost-agent-before-remove.sh \
+	 --after-remove $(AGENT_SRC_DIR)/scripts/byohost-agent-after-remove.sh \
+	 -p $(BYOHOST_DEB_FILE) \
 	 -C $(DEB_SRC_ROOT)/ .
-	$(AGENT_SRC_DIR)/sign_packages_deb.sh $(PF9_BYOHOST_DEB_FILE)
-	md5sum $(PF9_BYOHOST_DEB_FILE) | cut -d' ' -f 1 > $(PF9_BYOHOST_DEB_FILE).md5
+	$(AGENT_SRC_DIR)/sign_packages_deb.sh $(BYOHOST_DEB_FILE)
+	md5sum $(BYOHOST_DEB_FILE) | cut -d' ' -f 1 > $(BYOHOST_DEB_FILE).md5
 
-build-host-agent-deb: $(PF9_BYOHOST_DEB_FILE)
+build-host-agent-deb: $(BYOHOST_DEB_FILE)
 
 ########################################################################
 
