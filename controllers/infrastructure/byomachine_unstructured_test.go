@@ -1,16 +1,6 @@
 // Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// This file characterizes the apimachinery entry points that
-// byomachine_controller.go relies on to read the installer config's
-// installationSecret/uninstallationSecret out of an unstructured object:
-// unstructured.NestedFieldNoCopy and runtime.DefaultUnstructuredConverter.
-// These are plain `go test` functions rather than Ginkgo specs, so on an
-// apimachinery bump `go test -run <name>` pinpoints a break in the raw
-// conversion/lookup behavior separately from a break in the reconciler
-// business logic exercised by the Ginkgo suite in this package. TestMain
-// in suite_test.go still starts envtest for the whole package (Go builds
-// one test binary per directory), so this doesn't avoid that setup cost.
 package controllers_test
 
 import (
@@ -23,9 +13,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-// installerConfigWithSecret builds an unstructured object shaped like a
-// K8sInstallerConfig whose status carries an installationSecret ObjectReference,
-// mirroring what the real CRD status looks like on the wire.
 func installerConfigWithSecret(secret map[string]interface{}) *unstructured.Unstructured {
 	obj := &unstructured.Unstructured{
 		Object: map[string]interface{}{
