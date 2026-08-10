@@ -19,6 +19,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
+const testMapFuncClusterName = "cluster-a"
+
 func newMapFuncTestScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	scheme := runtime.NewScheme()
@@ -28,20 +30,19 @@ func newMapFuncTestScheme(t *testing.T) *runtime.Scheme {
 }
 
 func TestClusterToByoMachines(t *testing.T) {
-	const namespace = "default"
 	scheme := newMapFuncTestScheme(t)
 
 	matching := &infrastructurev1beta1.ByoMachine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "byomachine-in-cluster",
-			Namespace: namespace,
-			Labels:    map[string]string{clusterv1.ClusterNameLabel: "cluster-a"},
+			Namespace: defaultNamespace,
+			Labels:    map[string]string{clusterv1.ClusterNameLabel: testMapFuncClusterName},
 		},
 	}
 	other := &infrastructurev1beta1.ByoMachine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "byomachine-in-other-cluster",
-			Namespace: namespace,
+			Namespace: defaultNamespace,
 			Labels:    map[string]string{clusterv1.ClusterNameLabel: "cluster-b"},
 		},
 	}
@@ -51,15 +52,15 @@ func TestClusterToByoMachines(t *testing.T) {
 	mapFunc := r.ClusterToByoMachines(logr.Discard())
 
 	t.Run("returns requests only for ByoMachines labeled with the cluster", func(t *testing.T) {
-		cluster := &clusterv1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a", Namespace: namespace}}
+		cluster := &clusterv1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: testMapFuncClusterName, Namespace: defaultNamespace}}
 		requests := mapFunc(cluster)
 		require.Len(t, requests, 1)
 		assert.Equal(t, "byomachine-in-cluster", requests[0].Name)
-		assert.Equal(t, namespace, requests[0].Namespace)
+		assert.Equal(t, defaultNamespace, requests[0].Namespace)
 	})
 
 	t.Run("returns nothing for a cluster with no matching ByoMachines", func(t *testing.T) {
-		cluster := &clusterv1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster-with-no-machines", Namespace: namespace}}
+		cluster := &clusterv1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster-with-no-machines", Namespace: defaultNamespace}}
 		assert.Empty(t, mapFunc(cluster))
 	})
 
@@ -67,8 +68,8 @@ func TestClusterToByoMachines(t *testing.T) {
 		now := metav1.Now()
 		cluster := &clusterv1.Cluster{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:              "cluster-a",
-				Namespace:         namespace,
+				Name:              testMapFuncClusterName,
+				Namespace:         defaultNamespace,
 				DeletionTimestamp: &now,
 				Finalizers:        []string{"keep-for-test"},
 			},
@@ -91,14 +92,14 @@ func TestByoHostToByoMachineMapFunc(t *testing.T) {
 				MachineRef: &corev1.ObjectReference{
 					APIVersion: byoMachineGVK.GroupVersion().String(),
 					Kind:       byoMachineGVK.Kind,
-					Namespace:  "default",
+					Namespace:  defaultNamespace,
 					Name:       "referenced-byomachine",
 				},
 			},
 		}
 		requests := mapFunc(host)
 		require.Len(t, requests, 1)
-		assert.Equal(t, client.ObjectKey{Namespace: "default", Name: "referenced-byomachine"}, requests[0].NamespacedName)
+		assert.Equal(t, client.ObjectKey{Namespace: defaultNamespace, Name: "referenced-byomachine"}, requests[0].NamespacedName)
 	})
 
 	t.Run("returns nil when MachineRef is not set", func(t *testing.T) {
@@ -112,7 +113,7 @@ func TestByoHostToByoMachineMapFunc(t *testing.T) {
 				MachineRef: &corev1.ObjectReference{
 					APIVersion: clusterv1.GroupVersion.String(),
 					Kind:       "Machine",
-					Namespace:  "default",
+					Namespace:  defaultNamespace,
 					Name:       "some-machine",
 				},
 			},
