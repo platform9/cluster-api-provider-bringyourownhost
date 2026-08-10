@@ -13,6 +13,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation/field"
 )
 
+const wantAPIServerFormatDetail = "APIServer is not of the format https://hostname:port"
+
 func TestValidateAPIServer(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -21,9 +23,9 @@ func TestValidateAPIServer(t *testing.T) {
 	}{
 		{"empty", "", "APIServer field cannot be empty"},
 		{"invalid URL", "htt p://test.com", "APIServer URL is not valid"},
-		{"missing scheme", "abc.com", "APIServer is not of the format https://hostname:port"},
-		{"missing hostname", "https://test-server", "APIServer is not of the format https://hostname:port"},
-		{"missing port", "https://test.com", "APIServer is not of the format https://hostname:port"},
+		{"missing scheme", "abc.com", wantAPIServerFormatDetail},
+		{"missing hostname", "https://test-server", wantAPIServerFormatDetail},
+		{"missing port", "https://test.com", wantAPIServerFormatDetail},
 	}
 
 	for _, tt := range tests {

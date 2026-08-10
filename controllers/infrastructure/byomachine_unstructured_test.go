@@ -13,12 +13,22 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
+const (
+	testK8sInstallerConfigAPIVersion = "infrastructure.cluster.x-k8s.io/v1beta1"
+	testK8sInstallerConfigKind       = "K8sInstallerConfig"
+	testSecretKind                   = "Secret"
+	testSecretNameField              = "name"
+	testKindField                    = "kind"
+	testSecretName                   = "k8s-installation-secret"
+	testObjectReferenceAPIVersion    = "v1"
+)
+
 func installerConfigWithSecret(secret map[string]interface{}) *unstructured.Unstructured {
 	obj := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "infrastructure.cluster.x-k8s.io/v1beta1",
-			"kind":       "K8sInstallerConfig",
-			"status":     map[string]interface{}{},
+			"apiVersion":  testK8sInstallerConfigAPIVersion,
+			testKindField: testK8sInstallerConfigKind,
+			"status":      map[string]interface{}{},
 		},
 	}
 	if secret != nil {
@@ -31,9 +41,9 @@ func TestNestedFieldNoCopy_InstallationSecret(t *testing.T) {
 	g := gomega.NewWithT(t)
 
 	secret := map[string]interface{}{
-		"kind":      "Secret",
-		"namespace": "default",
-		"name":      "k8s-installation-secret",
+		testKindField:       testSecretKind,
+		"namespace":         defaultNamespace,
+		testSecretNameField: testSecretName,
 	}
 	obj := installerConfigWithSecret(secret)
 
@@ -73,19 +83,19 @@ func TestFromUnstructured_ObjectReferenceRoundTrip(t *testing.T) {
 	g := gomega.NewWithT(t)
 
 	secret := map[string]interface{}{
-		"kind":       "Secret",
-		"namespace":  "default",
-		"name":       "k8s-installation-secret",
-		"apiVersion": "v1",
+		testKindField:       testSecretKind,
+		"namespace":         defaultNamespace,
+		testSecretNameField: testSecretName,
+		"apiVersion":        testObjectReferenceAPIVersion,
 	}
 
 	secretRef := &corev1.ObjectReference{}
 	err := runtime.DefaultUnstructuredConverter.FromUnstructured(secret, secretRef)
 	g.Expect(err).NotTo(gomega.HaveOccurred())
-	g.Expect(secretRef.Kind).To(gomega.Equal("Secret"))
-	g.Expect(secretRef.Namespace).To(gomega.Equal("default"))
-	g.Expect(secretRef.Name).To(gomega.Equal("k8s-installation-secret"))
-	g.Expect(secretRef.APIVersion).To(gomega.Equal("v1"))
+	g.Expect(secretRef.Kind).To(gomega.Equal(testSecretKind))
+	g.Expect(secretRef.Namespace).To(gomega.Equal(defaultNamespace))
+	g.Expect(secretRef.Name).To(gomega.Equal(testSecretName))
+	g.Expect(secretRef.APIVersion).To(gomega.Equal(testObjectReferenceAPIVersion))
 }
 
 func TestFromUnstructured_WrongFieldType(t *testing.T) {
@@ -94,8 +104,8 @@ func TestFromUnstructured_WrongFieldType(t *testing.T) {
 	// "name" must be a string on ObjectReference; a numeric value should fail
 	// the conversion rather than silently coerce, exactly as the controller expects.
 	secret := map[string]interface{}{
-		"kind": "Secret",
-		"name": 12345,
+		testKindField:       testSecretKind,
+		testSecretNameField: 12345,
 	}
 
 	secretRef := &corev1.ObjectReference{}
@@ -118,12 +128,12 @@ func TestInstallerConfigGVK_TemplateSuffixStripped(t *testing.T) {
 
 	installerConfig := &unstructured.Unstructured{}
 	gvk := templateGVK
-	gvk.Kind = "K8sInstallerConfig"
+	gvk.Kind = testK8sInstallerConfigKind
 	installerConfig.SetGroupVersionKind(gvk)
 
 	g.Expect(installerConfig.GroupVersionKind()).To(gomega.Equal(schema.GroupVersionKind{
 		Group:   "infrastructure.cluster.x-k8s.io",
 		Version: "v1beta1",
-		Kind:    "K8sInstallerConfig",
+		Kind:    testK8sInstallerConfigKind,
 	}))
 }
