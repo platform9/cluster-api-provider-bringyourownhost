@@ -14,18 +14,61 @@ on:
     branches: [ main ]
 
 jobs:
+  go-version:
+    uses: ./.github/workflows/_go.yml
+
   golangci:
+    needs: go-version
     runs-on: ubuntu-22.04
     steps:
     - name: Checkout code
       uses: actions/checkout@v6
 
-    - name: Install Go 1.26.2
+    - name: Install Go
       uses: actions/setup-go@v6
       with:
-        go-version: 1.26.2
+        go-version: ${{ needs.go-version.outputs.version }}
 
     - name: golangci-lint
       uses: golangci/golangci-lint-action@v9
       with:
         version: v2.12.2
+
+  check-go-version-consistency:
+    name: Go version consistency
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Check Go versions match across config files
+        run: |
+          set -euo pipefail
+
+          GOMOD_VERSION=$(grep '^go ' go.mod | awk '{print $2}')
+          GO_YML_VERSION=$(grep 'GO_VERSION:' .github/workflows/_go.yml | awk '{print $2}' | tr -d '"~')
+          TOOL_VERSION=$(grep '^golang ' .tool-versions | awk '{print $2}')
+
+          echo "go.mod:          ${GOMOD_VERSION}"
+          echo "_go.yml:         ${GO_YML_VERSION}"
+          echo ".tool-versions:  ${TOOL_VERSION}"
+
+          FAILED=0
+
+          if [ "$TOOL_VERSION" != "$GOMOD_VERSION" ]; then
+            echo "Error: .tool-versions (${TOOL_VERSION}) does not match go.mod (${GOMOD_VERSION})."
+            FAILED=1
+          fi
+
+          if [ "$GO_YML_VERSION" != "$GOMOD_VERSION" ]; then
+            echo "Error: _go.yml (${GO_YML_VERSION}) does not match go.mod (${GOMOD_VERSION})."
+            FAILED=1
+          fi
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo ""
+            echo "Fix: update go.mod, .tool-versions and .github/workflows/_go.yml to the same Go version."
+            exit 1
+          fi
+
+          echo "go.mod, .tool-versions and .github/workflows/_go.yml have the same Go version: ${GOMOD_VERSION}"
