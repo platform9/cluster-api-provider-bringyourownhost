@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Build the manager binary
-FROM golang:1.26.2 AS builder
+ARG GO_VERSION=1.26.4
+FROM golang:${GO_VERSION} AS builder
 ARG TARGETARCH
 
 WORKDIR /workspace

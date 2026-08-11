@@ -27,8 +27,12 @@ permissions:
   actions: read
 
 jobs:
+  go-version:
+    uses: ./.github/workflows/_go.yml
+
   e2e:
     if: ${{ !github.event.pull_request.draft }}
+    needs: go-version
     runs-on: ubuntu-22.04
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -65,7 +69,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v7
       with:
-        go-version: 1.26.2
+        go-version: ${{ needs.go-version.outputs.version }}
         cache: true
 
     - name: turn off swap

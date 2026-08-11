@@ -7,20 +7,12 @@ on:
   pull_request:
 
 jobs:
-  setup:
-    name: Shared Setup
-    runs-on: ubuntu-latest
-    outputs:
-      go-version: '1.22'
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
-      - name: Export Go Version
-        run: echo "go-version=1.22" >> $GITHUB_OUTPUT
+  go-version:
+    uses: ./.github/workflows/_go.yml
 
   gosec_scan:
     name: Gosec Security Scan (Full)
-    needs: setup
+    needs: go-version
     runs-on: ubuntu-latest
     outputs:
       gosec_high_found: ${{ steps.scan.outputs.gosec_high_found }}
@@ -34,7 +26,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version: '${{ needs.setup.outputs.go-version }}'
+          go-version: '${{ needs.go-version.outputs.version }}'
 
       - name: Install gosec
         run: |
@@ -103,7 +95,7 @@ jobs:
 
   trivy_scan:
     name: Trivy Security Scan (Full)
-    needs: setup
+    needs: go-version
     runs-on: ubuntu-latest
     outputs:
       trivy_high_found: ${{ steps.scan.outputs.trivy_high_found }}

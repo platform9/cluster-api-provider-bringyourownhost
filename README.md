@@ -63,6 +63,27 @@ This project is currently a work-in-progress, in an Alpha state, so it may not b
 
 ## Getting involved and contributing
 
+### Go version management
+
+This project uses [asdf](https://asdf-vm.com) to pin the Go version. The required version is declared in `.tool-versions`.
+
+Install asdf by following the [official instructions](https://asdf-vm.com/guide/getting-started.html) for your platform. 
+
+Install the Go plugin and the pinned version:
+
+```bash
+asdf plugin add golang
+asdf install
+```
+
+`asdf install` reads `.tool-versions` and installs the exact version. After that, `go version` in this directory will report the pinned version.
+
+To verify, for example:
+
+```bash
+$ go version
+go version go1.26.4 darwin/arm64
+```
 ### Launching a Kubernetes cluster using BYOH source code
 
 Check out the [developer guide](./docs/local_dev.md) for launching a BYOH cluster consisting of Docker containers as hosts.

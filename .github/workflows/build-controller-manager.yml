@@ -25,8 +25,12 @@ permissions:
   contents: read
 
 jobs:
+  go-version:
+    uses: ./.github/workflows/_go.yml
+
   build-controller-manager:
     if: ${{ !github.event.pull_request.draft }}
+    needs: go-version
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout code
@@ -36,13 +40,11 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: 1.26.2
+          go-version: ${{ needs.go-version.outputs.version }}
           cache: true
       - name: Print tag
         run: make tag
       - name: Build controller manager image
-        env:
-          USE_SYSTEM_GO: "1"
         run: bash .ci/build-controller-manager.sh
       - name: Save controller manager image artifact
         run: |
