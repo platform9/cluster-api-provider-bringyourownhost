@@ -12,13 +12,8 @@ if [ -f /binary/pf9-byoh-hostagent-linux-amd64 ]; then
 	    exit 1
 	fi
 
-if [ -f /lib/systemd/system/pf9-byohost-agent.service ]; then
-	    if ! cp /lib/systemd/system/pf9-byohost-agent.service /etc/systemd/system/pf9-byohost-agent.service; then
-	        echo "Error: Failed to copy service file"
-	        exit 1
-	    fi
-	else
-	    echo "Error: Service file not found at /lib/systemd/system/pf9-byohost-agent.service"
+if [ ! -f /etc/systemd/system/pf9-byohost-agent.service ]; then
+	    echo "Error: Service file not found at /etc/systemd/system/pf9-byohost-agent.service"
 	    exit 1
 	fi
 

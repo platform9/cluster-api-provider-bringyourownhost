@@ -4,10 +4,12 @@
 # Runs repo tests that make real network/Docker calls inside a native Linux
 # environment, so they behave the same whether invoked from a Linux CI runner
 # or from a macOS workstation's Podman/Docker Desktop VM. See docs/local_dev.md.
-FROM golang:1.26.2
+
+ARG GO_VERSION=1.26.4
+FROM golang:${GO_VERSION}
 
 RUN apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends podman curl \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends podman curl rpm \
     && rm -rf /var/lib/apt/lists/* \
     && ln -s "$(command -v podman)" /usr/local/bin/docker
 

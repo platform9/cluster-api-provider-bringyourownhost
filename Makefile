@@ -49,6 +49,7 @@ USE_EXISTING_CLUSTER ?= false
 EXISTING_CLUSTER_BYOHOSTCONFIG_PATH ?=
 GINKGO_NOCOLOR ?= false
 GITHASH=$(shell git rev-parse --short HEAD 2>/dev/null || echo 'unknown')
+BUILDNUM ?= $(if $(GITHUB_RUN_NUMBER),$(GITHUB_RUN_NUMBER),0)
 TOOLS_DIR := $(REPO_ROOT)/hack/tools
 BIN_DIR := bin
 TOOLS_BIN_DIR := $(TOOLS_DIR)/$(BIN_DIR)
@@ -255,7 +256,7 @@ cluster-templates-e2e: kustomize
 	$(KUSTOMIZE) build $(BYOH_TEMPLATES)/v1beta1/templates/e2e --load-restrictor LoadRestrictionsNone > $(BYOH_TEMPLATES)/v1beta1/templates/e2e/cluster-template.yaml
 
 linux-vm-image: ## Build the Linux container image used by the *-linux-vm targets
-	docker build -f hack/docker/linux-test-runner.Dockerfile -t $(LINUX_VM_IMG) .
+	docker build --build-arg GO_VERSION=$(GO_VERSION) -f hack/docker/linux-test-runner.Dockerfile -t $(LINUX_VM_IMG) .
 
 # Run any other Makefile target inside the Linux VM container (macOS) by
 # appending -linux-vm, e.g. `make agent-test-linux-vm`, `make
@@ -276,6 +277,7 @@ linux-vm-image: ## Build the Linux container image used by the *-linux-vm target
 		-w /workspace \
 		$(LINUX_VM_IMG) \
 		make $*
+
 
 define WARNING
 #####################################################################################################
@@ -345,6 +347,12 @@ host-agent-binaries: ## Builds the binaries for the host-agent
 host-agent-binary: $(RELEASE_DIR)
 ifdef SKIP_BUILD
 	@echo "SKIP_BUILD set; skipping host-agent binary build"
+else ifdef LINUX_VM
+	# Already running inside the *-linux-vm wrapper container.
+	# Nested call would need a bind-mount source
+	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) \
+	go build -buildvcs=false -a -ldflags "$(GOLDFLAGS)" \
+	-o ./bin/$(notdir $(RELEASE_BINARY))-$(GOOS)-$(GOARCH) $(HOST_AGENT_DIR)
 else
 	docker run \
 		--rm \
@@ -407,8 +415,8 @@ RPM_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/rpmsrc
 DEB_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/debsrc
 COMMON_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/common
 PF9_BYOHOST_DEB_FILE := $(PF9_BYOHOST_SRCDIR)/debsrc/pf9-byohost-agent.deb
-RPMBUILD_DIR := $(PF9_BYOHOST_SRCDIR)/rpmsrc
-PF9_BYOHOST_RPM_FILE := $(PF9_BYOHOST_SRCDIR)/rpmsrc/pf9-byohost-agent.rpm
+RPMBUILD_DIR := $(PF9_BYOHOST_SRCDIR)/rpmbuild
+PF9_BYOHOST_RPM_FILE := $(RPMBUILD_DIR)/RPMS/$(shell uname -m)/pf9-byohost-1.0-$(BUILDNUM).git$(GITHASH).$(shell uname -m).rpm
 
 $(RPM_SRC_ROOT): | $(COMMON_SRC_ROOT)
 	echo "make RPM_SRC_ROOT: $(RPM_SRC_ROOT)"
@@ -419,8 +427,9 @@ $(PF9_BYOHOST_RPM_FILE): |$(RPM_SRC_ROOT)
 	rpmbuild -bb \
 	    --define "_topdir $(RPMBUILD_DIR)"  \
 	    --define "_src_dir $(RPM_SRC_ROOT)"  \
-	    --define "_githash $(GITHASH)" $(AGENT_SRC_DIR)/scripts/pf9-byohost.spec 
-	./$(AGENT_SRC_DIR)/scripts/sign_packages.sh $(PF9_BYOHOST_RPM_FILE)
+	    --define "_githash $(GITHASH)" \
+	    --define "_buildnum $(BUILDNUM)" $(AGENT_SRC_DIR)/scripts/pf9-byohost.spec
+	$(AGENT_SRC_DIR)/scripts/sign_packages.sh $(PF9_BYOHOST_RPM_FILE)
 	md5sum $(PF9_BYOHOST_RPM_FILE) | cut -d' ' -f 1  > $(PF9_BYOHOST_RPM_FILE).md5
 
 build-host-agent-rpm:  $(PF9_BYOHOST_RPM_FILE)
@@ -434,8 +443,8 @@ $(COMMON_SRC_ROOT): build-host-agent-binary
 	mkdir -p $(COMMON_SRC_ROOT)/binary
 	cp $(RELEASE_DIR)/byoh-hostagent-linux-amd64 $(COMMON_SRC_ROOT)/binary/pf9-byoh-hostagent-linux-amd64
 	echo "BUILDING dir for pf9-byohost-service , COPING service pf9-byoh-agent.service "
-	mkdir -p $(COMMON_SRC_ROOT)/lib/systemd/system/
-	cp $(AGENT_SRC_DIR)/service/pf9-byohostagent.service $(COMMON_SRC_ROOT)/lib/systemd/system/pf9-byohost-agent.service
+	mkdir -p $(COMMON_SRC_ROOT)/etc/systemd/system/
+	cp $(AGENT_SRC_DIR)/service/pf9-byohostagent.service $(COMMON_SRC_ROOT)/etc/systemd/system/pf9-byohost-agent.service
 
 $(DEB_SRC_ROOT): | $(COMMON_SRC_ROOT)
 	cp -a  $(COMMON_SRC_ROOT) $(DEB_SRC_ROOT)
