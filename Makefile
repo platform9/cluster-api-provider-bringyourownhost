@@ -216,20 +216,20 @@ cluster-templates-v1beta1: kustomize ## Generate cluster templates for v1beta1
 # Run tests
 test: $(GINKGO) generate fmt vet manifests test-coverage cmd-test ## Run unit tests
 
-test-coverage: prepare-byoh-docker-host-image ## Run test-coverage
+test-coverage: $(GINKGO) prepare-byoh-docker-host-image ## Run test-coverage
 	find . -name "*.test" -not -path "./cmd/*" -delete
 	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; CGO_ENABLED=0 $(GINKGO) --randomize-all -r --cover --coverprofile=cover.out --output-dir=. --skip-package=test,cmd .
 
 cmd-test: ## Run cmd/byohctl tests (separate Go module)
 	cd cmd && go test ./...
 
-agent-test: prepare-byoh-docker-host-image ## Run agent tests
+agent-test: $(GINKGO) prepare-byoh-docker-host-image ## Run agent tests
 	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; CGO_ENABLED=0 $(GINKGO) --randomize-all -r $(HOST_AGENT_DIR) --coverprofile cover.out
 
-controller-test: ## Run controller tests
+controller-test: $(GINKGO) ## Run controller tests
 	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; $(GINKGO) --randomize-all controllers/infrastructure --coverprofile cover.out --vv
 
-webhook-test: ## Run webhook tests
+webhook-test: $(GINKGO) ## Run webhook tests
 	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; $(GINKGO) apis/infrastructure/v1beta1 --coverprofile cover.out
 
 test-e2e: take-user-input docker-build prepare-byoh-docker-host-image $(GINKGO) cluster-templates-e2e ## Run the end-to-end tests
