@@ -1,8 +1,18 @@
 name: e2e-suite
 
 on:
-  pull_request:
+  push:
     branches: [ main ]
+    tags: [ 'ci-*' ]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - 'NOTICE'
+      - 'PROJECT'
+      - 'SECURITY_CONTACTS'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths-ignore:
       - '*.md'
       - 'docs/**'
@@ -12,22 +22,51 @@ on:
       - 'SECURITY_CONTACTS'
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
-  e2e-pr-blocking:
+  e2e:
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-22.04
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+
+    - name: Wait for controller manager image build
+      if: ${{ github.event_name != 'workflow_dispatch' }}
+      id: wait
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: bash .ci/wait-for-job.sh build-controller-manager.yml build-controller-manager "${{ github.event.pull_request.head.sha || github.sha }}"
+
+    - name: Download controller manager image artifact
+      if: ${{ github.event_name != 'workflow_dispatch' }}
+      uses: actions/download-artifact@v4
+      with:
+        name: controller-manager-image
+        path: .
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        run-id: ${{ steps.wait.outputs.run_id }}
+
+    - name: Load controller manager image
+      if: ${{ github.event_name != 'workflow_dispatch' }}
+      run: |
+        docker load -i controller-manager-image.tar
+        TAG=$(make tag)
+        IMAGE=quay.io/platform9/cluster-api-provider-bringyourownhost/controller-manager
+        docker tag "${IMAGE}:${TAG}" "${IMAGE}:dev"
 
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v7
       with:
-        go-version: 1.24.5
-
-    - name: Install ginkgo
-      run: go install github.com/onsi/ginkgo/v2/ginkgo@v2.9.2
+        go-version: 1.26.2
+        cache: true
 
     - name: turn off swap
       run: sudo swapoff -a
@@ -35,8 +74,7 @@ jobs:
     - name: Set netfilter conntrack max
       run: sudo sysctl -w net.netfilter.nf_conntrack_max=131072
 
-    - name: Run Cluster Class e2e tests
-      run: yes | GINKGO_FOCUS="\[Cluster-Class\]" make test-e2e
-
-    - name: Run PR-Blocking e2e tests
-      run: yes | GINKGO_FOCUS="\[PR-Blocking\]" make test-e2e
+    - name: Run e2e tests
+      env:
+        SKIP_BUILD: ${{ github.event_name != 'workflow_dispatch' && '1' || '' }}
+      run: yes | GINKGO_NODES=7 make test-e2e

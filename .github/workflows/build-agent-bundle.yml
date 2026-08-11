@@ -1,0 +1,84 @@
+name: Build Agent Bundle
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'ci-*' ]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - 'NOTICE'
+      - 'PROJECT'
+      - 'SECURITY_CONTACTS'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - 'NOTICE'
+      - 'PROJECT'
+      - 'SECURITY_CONTACTS'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build-host-agent-binary:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: build host agent binary
+        run: make host-agent-binaries
+      - name: Upload agent binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: byoh-hostagent-linux-amd64
+          path: bin/byoh-hostagent-linux-amd64
+          retention-days: 1
+
+  build-agent-bundle:
+    needs: build-host-agent-binary
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: Download agent binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: byoh-hostagent-linux-amd64
+          path: bin
+      - name: Install fpm build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ruby ruby-dev rubygems build-essential
+          sudo gem install --no-document fpm
+      - name: Build agent deb bundle
+        env:
+          SKIP_BUILD: "1"
+        run: bash .ci/build-agent-bundle.sh
+      - name: Upload agent bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-bundle-deb
+          path: build/pf9-byohost/debsrc/
+          retention-days: 1
+
+      - name: Log in to Quay
+        if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/ci-') }}
+        uses: docker/login-action@v3
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_TOKEN }}
+
+      - name: Push agent bundle
+        if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/ci-') }}
+        run: make push-agent-bundle TAG=$(make --no-print-directory tag)
