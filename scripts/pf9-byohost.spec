@@ -1,4 +1,6 @@
 Name:           pf9-byohost
+Version:        1.0
+Release:        %{_buildnum}.git%{_githash}
 Summary:        Platform9 Kubernetes ByohAgent
 License:        Commercial
 URL:            http://www.platform9.net
@@ -11,6 +13,8 @@ Requires:       conntrack
 AutoReqProv:    no
 
 %global __os_install_post %(echo '%{__os_install_post}' | sed -e 's!/usr/lib[^[:space:]]*/brp-python-bytecompile[[:space:]].*$!!g')
+# Don't distribute debug symbols.
+%global _build_id_links none
 
 %description
 Platform9 Kubernetes ByohAgent
@@ -27,11 +31,6 @@ mkdir -p $RPM_BUILD_ROOT
 cp -r $SRC_DIR/* $RPM_BUILD_ROOT
 mkdir -p $RPM_BUILD_ROOT/var/log/pf9/byoh
 chmod +x $RPM_BUILD_ROOT/binary/pf9-byoh-hostagent-linux-amd64
-cp $RPM_BUILD_ROOT/lib/systemd/system/pf9-byohost-agent.service $RPM_BUILD_ROOT/etc/systemd/system/pf9-byohost-agent.service
-
-
-
-
 %clean
 rm -rf $RPM_BUILD_ROOT
 
@@ -39,8 +38,7 @@ rm -rf $RPM_BUILD_ROOT
 %defattr(-,root,root,-)
 %attr(0644, root, root) /binary/pf9-byoh-hostagent-linux-amd64
 /binary/pf9-byoh-hostagent-linux-amd64
-/lib/systemd/system/pf9-byohost-agent.service
-/namespace
+/etc/systemd/system/pf9-byohost-agent.service
 
 %pre
 # Set a flag indicating whether the package check should be performed
@@ -68,7 +66,6 @@ mkdir -p /var/log/pf9/byoh
 touch  /var/log/pf9/byoh/byoh-agent.log
 touch /var/log/pf9/byoh/byoh-agent-uninstall.log
 chmod +x /binary/pf9-byoh-hostagent-linux-amd64
-cp /lib/systemd/system/pf9-byohost-agent.service  /etc/systemd/system/pf9-byohost-agent.service
 
 if [ -z "$BOOTSTRAP_KUBECONFIG" ]; then
     echo "Error: BOOTSTRAP_KUBECONFIG environment variable is not set."
@@ -114,23 +111,8 @@ systemctl disable pf9-byohost-agent.service >> "$LOG_FILE" 2>&1 || echo "Service
 systemctl daemon-reload >> "$LOG_FILE" 2>&1
 echo "Systemd daemon reloaded" | tee -a "$LOG_FILE"
 
-# Remove binary
-if [ -f /binary/pf9-byoh-hostagent-linux-amd64 ]; then
-    echo "Removing binary..." | tee -a "$LOG_FILE"
-    rm -f /binary/pf9-byoh-hostagent-linux-amd64
-    echo "Binary removed successfully" | tee -a "$LOG_FILE"
-else
-    echo "Binary already removed or not found" | tee -a "$LOG_FILE"
-fi
-
-# Remove service file
-if [ -f /etc/systemd/system/pf9-byohost-agent.service ]; then
-    echo "Removing service file..." | tee -a "$LOG_FILE"
-    rm -f /etc/systemd/system/pf9-byohost-agent.service
-    echo "Service file removed successfully" | tee -a "$LOG_FILE"
-else
-    echo "Service file already removed or not found" | tee -a "$LOG_FILE"
-fi
+# Binary and service file are RPM-owned (%files) - rpm removes them itself
+# once %preun exits, no manual rm needed here.
 
 # Remove log files
 if [ -f /var/log/pf9/byoh/byoh-agent.log ]; then
