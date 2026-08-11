@@ -12,6 +12,10 @@ RELEASE_DIR := _dist
 IMG ?= ${STAGING_REGISTRY}/${IMAGE_NAME}:${TAG}
 BYOH_BASE_IMG = byoh/node:e2e
 BYOH_BASE_IMG_DEV = byoh/node:dev
+LINUX_VM_IMG = byoh/linux-test-runner:dev
+# Path to the podman machine's own socket, from inside the VM (not the macOS-side
+# forwarding socket at /var/run/docker.sock). See the *-linux-vm targets below.
+LINUX_VM_PODMAN_SOCK ?= /run/podman/podman.sock
 # Produce CRDs that work back to Kubernetes 1.11 (no version conversion)
 
 # GIT_VERSION is the single, predictable version string for every agent-side
@@ -239,6 +243,28 @@ cluster-templates: kustomize cluster-templates-v1beta1
 
 cluster-templates-e2e: kustomize
 	$(KUSTOMIZE) build $(BYOH_TEMPLATES)/v1beta1/templates/e2e --load-restrictor LoadRestrictionsNone > $(BYOH_TEMPLATES)/v1beta1/templates/e2e/cluster-template.yaml
+
+linux-vm-image: ## Build the Linux container image used by the *-linux-vm targets
+	docker build -f hack/docker/linux-test-runner.Dockerfile -t $(LINUX_VM_IMG) .
+
+agent-test-linux-vm: linux-vm-image ## Run agent-test inside a Linux container (macOS)
+	docker run --rm --network host --security-opt label=disable \
+		-v "$(REPO_ROOT)":/workspace \
+		-v $(LINUX_VM_PODMAN_SOCK):/var/run/docker.sock \
+		-e CONTAINER_HOST=unix:///var/run/docker.sock \
+		-w /workspace \
+		$(LINUX_VM_IMG) \
+		make agent-test
+
+test-e2e-linux-vm: linux-vm-image ## Run test-e2e inside a Linux container (macOS)
+	docker run --rm --network host --security-opt label=disable \
+		-v "$(REPO_ROOT)":/workspace \
+		-v $(LINUX_VM_PODMAN_SOCK):/var/run/docker.sock \
+		-e CONTAINER_HOST=unix:///var/run/docker.sock \
+		-e GINKGO_FOCUS -e GINKGO_SKIP -e GINKGO_NODES -e SKIP_RESOURCE_CLEANUP -e USE_EXISTING_CLUSTER \
+		-w /workspace \
+		$(LINUX_VM_IMG) \
+		bash -c "yes | make test-e2e"
 
 define WARNING
 #####################################################################################################
