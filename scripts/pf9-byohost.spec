@@ -72,7 +72,7 @@ if [ -z "$BOOTSTRAP_KUBECONFIG" ]; then
     exit 1
 fi
 
-if [ ! -f '$BOOTSTRAP_KUBECONFIG' ]; then
+if [ ! -f "$BOOTSTRAP_KUBECONFIG" ]; then
      echo "Error: File specified in '$BOOTSTRAP_KUBECONFIG' does not exist: $BOOTSTRAP_KUBECONFIG"
     exit 1
 fi

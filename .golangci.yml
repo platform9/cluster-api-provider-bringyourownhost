@@ -52,6 +52,12 @@ linters:
         - octalLiteral
         - whyNoLint
         - wrapperFunc
+        # This repo only ever targets Linux (host agent runs on Linux hosts,
+        # controller manager runs in Linux containers) - filepathJoin's
+        # Windows-separator-portability concern doesn't apply, and forcing
+        # every path literal into single-segment filepath.Join args makes
+        # them harder to read for a benefit this project can't use.
+        - filepathJoin
       enabled-tags:
         - diagnostic
         - experimental
@@ -106,6 +112,7 @@ linters:
       - linters:
           - dupl
           - gosec
+          - goconst # don't make me obfuscate three word constants like "rpm"
         path: _test\.go
       # New files added since the fork from vmware-tanzu don't carry (and
       # shouldn't fabricate) a VMware copyright header.
