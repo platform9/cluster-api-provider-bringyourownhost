@@ -146,11 +146,18 @@ var _ = Describe("When BYO Host rejoins the capacity pool [Reuse]", func() {
 		}, e2eConfig.GetIntervals(specName, "wait-delete-cluster")...)
 
 		// Assert if cluster label is removed
-		// This verifies that the byohost has rejoined the capacity pool
-		byoHostToBeReused = &infrastructurev1beta1.ByoHost{}
-		Expect(bootstrapClusterProxy.GetClient().Get(ctx, byoHostLookupKey, byoHostToBeReused)).Should(Succeed())
-		_, ok = byoHostToBeReused.Labels[clusterv1.ClusterNameLabel]
-		Expect(ok).To(BeFalse())
+		// This verifies that the byohost has rejoined the capacity pool. The label is cleared
+		// asynchronously by the host agent's own reconcile loop (kubeadm reset plus an optional
+		// uninstall script) after the management-cluster side has already let the Cluster finish
+		// deleting, so this must poll rather than check once.
+		Eventually(func() bool {
+			polledByoHost := &infrastructurev1beta1.ByoHost{}
+			if err := bootstrapClusterProxy.GetClient().Get(ctx, byoHostLookupKey, polledByoHost); err != nil {
+				return true
+			}
+			_, labelPresent := polledByoHost.Labels[clusterv1.ClusterNameLabel]
+			return labelPresent
+		}, e2eConfig.GetIntervals("", "wait-controllers")...).Should(BeFalse())
 
 		By("Creating a new cluster")
 		clusterName = fmt.Sprintf("%s-%s", specName, util.RandomString(6))
