@@ -140,6 +140,63 @@ push-agent-bundle: ## Push the built agent .deb bundle to the registry via imgpk
 	chmod +x /tmp/imgpkg
 	/tmp/imgpkg push -f build/pf9-byohost/debsrc/ -i $(BYOH_AGENT_BUNDLE_IMAGE):$(TAG)
 
+##@ Helm chart
+
+# HELM_VERSION's release tarball is pinned by SHA256 (checked against the
+# published helm-<version>-<os>-<arch>.tar.gz.sha256sum on get.helm.sh), the
+# same reasoning as IMGPKG_SHA256 in cmd/byohctl/Makefile: a compromised
+# upstream release can't swap the binary this Makefile executes without a
+# second, reviewable commit to this repo.
+HELM_VERSION ?= v3.21.3
+HELM_OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
+HELM_ARCH_RAW := $(shell uname -m)
+ifeq ($(HELM_ARCH_RAW),x86_64)
+HELM_ARCH := amd64
+else ifeq ($(HELM_ARCH_RAW),aarch64)
+HELM_ARCH := arm64
+else
+HELM_ARCH := $(HELM_ARCH_RAW)
+endif
+# Only the platforms this repo's contributors and CI actually run on are
+# pinned here (macOS/arm64 dev machines, ubuntu-22.04 linux/amd64 CI).
+# Before using another platform: download its helm-<version>-<os>-<arch>.tar.gz,
+# compute its SHA256, cross-check against get.helm.sh's published
+# .sha256sum file, then add a HELM_SHA256_<os>_<arch> entry here.
+HELM_SHA256_darwin_arm64 := 19879a848cad832b7a1ac24b767a481d20fb3b95ab53a220849649422ada144e
+HELM_SHA256_linux_amd64 := 15e041a93a590dce8100f39385cd98c84a765c9e36aeeb9e2dc6ff9e4769e2e0
+HELM_SHA256 := $(HELM_SHA256_$(HELM_OS)_$(HELM_ARCH))
+
+HELM = $(shell pwd)/bin/helm
+BYOH_HELM_CHART_IMAGE ?= quay.io/platform9/cluster-api-provider-bringyourownhost
+
+helm-binary: ## Download the pinned helm CLI locally if necessary.
+	@if [ -z "$(HELM_SHA256)" ]; then \
+		echo "error: no pinned helm SHA256 for platform $(HELM_OS)/$(HELM_ARCH); add a verified HELM_SHA256_$(HELM_OS)_$(HELM_ARCH) entry to the Makefile" >&2; \
+		exit 1; \
+	fi
+	@[ -f $(HELM) ] || { \
+	set -e ;\
+	curl -fsSL -o /tmp/helm-download.tar.gz "https://get.helm.sh/helm-$(HELM_VERSION)-$(HELM_OS)-$(HELM_ARCH).tar.gz" ;\
+	echo "$(HELM_SHA256)  /tmp/helm-download.tar.gz" | sha256sum -c - ;\
+	rm -rf /tmp/helm-extract ;\
+	mkdir -p /tmp/helm-extract $(shell pwd)/bin ;\
+	tar -xzf /tmp/helm-download.tar.gz -C /tmp/helm-extract ;\
+	install -m 0755 /tmp/helm-extract/$(HELM_OS)-$(HELM_ARCH)/helm $(HELM) ;\
+	rm -rf /tmp/helm-download.tar.gz /tmp/helm-extract ;\
+	}
+
+helm: kustomize yq helm-binary ## Generate the byoh helm chart under charts/ (chart-generator/chart-generator.sh).
+	PATH="$(shell pwd)/bin:$$PATH" VERSION=$(GIT_VERSION) chart-generator/chart-generator.sh -e $(IMG)
+
+helm-package: helm ## Package the generated chart into a .tgz.
+	PATH="$(shell pwd)/bin:$$PATH" helm package ./charts
+
+helm-login: helm-binary ## Log in to the Quay OCI registry for helm push (reads QUAY_USERNAME/QUAY_TOKEN from the environment).
+	echo "$$QUAY_TOKEN" | PATH="$(shell pwd)/bin:$$PATH" helm registry login --username "$$QUAY_USERNAME" --password-stdin quay.io
+
+helm-push: helm-package ## Push the packaged helm chart to Quay via OCI.
+	PATH="$(shell pwd)/bin:$$PATH" helm push byoh-chart-$(GIT_VERSION).tgz oci://$(BYOH_HELM_CHART_IMAGE)
+
 prepare-byoh-docker-host-image:
 	docker build test/e2e -f test/e2e/BYOHDockerFile -t ${BYOH_BASE_IMG}
 
