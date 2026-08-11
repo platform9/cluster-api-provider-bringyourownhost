@@ -1,4 +1,5 @@
 // Copyright 2022 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package installer_test
@@ -35,7 +36,7 @@ var _ = Describe("Byohost Installer Tests", func() {
 
 	Context("When installer object is created for invalid arch", func() {
 		It("should fail create the object", func() {
-			arch = "arm64"
+			arch = "riscv64"
 			_, err := installer.NewInstaller(context.TODO(), os, arch, k8sversion, downloader, false)
 			Expect(err).To(MatchError(installer.ErrOsK8sNotSupported))
 		})
