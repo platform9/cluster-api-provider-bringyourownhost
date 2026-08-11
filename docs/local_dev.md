@@ -7,6 +7,76 @@ This doc provides instructions about how to test Bring Your Own Host Provider on
 - [BYOH](https://github.com/vmware-tanzu/cluster-api-provider-bringyourownhost) provider to add the above hosts to the aforemention workload cluster
 - [Tilt](https://docs.tilt.dev/install.html) for faster iterative development
 
+## Running `agent-test` / `test-e2e` on macOS
+
+`make agent-test` and `make test-e2e` make real network/Docker calls, including spawning
+containers with `--network host`. On Linux (CI's runner, or a Linux dev machine) that
+genuinely shares the machine's own network namespace, so it just works. On macOS, container
+runtimes (Podman machine, Docker Desktop) run everything inside a Linux VM — `--network host`
+there only shares the *VM's* namespace, not the real Mac, so anything the test process itself
+binds to its own loopback (envtest's API server, the management kind cluster's exposed port)
+becomes unreachable from the containers the test spawns. This isn't a bug in this repo's
+tests; it's inherent to how virtualization-backed container runtimes work on macOS.
+
+Use `make agent-test-linux-vm` / `make test-e2e-linux-vm` instead: they run the whole test
+process inside a Linux container sharing the podman machine's own socket, so the test process
+and the containers it spawns all land in one flat Linux network namespace — the same
+arrangement as real CI — with no macOS-specific workarounds needed in the test code itself.
+
+### One-time host setup (Podman machine)
+
+These targets assume [Podman Desktop](https://podman-desktop.io/)'s machine as the container
+runtime, with a working `docker` CLI on `PATH` backed by it:
+
+```bash
+# A plain `docker` name is required: CAPI's kind-bootstrap library shells out to
+# "docker -v" / "podman -v" to decide which one to use, and falls back to Docker's
+# (incompatible) network flags if it can't find *either* by name on PATH.
+ln -s "$(command -v podman)" /opt/homebrew/bin/docker
+ln -s "$(command -v podman)" /opt/homebrew/bin/podman  # if `podman` itself isn't already on PATH
+```
+
+Give the machine enough resources to run a management cluster plus several BYO host
+containers concurrently — 4+ CPUs and 8GB+ RAM has worked reliably:
+
+```bash
+podman machine stop
+podman machine set --memory 8192
+podman machine start
+```
+
+### Running
+
+```bash
+make agent-test-linux-vm
+GINKGO_FOCUS='\[PR-Blocking\]' make test-e2e-linux-vm
+SKIP_RESOURCE_CLEANUP=true GINKGO_FOCUS='\[PR-Blocking\]' make test-e2e-linux-vm
+```
+
+`GINKGO_FOCUS`, `GINKGO_SKIP`, `GINKGO_NODES`, `SKIP_RESOURCE_CLEANUP`, and
+`USE_EXISTING_CLUSTER` all pass through to the containerized `make test-e2e` unchanged. The
+"these tests modify system settings" confirmation prompt is answered automatically — the
+changes it warns about land inside the disposable container, not on your Mac.
+
+### Known gotchas
+
+- **Stale cross-arch tool binaries.** `hack/tools/bin/ginkgo` and `bin/kustomize` are built
+  once and reused by their Makefile targets — they don't get rebuilt just because you switched
+  between running natively and running via a `*-linux-vm` target. If you see `cannot execute
+  binary file` or `exec format error`, delete the stale binary (`rm hack/tools/bin/ginkgo` /
+  `rm bin/kustomize`) and re-run; the next `make` invocation rebuilds it for whichever
+  environment is running.
+- **Killing a `*-linux-vm` run doesn't stop its container.** Interrupting the `make` command
+  only kills the local `docker run` client; the container keeps running server-side. Check
+  `docker ps` and `docker rm -f <name>` explicitly, or a later run can end up contending with
+  a leftover one for the same ports/resources.
+- **arm64 BYO hosts need a real arm64 bundle published.** `test-e2e-linux-vm` runs BYO host
+  containers natively for your Mac's architecture (arm64 on Apple Silicon). The installer
+  registry has arm64 entries (see `installer/registry.go`), but actually installing Kubernetes
+  on the host still needs an arm64 bundle image at wherever `K8sInstallerConfig.spec.bundleRepo`
+  points — if none has been published there, host provisioning will stall waiting for the
+  bundle regardless of anything these targets do.
+
 ## Pre-requisites
 
 It is required to have a docker image to be used when doing docker run for creating hosts
@@ -39,7 +109,7 @@ kind create cluster --config kind-cluster.yaml
 Installing cluster API into the Kubernetes cluster will turn it into a Cluster API management cluster.
 
 We are going using [tilt](https://tilt.dev/) in order to do so, so you can have your local environment set up for rapid iterations, as described in
-[Developing Cluster API with Tilt](https://cluster-api.sigs.k8s.io/developer/tilt.html).
+[Developing Cluster API with Tilt](https://cluster-api.sigs.k8s.io/developer/core/tilt.html).
 
 In order to do so you need to clone both https://github.com/kubernetes-sigs/cluster-api/ and https://github.com/vmware-tanzu/cluster-api-provider-bringyourownhost locally;
 
