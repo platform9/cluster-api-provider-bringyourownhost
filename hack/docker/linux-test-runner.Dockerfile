@@ -9,9 +9,11 @@ ARG GO_VERSION=1.26.4
 FROM golang:${GO_VERSION}
 
 RUN apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends podman curl rpm \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        podman curl rpm ruby ruby-dev rubygems build-essential \
     && rm -rf /var/lib/apt/lists/* \
-    && ln -s "$(command -v podman)" /usr/local/bin/docker
+    && ln -s "$(command -v podman)" /usr/local/bin/docker \
+    && gem install --no-document fpm
 
 # The e2e suite shells out to kubectl directly (e.g. applying cluster templates,
 # dumping cluster state for debugging) rather than going through client-go.

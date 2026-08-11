@@ -19,6 +19,7 @@ IMG ?= ${STAGING_REGISTRY}/${IMAGE_NAME}:${TAG}
 BYOH_BASE_IMG = byoh/node:e2e
 BYOH_BASE_IMG_DEV = byoh/node:dev
 LINUX_VM_IMG = byoh/linux-test-runner:dev
+PACKAGING_TEST_RPM_IMG = byoh/packaging-test-rocky:dev
 # Path to the podman machine's own socket, from inside the VM (not the macOS-side
 # forwarding socket at /var/run/docker.sock). See the *-linux-vm targets below.
 LINUX_VM_PODMAN_SOCK ?= /run/podman/podman.sock
@@ -214,6 +215,12 @@ helm-push: helm-package ## Push the packaged helm chart to Quay via OCI.
 
 prepare-byoh-docker-host-image:
 	docker build test/e2e -f test/e2e/BYOHDockerFile -t ${BYOH_BASE_IMG}
+
+build-packaging-test-image: ## Build the Rocky Linux image used by test-packaging
+	docker build test/e2e/packaging -f test/e2e/packaging/RockyDockerFile -t $(PACKAGING_TEST_RPM_IMG)
+
+test-packaging: build-packaging-test-image ## Run the pf9-byohost RPM install/uninstall test
+	go test ./test/e2e/packaging/... -v -timeout 5m
 
 prepare-byoh-docker-host-image-dev:
 	docker build test/e2e -f docs/BYOHDockerFileDev -t ${BYOH_BASE_IMG_DEV}
