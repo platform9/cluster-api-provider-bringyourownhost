@@ -8,9 +8,6 @@
 # - IMAGE_TAG       Tag to use for the image. By default the output of `make tag` (git describe) is used.
 # - CONTAINER_TAG   Location of the container_tag file (used as an artifact in TeamCity)
 #
-# Examples:
-# - `USE_SYSTEM_GO=1 IMAGE_REGISTRY=quay.io IMAGE_NAME=platform9/cluster-api-provider-bringyourownhost/controller-manager IMAGE_TAG=latest ./build-controller-manager.sh`: To test the script locally without gimme
-
 set -o nounset
 set -o errexit
 set -o pipefail
@@ -19,7 +16,6 @@ project_root=$(realpath "$(dirname "$0")/..")
 build_dir=${project_root}/build
 CONTAINER_TAG=${CONTAINER_TAG:-${build_dir}/manager-container-tag}
 CONTAINER_FULL_TAG=${CONTAINER_FULL_TAG:-${build_dir}/manager-container-full-tag}
-GO_VERSION=${GO_VERSION:-1.22.5}
 
 IMAGE_REGISTRY=${IMAGE_REGISTRY:-"quay.io/platform9/cluster-api-provider-bringyourownhost"}
 IMAGE_NAME=${IMAGE_NAME:-"controller-manager"}
@@ -51,7 +47,7 @@ main() {
   info "Verifying prerequisites"
   #which aws > /dev/null || (echo "error: missing required command 'aws'" && exit 1)
   which docker >/dev/null || (echo "error: missing required command 'docker'" && exit 1)
-  # note: go and/or gimme are checked in configure_go
+  # note: go is checked in configure_go
 
   info "Preparing build environment"
   mkdir -p "${build_dir}"
@@ -87,13 +83,6 @@ on_exit() {
 }
 
 configure_go() {
-  if [ -n "${USE_SYSTEM_GO:-}" ]; then
-    echo "\$USE_SYSTEM_GO set, using system go instead of gimme"
-    return 0
-  else
-    which gimme >/dev/null || (echo "error: missing required command 'gimme'" && exit 1)
-    eval "$(GIMME_GO_VERSION=${GO_VERSION} gimme)"
-  fi
   which go
   go version
 }

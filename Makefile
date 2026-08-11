@@ -1,6 +1,10 @@
 #Ensure Make is run with bash shell as some syntax below is bash-specific
 SHELL:=/usr/bin/env bash
 
+# GO_VERSION is derived from .tool-versions (the asdf-managed source of
+# truth) so there is exactly one place in this Makefile that declares it.
+GO_VERSION := $(shell awk '/^golang /{print $$2}' .tool-versions)
+
 # Define registries
 STAGING_REGISTRY ?= quay.io/platform9/cluster-api-provider-bringyourownhost
 
@@ -130,7 +134,7 @@ docker-build: ## Build docker image with the manager.
 ifdef SKIP_BUILD
 	@echo "SKIP_BUILD set; skipping docker build for ${IMG}"
 else
-	docker build -t ${IMG} .
+	docker build --build-arg GO_VERSION=$(GO_VERSION) -t ${IMG} .
 endif
 
 docker-push: ## Push docker image with the manager.
@@ -342,7 +346,7 @@ else
 		-e GOARCH=$(GOARCH) \
 		-v "$$(pwd):/workspace$(DOCKER_VOL_OPTS)" \
 		-w /workspace \
-		golang:1.26.2 \
+		golang:$(GO_VERSION) \
 		go build -buildvcs=false -a -ldflags "$(GOLDFLAGS)" \
 		-o ./bin/$(notdir $(RELEASE_BINARY))-$(GOOS)-$(GOARCH) $(HOST_AGENT_DIR)
 endif
