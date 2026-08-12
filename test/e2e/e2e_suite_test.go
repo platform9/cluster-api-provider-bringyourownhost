@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
@@ -83,6 +84,11 @@ var (
 	clusterConName string
 
 	pathToHostAgentBinary string
+
+	// pathToByohctlBinary is built once here, alongside pathToHostAgentBinary, and shared across
+	// ParallelNodes -- byohctl is its own Go module (see CLAUDE.md), so it can't be built with
+	// gexec.BuildWithEnvironment from this (root-module) process the way the agent binary is.
+	pathToByohctlBinary string
 )
 
 func init() {
@@ -109,6 +115,7 @@ type sharedSuiteData struct {
 	kubeconfigPath        string
 	clusterConName        string
 	pathToHostAgentBinary string
+	pathToByohctlBinary   string
 }
 
 func formatSharedSuiteData(d *sharedSuiteData) []byte {
@@ -119,13 +126,14 @@ func formatSharedSuiteData(d *sharedSuiteData) []byte {
 		d.kubeconfigPath,
 		d.clusterConName,
 		d.pathToHostAgentBinary,
+		d.pathToByohctlBinary,
 	}, ","))
 }
 
 func parseSharedSuiteData(data []byte) (sharedSuiteData, error) {
 	parts := strings.Split(string(data), ",")
-	if len(parts) != 6 {
-		return sharedSuiteData{}, fmt.Errorf("expected 6 comma-separated fields in shared suite data, got %d", len(parts))
+	if len(parts) != 7 {
+		return sharedSuiteData{}, fmt.Errorf("expected 7 comma-separated fields in shared suite data, got %d", len(parts))
 	}
 
 	return sharedSuiteData{
@@ -135,7 +143,32 @@ func parseSharedSuiteData(data []byte) (sharedSuiteData, error) {
 		kubeconfigPath:        parts[3],
 		clusterConName:        parts[4],
 		pathToHostAgentBinary: parts[5],
+		pathToByohctlBinary:   parts[6],
 	}, nil
+}
+
+// buildByohctlBinary builds byohctl for the docker host containers' architecture (which follows
+// the host running this suite -- Docker Desktop on Apple Silicon runs arm64 containers -- not a
+// fixed default), via cmd/byohctl's own Makefile rather than a hand-rolled `go build`. byohctl is
+// its own Go module (see CLAUDE.md), so it can't be built with gexec.BuildWithEnvironment the way
+// the agent binary above is.
+func buildByohctlBinary() (string, error) {
+	// No caller passes a context through this build-setup helper; scope one locally, matching
+	// e2e_debug_helper.go's ExecuteShellScript.
+	ctx := context.Background()
+
+	repoRootBytes, err := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel").Output() // #nosec G204 -- fixed args, no user input
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve repo root: %w", err)
+	}
+	byohctlDir := filepath.Join(strings.TrimSpace(string(repoRootBytes)), "cmd", "byohctl")
+
+	cmd := exec.CommandContext(ctx, "make", "build", "GOARCH="+goruntime.GOARCH) // #nosec G204 -- fixed args, no user input
+	cmd.Dir = byohctlDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("failed to build byohctl: %w\n%s", err, output)
+	}
+	return filepath.Join(byohctlDir, "bin", "byohctl"), nil
 }
 
 // Using a SynchronizedBeforeSuite for controlling how to create resources shared across ParallelNodes (~ginkgo threads).
@@ -173,6 +206,10 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	)
 	Expect(err).NotTo(HaveOccurred())
 
+	By("building byohctl binary")
+	pathToByohctlBinary, err = buildByohctlBinary()
+	Expect(err).NotTo(HaveOccurred())
+
 	clusterConName = e2eConfig.ManagementClusterName
 	return formatSharedSuiteData(&sharedSuiteData{
 		artifactFolder:        artifactFolder,
@@ -181,6 +218,7 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 		kubeconfigPath:        bootstrapClusterProxy.GetKubeconfigPath(),
 		clusterConName:        clusterConName,
 		pathToHostAgentBinary: pathToHostAgentBinary,
+		pathToByohctlBinary:   pathToByohctlBinary,
 	})
 }, func(data []byte) {
 	// Before each ParallelNode.
@@ -193,6 +231,7 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	clusterctlConfigPath = shared.clusterctlConfigPath
 	clusterConName = shared.clusterConName
 	pathToHostAgentBinary = shared.pathToHostAgentBinary
+	pathToByohctlBinary = shared.pathToByohctlBinary
 
 	e2eConfig = loadE2EConfig(configPath)
 	bootstrapClusterProxy = framework.NewClusterProxy("bootstrap", shared.kubeconfigPath, initScheme(), framework.WithMachineLogCollector(framework.DockerLogCollector{}))

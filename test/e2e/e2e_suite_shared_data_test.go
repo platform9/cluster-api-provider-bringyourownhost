@@ -25,6 +25,7 @@ func TestParseSharedSuiteData(t *testing.T) {
 				kubeconfigPath:        "/tmp/kind-bootstrap.kubeconfig",
 				clusterConName:        "test-ab12cd",
 				pathToHostAgentBinary: "/tmp/agent-binary/byoh-hostagent",
+				pathToByohctlBinary:   "/tmp/byohctl-binary/byohctl",
 			},
 		},
 		{

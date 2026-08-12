@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/term"
 )
 
@@ -229,6 +231,8 @@ func resetOnboardGlobals() {
 	verbosity = ""
 	regionName = ""
 	configFile = ""
+	bootstrapKubeconfigPath = ""
+	hostNamespace = ""
 }
 
 func TestConfigFilePrecedence(t *testing.T) {
@@ -401,9 +405,70 @@ func createTestCommand() *cobra.Command {
 		testCmd,
 		&fqdn, &username, &password, &passwordInteractive,
 		&clientToken, &domain, &tenant, &verbosity, &regionName, &configFile,
+		&bootstrapKubeconfigPath, &hostNamespace,
 	)
 
 	return testCmd
+}
+
+func TestWriteBootstrapCredential(t *testing.T) {
+	byohDir := t.TempDir()
+	origConfDir := bootstrapAgentConfDir
+	bootstrapAgentConfDir = t.TempDir()
+	t.Cleanup(func() { bootstrapAgentConfDir = origConfDir })
+
+	srcPath := filepath.Join(t.TempDir(), "bootstrap-kubeconfig.yaml")
+	const kubeconfigContent = "apiVersion: v1\nkind: Config\n"
+	require.NoError(t, os.WriteFile(srcPath, []byte(kubeconfigContent), 0o600))
+
+	require.NoError(t, writeBootstrapCredential(byohDir, srcPath, "test-tenant-ns"))
+
+	written, err := os.ReadFile(filepath.Join(bootstrapAgentConfDir, "bootstrap-kubeconfig.yaml"))
+	require.NoError(t, err)
+	require.Equal(t, kubeconfigContent, string(written))
+
+	namespace, err := os.ReadFile(filepath.Join(byohDir, "namespace"))
+	require.NoError(t, err)
+	require.Equal(t, "test-tenant-ns", string(namespace))
+}
+
+func TestWriteBootstrapCredentialMissingSource(t *testing.T) {
+	byohDir := t.TempDir()
+	origConfDir := bootstrapAgentConfDir
+	bootstrapAgentConfDir = t.TempDir()
+	t.Cleanup(func() { bootstrapAgentConfDir = origConfDir })
+
+	err := writeBootstrapCredential(byohDir, filepath.Join(t.TempDir(), "does-not-exist.yaml"), "test-tenant-ns")
+	require.Error(t, err)
+}
+
+func TestBootstrapKubeconfigMutuallyExclusiveWithPlatform9Flags(t *testing.T) {
+	for _, pcdFlag := range []struct {
+		name string
+		args []string
+	}{
+		{"username", []string{"--username", "testuser"}},
+		{"client-token", []string{"--client-token", "testtoken"}},
+		{"url", []string{"--url", "test.platform9.com"}},
+	} {
+		t.Run(pcdFlag.name, func(t *testing.T) {
+			resetOnboardGlobals()
+			testCmd := createTestCommand()
+			args := append([]string{"--bootstrap-kubeconfig", "/tmp/bootstrap.yaml", "--namespace", "ns", "--region", "test-region"}, pcdFlag.args...)
+			testCmd.SetArgs(args)
+			var output bytes.Buffer
+			testCmd.SetOut(&output)
+			testCmd.SetErr(&output)
+
+			err := testCmd.Execute()
+			if err == nil {
+				t.Errorf("Expected error when combining --bootstrap-kubeconfig with --%s, got nil", pcdFlag.name)
+			}
+			if !strings.Contains(output.String(), "none of the others can be") || !strings.Contains(output.String(), "bootstrap-kubeconfig") {
+				t.Errorf("Expected error message about mutually exclusive flags, got: %s", output.String())
+			}
+		})
+	}
 }
 
 func TestInteractivePassword(t *testing.T) {

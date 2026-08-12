@@ -44,10 +44,19 @@ const (
 	PcdKaapiRegionKey = "pcd-kaapi.pf9.io/region"
 )
 
+// byohAgentBundleURLOverrideEnvVar lets callers point SetupAgent at an agent bundle other than
+// the one matching byohctl's own git-describe tag -- e.g. a bundle built and pushed from a PR
+// branch that quay.io doesn't have a published tag for yet (only main/ci-* pushes are published;
+// see .github/workflows/build-byohctl.yml).
+const byohAgentBundleURLOverrideEnvVar = "BYOH_AGENT_BUNDLE_URL"
+
 // byohAgentBundleURL returns the OCI bundle reference for the agent deb package matching byohctl's
 // own build version. byohctl and the agent bundle are always published from the same commit under
 // the same git-describe tag.
 func byohAgentBundleURL() string {
+	if override := os.Getenv(byohAgentBundleURLOverrideEnvVar); override != "" {
+		return override
+	}
 	return fmt.Sprintf("%s:%s", byohAgentDebRepo, version.GetVersion())
 }
 
