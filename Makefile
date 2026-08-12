@@ -128,6 +128,9 @@ golangci-lint:
 
 ##@ Build
 
+clean: ## Remove local build output (bin/, _dist/, build/)
+	rm -rf bin $(RELEASE_DIR) build
+
 build: generate fmt vet ## Build manager binary.
 	go build -o bin/manager main.go
 
@@ -434,6 +437,7 @@ $(PF9_BYOHOST_RPM_FILE): |$(RPM_SRC_ROOT)
 	rpmbuild -bb \
 	    --define "_topdir $(RPMBUILD_DIR)"  \
 	    --define "_src_dir $(RPM_SRC_ROOT)"  \
+	    --define "_scripts_dir $(AGENT_SRC_DIR)/scripts"  \
 	    --define "_githash $(GITHASH)" \
 	    --define "_buildnum $(BUILDNUM)" $(AGENT_SRC_DIR)/scripts/pf9-byohost.spec
 	$(AGENT_SRC_DIR)/scripts/sign_packages.sh $(PF9_BYOHOST_RPM_FILE)

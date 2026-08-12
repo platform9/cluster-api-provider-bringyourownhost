@@ -21,10 +21,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-const (
-	rpmContainerPath   = "/root/pf9-byohost.rpm"
-	stubKubeconfigPath = "/root/bootstrap-kubeconfig.yaml"
-)
+const rpmContainerPath = "/root/pf9-byohost.rpm"
 
 func copyFileToContainer(ctx context.Context, containerID, localPath, containerPath string) error {
 	content, err := os.ReadFile(localPath)
@@ -128,16 +125,12 @@ var _ = Describe("pf9-byohost RPM", func() {
 			ContainSubstring("running"), ContainSubstring("degraded"),
 		))
 
-		By("copying the built RPM and a stub bootstrap kubeconfig into the container")
+		By("copying the built RPM into the container")
 		Expect(copyFileToContainer(ctx, containerID, rpmPath, rpmContainerPath)).To(Succeed())
-		_, exitCode, err := execInContainer(ctx, containerID, []string{"touch", stubKubeconfigPath}, nil)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(exitCode).To(Equal(0))
 
 		By("installing the RPM")
 		installOutput, exitCode, err := execInContainer(ctx, containerID,
-			[]string{"rpm", "-i", rpmContainerPath},
-			[]string{"BOOTSTRAP_KUBECONFIG=" + stubKubeconfigPath})
+			[]string{"rpm", "-i", rpmContainerPath}, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(exitCode).To(Equal(0), "rpm -i failed:\n%s", installOutput)
 
@@ -150,6 +143,15 @@ var _ = Describe("pf9-byohost RPM", func() {
 			"/binary/pf9-byoh-hostagent-linux-amd64",
 			"/etc/systemd/system/pf9-byohost-agent.service",
 		))
+
+		By("asserting %post generated the EnvironmentFile the systemd unit reads BOOTSTRAP_KUBECONFIG from")
+		confOutput, exitCode, err := execInContainer(ctx, containerID,
+			[]string{"cat", "/etc/pf9-byohost-agent.service.d/pf9-byohost-agent.conf"}, nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(exitCode).To(Equal(0))
+		Expect(confOutput).To(ContainSubstring("BOOTSTRAP_KUBECONFIG="))
+		Expect(confOutput).To(ContainSubstring("NAMESPACE="))
+		Expect(confOutput).To(ContainSubstring("REGION="))
 
 		// Not asserting is-active: the agent gets a stub, empty kubeconfig
 		// with no real cluster to register with
