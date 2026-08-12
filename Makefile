@@ -348,9 +348,12 @@ ifdef SKIP_BUILD
 else
 	docker run \
 		--rm \
+		--user "$$(id -u):$$(id -g)" \
 		-e CGO_ENABLED=0 \
 		-e GOOS=$(GOOS) \
 		-e GOARCH=$(GOARCH) \
+		-e GOCACHE=/tmp/go-build-cache \
+		-e GOPATH=/tmp/go \
 		-v "$$(pwd):/workspace$(DOCKER_VOL_OPTS)" \
 		-w /workspace \
 		golang:$(GO_VERSION) \
