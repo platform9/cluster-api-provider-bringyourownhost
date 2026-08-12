@@ -257,25 +257,25 @@ cluster-templates-e2e: kustomize
 linux-vm-image: ## Build the Linux container image used by the *-linux-vm targets
 	docker build -f hack/docker/linux-test-runner.Dockerfile -t $(LINUX_VM_IMG) .
 
-agent-test-linux-vm: linux-vm-image ## Run agent-test inside a Linux container (macOS)
-	docker run --rm --network host --security-opt label=disable \
+# Run any other Makefile target inside the Linux VM container (macOS) by
+# appending -linux-vm, e.g. `make agent-test-linux-vm`, `make
+# prepare-byoh-docker-host-image-linux-vm`, `make build-host-agent-rpm-linux-vm`.
+# LINUX_VM=1 tells host-agent-binary (see below) it's already inside the
+# wrapper container and shouldn't nest another docker run. -i keeps stdin
+# open so an interactive prompt (e.g. test-e2e's take-user-input) still
+# reaches the container: answer it yourself, or run e.g.
+# `yes | make test-e2e-linux-vm` to auto-confirm, same as with plain `make test-e2e`.
+%-linux-vm: linux-vm-image
+	docker run --rm -i --network host --security-opt label=disable \
 		-v "$(REPO_ROOT)":/workspace \
 		-v $(LINUX_VM_PODMAN_SOCK):/var/run/docker.sock \
 		-e CONTAINER_HOST=unix:///var/run/docker.sock \
-		-w /workspace \
-		$(LINUX_VM_IMG) \
-		make agent-test
-
-test-e2e-linux-vm: linux-vm-image ## Run test-e2e inside a Linux container (macOS)
-	docker run --rm --network host --security-opt label=disable \
-		-v "$(REPO_ROOT)":/workspace \
-		-v $(LINUX_VM_PODMAN_SOCK):/var/run/docker.sock \
-		-e CONTAINER_HOST=unix:///var/run/docker.sock \
+		-e LINUX_VM=1 \
 		-e GINKGO_FOCUS -e GINKGO_SKIP -e GINKGO_NODES -e SKIP_RESOURCE_CLEANUP -e USE_EXISTING_CLUSTER \
 		-e BYOH_AGENT_BUNDLE_URL \
 		-w /workspace \
 		$(LINUX_VM_IMG) \
-		bash -c "yes | make test-e2e"
+		make $*
 
 define WARNING
 #####################################################################################################
