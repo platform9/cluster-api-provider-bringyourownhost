@@ -15,7 +15,13 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-const packagingTestImage = "byoh/packaging-test-rocky:dev"
+const (
+	rpmTestImage = "byoh/packaging-test-rocky:dev"
+	// Reuses the existing e2e image (test/e2e/BYOHDockerFile) rather than a
+	// new one: it's already systemd-as-PID-1 and already has this spec's
+	// runtime deps (conntrack/ethtool/socat/ebtables) installed.
+	debTestImage = "byoh/node:e2e"
+)
 
 var (
 	ctx          context.Context

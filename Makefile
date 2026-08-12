@@ -36,6 +36,9 @@ tag: ## Print the predictable git-derived version used for agent/byohctl artifac
 	@echo $(GIT_VERSION)
 
 REPO_ROOT := $(shell pwd)
+# Real .git dir, outside REPO_ROOT for a linked worktree -- mounted below so git works in-container.
+GIT_COMMON_DIR := $(shell git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+EXTRA_GIT_MOUNT := $(if $(GIT_COMMON_DIR),$(if $(filter $(REPO_ROOT)%,$(GIT_COMMON_DIR)),,-v "$(GIT_COMMON_DIR)":"$(GIT_COMMON_DIR)"),)
 GINKGO_FOCUS  ?=
 GINKGO_SKIP ?=
 GINKGO_NODES  ?= 1
@@ -222,7 +225,7 @@ prepare-byoh-docker-host-image:
 build-packaging-test-image: ## Build the Rocky Linux image used by test-packaging
 	docker build test/e2e/packaging -f test/e2e/packaging/RockyDockerFile -t $(PACKAGING_TEST_RPM_IMG)
 
-test-packaging: build-packaging-test-image ## Run the pf9-byohost RPM install/uninstall test
+test-packaging: build-packaging-test-image prepare-byoh-docker-host-image ## Run the pf9-byohost RPM/deb install/uninstall tests
 	go test ./test/e2e/packaging/... -v -timeout 5m
 
 prepare-byoh-docker-host-image-dev:
@@ -279,6 +282,7 @@ linux-vm-image: ## Build the Linux container image used by the *-linux-vm target
 %-linux-vm: linux-vm-image
 	docker run --rm -i --network host --security-opt label=disable \
 		-v "$(REPO_ROOT)":/workspace \
+		$(EXTRA_GIT_MOUNT) \
 		-v $(LINUX_VM_PODMAN_SOCK):/var/run/docker.sock \
 		-e CONTAINER_HOST=unix:///var/run/docker.sock \
 		-e LINUX_VM=1 \

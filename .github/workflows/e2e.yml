@@ -126,6 +126,11 @@ jobs:
     - name: Install rpmbuild
       run: sudo apt-get update && sudo apt-get install -y rpm
 
+    - name: Install fpm build dependencies
+      run: |
+        sudo apt-get install -y --no-install-recommends ruby ruby-dev rubygems build-essential
+        sudo gem install --no-document fpm
+
     - name: Run packaging tests
       run: make test-packaging
 
