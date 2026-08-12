@@ -268,6 +268,7 @@ test-e2e-linux-vm: linux-vm-image ## Run test-e2e inside a Linux container (macO
 		-v $(LINUX_VM_PODMAN_SOCK):/var/run/docker.sock \
 		-e CONTAINER_HOST=unix:///var/run/docker.sock \
 		-e GINKGO_FOCUS -e GINKGO_SKIP -e GINKGO_NODES -e SKIP_RESOURCE_CLEANUP -e USE_EXISTING_CLUSTER \
+		-e BYOH_AGENT_BUNDLE_URL \
 		-w /workspace \
 		$(LINUX_VM_IMG) \
 		bash -c "yes | make test-e2e"

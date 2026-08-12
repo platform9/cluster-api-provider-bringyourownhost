@@ -18,17 +18,21 @@ import (
 )
 
 var (
-	username            string
-	password            string
-	passwordInteractive bool
-	fqdn                string
-	domain              string
-	tenant              string
-	clientToken         string
-	verbosity           string
-	regionName          string
-	configFile          string
+	username                string
+	password                string
+	passwordInteractive     bool
+	fqdn                    string
+	domain                  string
+	tenant                  string
+	clientToken             string
+	verbosity               string
+	regionName              string
+	configFile              string
+	bootstrapKubeconfigPath string
+	hostNamespace           string
 )
+
+var bootstrapAgentConfDir = "/etc/pf9-byohost-agent.service.d"
 
 var onboardCmd = &cobra.Command{
 	Use:   "onboard",
@@ -53,6 +57,7 @@ func init() {
 		onboardCmd,
 		&fqdn, &username, &password, &passwordInteractive,
 		&clientToken, &domain, &tenant, &verbosity, &regionName, &configFile,
+		&bootstrapKubeconfigPath, &hostNamespace,
 	)
 	rootCmd.AddCommand(onboardCmd)
 }
@@ -61,6 +66,7 @@ func init() {
 func AddOnboardFlags(cmd *cobra.Command,
 	fqdn *string, username *string, password *string, passwordInteractive *bool,
 	clientToken *string, domain *string, tenant *string, verbosity *string, regionName *string, configFile *string,
+	bootstrapKubeconfigPath *string, hostNamespace *string,
 ) {
 	cmd.Flags().StringVarP(fqdn, "url", "u", "", "Platform9 FQDN")
 	cmd.Flags().StringVarP(username, "username", "e", "", "Platform9 username")
@@ -73,6 +79,18 @@ func AddOnboardFlags(cmd *cobra.Command,
 	cmd.MarkFlagsMutuallyExclusive("password", "password-interactive")
 	cmd.Flags().StringVarP(regionName, "region", "r", "", "Platform9 region where you want to onboard this host")
 	cmd.Flags().StringVarP(configFile, "config", "f", "", "Path to onboarding config YAML file")
+	cmd.Flags().StringVar(bootstrapKubeconfigPath, "bootstrap-kubeconfig", "", "Path to a bootstrap kubeconfig")
+	cmd.Flags().StringVar(hostNamespace, "namespace", "default", "Namespace to register this host in (only used with --bootstrap-kubeconfig)")
+	cmd.MarkFlagsMutuallyExclusive("bootstrap-kubeconfig", "username")
+	cmd.MarkFlagsMutuallyExclusive("bootstrap-kubeconfig", "client-token")
+	cmd.MarkFlagsMutuallyExclusive("bootstrap-kubeconfig", "url")
+
+	// Hidden until the CSR approver validates requester identity against the requested CN and the
+	// ByoHost ownership webhook is re-enabled (currently disabled, see cd421b5) -- until then a
+	// bootstrap token's holder isn't actually scoped to onboarding just their own host. Functional,
+	// just not advertised: --help/usage won't show these, but the flags still work if invoked.
+	_ = cmd.Flags().MarkHidden("bootstrap-kubeconfig")
+	_ = cmd.Flags().MarkHidden("namespace")
 }
 
 // Check if running on Ubuntu
@@ -108,6 +126,27 @@ func LoadOnboardConfig(path string) (*OnboardConfig, error) {
 		return nil, err
 	}
 	return &cfg, nil
+}
+
+// Never writes ~/.byoh/config thus agent's own bootstrap-token-to-certificate exchange
+// runs on first start
+func writeBootstrapCredential(byohDir, bootstrapKubeconfigPath, namespace string) error {
+	data, err := os.ReadFile(bootstrapKubeconfigPath)
+	if err != nil {
+		return fmt.Errorf("failed to read bootstrap kubeconfig %s: %w", bootstrapKubeconfigPath, err)
+	}
+	if err := os.MkdirAll(bootstrapAgentConfDir, service.DefaultDirPerms); err != nil {
+		return fmt.Errorf("failed to create %s: %w", bootstrapAgentConfDir, err)
+	}
+	destPath := filepath.Join(bootstrapAgentConfDir, "bootstrap-kubeconfig.yaml")
+	if err := os.WriteFile(destPath, data, 0o600); err != nil {
+		return fmt.Errorf("failed to write %s: %w", destPath, err)
+	}
+	namespaceFile := filepath.Join(byohDir, "namespace")
+	if err := os.WriteFile(namespaceFile, []byte(namespace), service.DefaultFilePerms); err != nil {
+		return fmt.Errorf("failed to save namespace: %w", err)
+	}
+	return nil
 }
 
 // Helper to merge config values with CLI flags
@@ -149,18 +188,22 @@ func runOnboard(cmd *cobra.Command, args []string) {
 		mergeConfigWithFlags(cfg)
 	}
 
+	usingBootstrapKubeconfig := bootstrapKubeconfigPath != ""
+
 	missing := []string{}
-	if fqdn == "" {
-		missing = append(missing, "--url (or config file 'url")
-	}
-	if username == "" {
-        missing = append(missing, "--username (or config file 'username')")
-	}
-	if clientToken == "" {
-        missing = append(missing, "--client-token (or config file 'client-token')")
+	if !usingBootstrapKubeconfig {
+		if fqdn == "" {
+			missing = append(missing, "--url (or config file 'url")
+		}
+		if username == "" {
+			missing = append(missing, "--username (or config file 'username')")
+		}
+		if clientToken == "" {
+			missing = append(missing, "--client-token (or config file 'client-token')")
+		}
 	}
 	if regionName == "" {
-        missing = append(missing, "--region (or config file 'region')")
+		missing = append(missing, "--region (or config file 'region')")
 	}
 	if len(missing) > 0 {
 		fmt.Printf("Error: missing required flags: %s\n", strings.Join(missing, ", "))
@@ -177,7 +220,7 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	}
 
 	// Continue with interactive password if needed
-	if passwordInteractive {
+	if !usingBootstrapKubeconfig && passwordInteractive {
 		fmt.Print("Enter Password: ")
 		pwBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
 		if err != nil {
@@ -222,20 +265,7 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	defer utils.TrackTime(start, "Total onboarding process")
 
 	utils.LogDebug("Starting host onboarding process")
-	utils.LogDebug("Using FQDN: %s, Domain: %s, Tenant: %s", fqdn, domain, tenant)
 	utils.LogDebug("Verbosity level set to: %s", verbosity)
-
-	// Get authentication token
-	utils.LogDebug("Getting authentication token for user %s", username)
-	authClient := client.NewAuthClient(fqdn, clientToken)
-	token, err := authClient.GetToken(username, password)
-	if err != nil {
-		utils.LogError("Failed to get authentication token: %v", err)
-		os.Exit(1)
-	}
-
-	// Create Kubernetes client
-	k8sClient := client.NewK8sClient(fqdn, domain, tenant, token, regionName)
 
 	// Prepare directories
 	utils.LogInfo("Preparing directory structure for BYOH agent")
@@ -250,32 +280,52 @@ func runOnboard(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// Save kubeconfig
-	utils.LogInfo("Saving kubeconfig from bootstrap secret")
-	if err := k8sClient.SaveKubeConfig("byoh-bootstrap-kc"); err != nil {
-		utils.LogError("Failed to save kubeconfig: %v", err)
-		os.Exit(1)
-	}
+	if usingBootstrapKubeconfig {
+		utils.LogDebug("Using bootstrap kubeconfig %s, namespace %s", bootstrapKubeconfigPath, hostNamespace)
+		utils.LogInfo("Handing bootstrap credential to the agent")
+		if err := writeBootstrapCredential(byohDir, bootstrapKubeconfigPath, hostNamespace); err != nil {
+			utils.LogError("Failed to write bootstrap credential: %v", err)
+			os.Exit(1)
+		}
+	} else {
+		utils.LogDebug("Using FQDN: %s, Domain: %s, Tenant: %s", fqdn, domain, tenant)
 
-	// Check if region where user wants to onboard to is available for this tenant or not
-	// If not available, roll back the onboarding process
-	available, regions, err := k8sClient.CheckRegionAvailability(regionName)
-	if err != nil {
-		utils.LogError("Failed to check region availability, rolling back onboarding process: %v", err)
-		if err := k8sClient.DeleteSavedKubeconfig(); err != nil {
-			utils.LogError("Failed to delete saved kubeconfig while rolling back onboarding process: %v", err)
+		utils.LogDebug("Getting authentication token for user %s", username)
+		authClient := client.NewAuthClient(fqdn, clientToken)
+		token, err := authClient.GetToken(username, password)
+		if err != nil {
+			utils.LogError("Failed to get authentication token: %v", err)
+			os.Exit(1)
 		}
-		os.Exit(1)
-	}
-	if !available {
-		utils.LogError("Region %s is not available for the tenant, rolling back onboarding process", regionName)
-		if len(regions) > 0 {
-			utils.LogInfo("Available regions: %v", regions)
+
+		k8sClient := client.NewK8sClient(fqdn, domain, tenant, token, regionName)
+
+		utils.LogInfo("Saving kubeconfig from bootstrap secret")
+		if err := k8sClient.SaveKubeConfig("byoh-bootstrap-kc"); err != nil {
+			utils.LogError("Failed to save kubeconfig: %v", err)
+			os.Exit(1)
 		}
-		if err := k8sClient.DeleteSavedKubeconfig(); err != nil {
-			utils.LogError("Failed to delete saved kubeconfig while rolling back onboarding process: %v", err)
+
+		// Check if region where user wants to onboard to is available for this tenant or not
+		// If not available, roll back the onboarding process
+		available, regions, err := k8sClient.CheckRegionAvailability(regionName)
+		if err != nil {
+			utils.LogError("Failed to check region availability, rolling back onboarding process: %v", err)
+			if err := k8sClient.DeleteSavedKubeconfig(); err != nil {
+				utils.LogError("Failed to delete saved kubeconfig while rolling back onboarding process: %v", err)
+			}
+			os.Exit(1)
 		}
-		os.Exit(1)
+		if !available {
+			utils.LogError("Region %s is not available for the tenant, rolling back onboarding process", regionName)
+			if len(regions) > 0 {
+				utils.LogInfo("Available regions: %v", regions)
+			}
+			if err := k8sClient.DeleteSavedKubeconfig(); err != nil {
+				utils.LogError("Failed to delete saved kubeconfig while rolling back onboarding process: %v", err)
+			}
+			os.Exit(1)
+		}
 	}
 
 	// Save region name in a temp file in byohDir

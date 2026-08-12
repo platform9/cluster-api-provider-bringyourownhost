@@ -24,7 +24,11 @@ if [ -f /lib/systemd/system/pf9-byohost-agent.service ]; then
 
 mkdir -p /etc/pf9-byohost-agent.service.d/
 touch /etc/pf9-byohost-agent.service.d/pf9-byohost-agent.conf
-export NAMESPACE=$(grep 'namespace: *' /root/.byoh/config | awk '{print $2}')
+# --bootstrap-kubeconfig onboarding writes this file directly; fall back to the legacy scrape otherwise.
+export NAMESPACE=$(cat /root/.byoh/namespace 2>/dev/null)
+if [ -z "$NAMESPACE" ]; then
+	export NAMESPACE=$(grep 'namespace: *' /root/.byoh/config | awk '{print $2}')
+fi
 export REGION=$(cat /root/.byoh/region)
 
 echo "NAMESPACE=$NAMESPACE" > /etc/pf9-byohost-agent.service.d/pf9-byohost-agent.conf
