@@ -50,6 +50,10 @@ const (
 // see .github/workflows/build-byohctl.yml).
 const byohAgentBundleURLOverrideEnvVar = "BYOH_AGENT_BUNDLE_URL"
 
+// byohAgentBundleInsecureEnvVar opts into imgpkg's --registry-insecure for the SetupAgent pull.
+// Off by default.
+const byohAgentBundleInsecureEnvVar = "BYOH_AGENT_BUNDLE_INSECURE_REGISTRY"
+
 // byohAgentBundleURL returns the OCI bundle reference for the agent deb package matching byohctl's
 // own build version. byohctl and the agent bundle are always published from the same commit under
 // the same git-describe tag.
@@ -58,6 +62,10 @@ func byohAgentBundleURL() string {
 		return override
 	}
 	return fmt.Sprintf("%s:%s", byohAgentDebRepo, version.GetVersion())
+}
+
+func byohAgentBundleInsecure() bool {
+	return os.Getenv(byohAgentBundleInsecureEnvVar) != ""
 }
 
 var (

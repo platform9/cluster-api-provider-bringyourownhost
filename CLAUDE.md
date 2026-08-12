@@ -96,6 +96,8 @@ Tests use **Ginkgo v2** + **Gomega** and **Counterfeiter** for mocks (generated 
 
 When adding a new controller or type, run `make generate && make manifests` before writing tests.
 
+A throwaway local registry is available if future e2e work needs to serve a real built artifact without touching quay.io: `test/e2e/e2e_agent_bundle_registry.go`'s `ensureLocalAgentBundleRegistry` builds and serves an agent `.deb` bundle this way for the `byohctl` e2e spec (`test/e2e/e2e_byohctl_test.go`), since quay.io's published bundle is only tagged for commits already on `main`/`ci-*`. Be aware it only kicks in if `build/pf9-byohost/debsrc/` already exists (from `make build-host-agent-deb`, run separately in `.github/workflows/e2e.yml` — not part of `make test-e2e`'s own dependency chain, since it needs `fpm`/ruby installed); without that prerequisite, the spec skips locally but **fails** (not skips) when `CI` is set, so a broken prerequisite can't silently drop coverage.
+
 ## Code Generation
 
 After editing type files in `apis/`, always regenerate:

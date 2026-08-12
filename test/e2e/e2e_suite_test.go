@@ -17,6 +17,8 @@ import (
 	"strings"
 	"testing"
 
+	dockertypes "github.com/docker/docker/api/types"
+	"github.com/docker/docker/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gexec"
@@ -89,6 +91,9 @@ var (
 	// ParallelNodes -- byohctl is its own Go module (see CLAUDE.md), so it can't be built with
 	// gexec.BuildWithEnvironment from this (root-module) process the way the agent binary is.
 	pathToByohctlBinary string
+
+	// Together with ensureLocalAgentBundleRegistry
+	byohAgentBundleURLForContainers string
 )
 
 func init() {
@@ -109,13 +114,14 @@ func TestE2E(t *testing.T) {
 // process under GINKGO_NODES>1, so it has to cross the process boundary via this struct rather
 // than a plain package-level assignment.
 type sharedSuiteData struct {
-	artifactFolder        string
-	configPath            string
-	clusterctlConfigPath  string
-	kubeconfigPath        string
-	clusterConName        string
-	pathToHostAgentBinary string
-	pathToByohctlBinary   string
+	artifactFolder                  string
+	configPath                      string
+	clusterctlConfigPath            string
+	kubeconfigPath                  string
+	clusterConName                  string
+	pathToHostAgentBinary           string
+	pathToByohctlBinary             string
+	byohAgentBundleURLForContainers string
 }
 
 func formatSharedSuiteData(d *sharedSuiteData) []byte {
@@ -127,23 +133,25 @@ func formatSharedSuiteData(d *sharedSuiteData) []byte {
 		d.clusterConName,
 		d.pathToHostAgentBinary,
 		d.pathToByohctlBinary,
+		d.byohAgentBundleURLForContainers,
 	}, ","))
 }
 
 func parseSharedSuiteData(data []byte) (sharedSuiteData, error) {
 	parts := strings.Split(string(data), ",")
-	if len(parts) != 7 {
-		return sharedSuiteData{}, fmt.Errorf("expected 7 comma-separated fields in shared suite data, got %d", len(parts))
+	if len(parts) != 8 {
+		return sharedSuiteData{}, fmt.Errorf("expected 8 comma-separated fields in shared suite data, got %d", len(parts))
 	}
 
 	return sharedSuiteData{
-		artifactFolder:        parts[0],
-		configPath:            parts[1],
-		clusterctlConfigPath:  parts[2],
-		kubeconfigPath:        parts[3],
-		clusterConName:        parts[4],
-		pathToHostAgentBinary: parts[5],
-		pathToByohctlBinary:   parts[6],
+		artifactFolder:                  parts[0],
+		configPath:                      parts[1],
+		clusterctlConfigPath:            parts[2],
+		kubeconfigPath:                  parts[3],
+		clusterConName:                  parts[4],
+		pathToHostAgentBinary:           parts[5],
+		pathToByohctlBinary:             parts[6],
+		byohAgentBundleURLForContainers: parts[7],
 	}, nil
 }
 
@@ -210,15 +218,22 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	pathToByohctlBinary, err = buildByohctlBinary()
 	Expect(err).NotTo(HaveOccurred())
 
+	By("making an agent bundle reachable for the byohctl e2e spec, without quay.io")
+	dockerClientForRegistry, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	Expect(err).NotTo(HaveOccurred())
+	byohAgentBundleURLForContainers, err = ensureLocalAgentBundleRegistry(context.Background(), dockerClientForRegistry, dockerNetworkInterfaceKind)
+	Expect(err).NotTo(HaveOccurred())
+
 	clusterConName = e2eConfig.ManagementClusterName
 	return formatSharedSuiteData(&sharedSuiteData{
-		artifactFolder:        artifactFolder,
-		configPath:            configPath,
-		clusterctlConfigPath:  clusterctlConfigPath,
-		kubeconfigPath:        bootstrapClusterProxy.GetKubeconfigPath(),
-		clusterConName:        clusterConName,
-		pathToHostAgentBinary: pathToHostAgentBinary,
-		pathToByohctlBinary:   pathToByohctlBinary,
+		artifactFolder:                  artifactFolder,
+		configPath:                      configPath,
+		clusterctlConfigPath:            clusterctlConfigPath,
+		kubeconfigPath:                  bootstrapClusterProxy.GetKubeconfigPath(),
+		clusterConName:                  clusterConName,
+		pathToHostAgentBinary:           pathToHostAgentBinary,
+		pathToByohctlBinary:             pathToByohctlBinary,
+		byohAgentBundleURLForContainers: byohAgentBundleURLForContainers,
 	})
 }, func(data []byte) {
 	// Before each ParallelNode.
@@ -232,6 +247,7 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	clusterConName = shared.clusterConName
 	pathToHostAgentBinary = shared.pathToHostAgentBinary
 	pathToByohctlBinary = shared.pathToByohctlBinary
+	byohAgentBundleURLForContainers = shared.byohAgentBundleURLForContainers
 
 	e2eConfig = loadE2EConfig(configPath)
 	bootstrapClusterProxy = framework.NewClusterProxy("bootstrap", shared.kubeconfigPath, initScheme(), framework.WithMachineLogCollector(framework.DockerLogCollector{}))
@@ -248,6 +264,12 @@ var _ = SynchronizedAfterSuite(func() {
 	By("Tearing down the management cluster")
 	if !skipCleanup {
 		tearDown(bootstrapClusterProvider, bootstrapClusterProxy)
+	}
+
+	if byohAgentBundleURLForContainers != "" {
+		if dockerClientForRegistry, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation()); err == nil {
+			_ = dockerClientForRegistry.ContainerRemove(context.Background(), agentBundleRegistryContainerName, dockertypes.ContainerRemoveOptions{Force: true})
+		}
 	}
 })
 

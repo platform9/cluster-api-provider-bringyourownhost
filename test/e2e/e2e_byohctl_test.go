@@ -11,6 +11,7 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -20,14 +21,6 @@ import (
 )
 
 const (
-	// byohAgentBundleURLEnvVar mirrors the env var byohAgentBundleURL() in
-	// cmd/byohctl/service/constants.go checks for an override. byohctl's real onboarding flow
-	// downloads a published agent .deb bundle from quay.io tagged with byohctl's own git-describe
-	// version; that tag only exists in the registry for commits already on main (or ci-* tags),
-	// per .github/workflows/build-byohctl.yml. Without an override pointing at a bundle this run
-	// can actually reach, this spec would fail on every ordinary PR branch for a reason unrelated
-	// to what it's testing -- so it skips instead, until that bundle-hermeticity gap is closed.
-	byohAgentBundleURLEnvVar = "BYOH_AGENT_BUNDLE_URL"
 	byohctlContainerPath     = "/byohctl"
 	byohctlBootstrapConfPath = "/bootstrap.conf"
 )
@@ -47,10 +40,15 @@ var _ = Describe("When a host onboards via byohctl using a bootstrap kubeconfig,
 	BeforeEach(func() {
 		ctx = context.TODO()
 
-		if os.Getenv(byohAgentBundleURLEnvVar) == "" {
-			Skip(fmt.Sprintf("skipping: set %s to an agent bundle reachable from this run "+
-				"(byohctl's SetupAgent downloads a real published .deb via imgpkg; see the "+
-				"byohAgentBundleURLEnvVar doc comment in this file)", byohAgentBundleURLEnvVar))
+		if byohAgentBundleURLForContainers == "" {
+			reason := fmt.Sprintf("no agent bundle available for byohctl's SetupAgent to install "+
+				"(neither %s nor a local `make build-host-agent-deb` output was found; see "+
+				"ensureLocalAgentBundleRegistry in e2e_agent_bundle_registry.go)", byohAgentBundleURLEnvVar)
+			if os.Getenv("CI") != "" {
+				// Should never happen in CI -- fail loudly instead of skipping quietly.
+				Fail("in CI, this should never happen: " + reason)
+			}
+			Skip(reason)
 		}
 
 		Expect(bootstrapClusterProxy).NotTo(BeNil(), "Invalid argument. bootstrapClusterProxy can't be nil when calling %s spec", specName)
@@ -90,12 +88,17 @@ var _ = Describe("When a host onboards via byohctl using a bootstrap kubeconfig,
 		By("Copying byohctl and a bootstrap kubeconfig into the host container")
 		binConfig := cpConfig{sourcePath: pathToByohctlBinary, destPath: byohctlContainerPath, container: byohostContainer.ID}
 		Expect(copyToContainer(ctx, dockerClient, binConfig)).To(Succeed())
-		Expect(runner.copyKubeconfig(binConfig, types.ContainerListOptions{})).To(Succeed())
+		listopt := types.ContainerListOptions{Filters: filters.NewArgs()}
+		Expect(runner.copyKubeconfig(binConfig, listopt)).To(Succeed())
 
 		By("Running byohctl onboard --bootstrap-kubeconfig")
 		execResp, err := dockerClient.ContainerExecCreate(ctx, byohostContainer.ID, types.ExecConfig{
 			AttachStdout: true,
 			AttachStderr: true,
+			Env: []string{
+				byohAgentBundleURLEnvVar + "=" + byohAgentBundleURLForContainers,
+				byohAgentBundleInsecureEnvVar + "=1",
+			},
 			Cmd: []string{
 				byohctlContainerPath, "onboard",
 				"--bootstrap-kubeconfig", byohctlBootstrapConfPath,
