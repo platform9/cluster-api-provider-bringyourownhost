@@ -4,6 +4,8 @@ SHELL:=/usr/bin/env bash
 # GO_VERSION is derived from .tool-versions (the asdf-managed source of
 # truth) so there is exactly one place in this Makefile that declares it.
 GO_VERSION := $(shell awk '/^golang /{print $$2}' .tool-versions)
+# Evil hack to fix "make lint". Otherwise it tries to re-install
+export GOTOOLCHAIN := go$(GO_VERSION)
 
 # Define registries
 STAGING_REGISTRY ?= quay.io/platform9/cluster-api-provider-bringyourownhost
