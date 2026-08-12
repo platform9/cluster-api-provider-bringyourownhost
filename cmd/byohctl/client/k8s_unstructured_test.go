@@ -4,7 +4,6 @@
 package client
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -66,25 +65,36 @@ func newTestMachineDeployment(namespace, name string, replicas int32) *capiv1bet
 }
 
 func TestGetUnstructuredMachineObject(t *testing.T) {
-	scheme := newTestScheme(t)
-	machine := newTestMachine("ns1", "m1", "md1")
-	dynamicClient := dynamicfake.NewSimpleDynamicClient(scheme, machine)
-	c := &Client{DynamicClient: dynamicClient}
+	tests := []struct {
+		name        string
+		seedMachine bool
+		wantErr     bool
+	}{
+		{name: "machine exists", seedMachine: true, wantErr: false},
+		{name: "machine not found", seedMachine: false, wantErr: true},
+	}
 
-	obj, err := c.GetUnstructuredMachineObject("ns1", "m1")
-	require.NoError(t, err)
-	assert.Equal(t, "m1", obj.GetName())
-	assert.Equal(t, "ns1", obj.GetNamespace())
-	assert.Equal(t, "md1", obj.GetLabels()[deploymentNameLabel])
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scheme := newTestScheme(t)
+			var objs []runtime.Object
+			if tt.seedMachine {
+				objs = append(objs, newTestMachine("ns1", "m1", "md1"))
+			}
+			dynamicClient := dynamicfake.NewSimpleDynamicClient(scheme, objs...)
+			c := &Client{DynamicClient: dynamicClient}
 
-func TestGetUnstructuredMachineObject_NotFound(t *testing.T) {
-	scheme := newTestScheme(t)
-	dynamicClient := dynamicfake.NewSimpleDynamicClient(scheme)
-	c := &Client{DynamicClient: dynamicClient}
-
-	_, err := c.GetUnstructuredMachineObject("ns1", "missing")
-	assert.Error(t, err)
+			obj, err := c.GetUnstructuredMachineObject("ns1", "m1")
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, "m1", obj.GetName())
+			assert.Equal(t, "ns1", obj.GetNamespace())
+			assert.Equal(t, "md1", obj.GetLabels()[deploymentNameLabel])
+		})
+	}
 }
 
 func TestAnnotateMachineObject(t *testing.T) {
@@ -99,7 +109,7 @@ func TestAnnotateMachineObject(t *testing.T) {
 	err = c.AnnotateMachineObject(obj, "ns1", "byoh.platform9.io/decommissioned", "true")
 	require.NoError(t, err)
 
-	updated, err := dynamicClient.Resource(machineGVR).Namespace("ns1").Get(context.Background(), "m1", metav1.GetOptions{})
+	updated, err := dynamicClient.Resource(machineGVR).Namespace("ns1").Get(t.Context(), "m1", metav1.GetOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, "true", updated.GetAnnotations()["byoh.platform9.io/decommissioned"])
 }
@@ -146,7 +156,7 @@ func TestScaleDownMachineDeployment(t *testing.T) {
 	err = c.ScaleDownMachineDeployment(obj, "ns1")
 	require.NoError(t, err)
 
-	updatedUnstructured, err := dynamicClient.Resource(machineDeploymentGVR).Namespace("ns1").Get(context.Background(), "md1", metav1.GetOptions{})
+	updatedUnstructured, err := dynamicClient.Resource(machineDeploymentGVR).Namespace("ns1").Get(t.Context(), "md1", metav1.GetOptions{})
 	require.NoError(t, err)
 
 	updated := &capiv1beta1.MachineDeployment{}

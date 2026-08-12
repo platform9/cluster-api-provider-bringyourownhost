@@ -4,7 +4,6 @@
 package v1beta1
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -34,7 +33,7 @@ func newTestByoHostValidator(t *testing.T) *ByoHostValidator {
 func TestHandleCreateUpdate_EmptyRawExtension(t *testing.T) {
 	v := newTestByoHostValidator(t)
 
-	resp := v.Handle(context.TODO(), admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
+	resp := v.Handle(t.Context(), admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
 		Operation: admissionv1.Create,
 		UserInfo:  v1.UserInfo{Username: byohHostOneUser},
 		Object:    runtime.RawExtension{}, // no Raw bytes
@@ -49,7 +48,7 @@ func TestHandleCreateUpdate_EmptyRawExtension(t *testing.T) {
 func TestHandleCreateUpdate_MalformedRawExtension(t *testing.T) {
 	v := newTestByoHostValidator(t)
 
-	resp := v.Handle(context.TODO(), admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
+	resp := v.Handle(t.Context(), admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
 		Operation: admissionv1.Create,
 		UserInfo:  v1.UserInfo{Username: byohHostOneUser},
 		Object: runtime.RawExtension{
@@ -74,7 +73,7 @@ func TestHandleCreateUpdate_DecodesFromRawOnly(t *testing.T) {
 	raw, err := json.Marshal(byoHost)
 	require.NoError(t, err)
 
-	resp := v.Handle(context.TODO(), admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
+	resp := v.Handle(t.Context(), admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
 		Operation: admissionv1.Create,
 		UserInfo:  v1.UserInfo{Username: byohHostOneUser},
 		Object: runtime.RawExtension{
@@ -89,7 +88,7 @@ func TestHandleCreateUpdate_DecodesFromRawOnly(t *testing.T) {
 func TestHandleDelete_EmptyOldObjectRawExtension(t *testing.T) {
 	v := newTestByoHostValidator(t)
 
-	resp := v.Handle(context.TODO(), admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
+	resp := v.Handle(t.Context(), admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
 		Operation: admissionv1.Delete,
 		OldObject: runtime.RawExtension{},
 	}})

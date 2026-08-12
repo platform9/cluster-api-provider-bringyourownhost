@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/common/bootstraptoken"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,74 +17,73 @@ import (
 	bootstraputil "k8s.io/cluster-bootstrap/token/util"
 )
 
-func TestBootstrapToken(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "BootstrapToken Suite")
-}
-
 const (
 	validTokenID     = "abcdef"
 	validTokenSecret = "0123456789abcdef"
 	validToken       = validTokenID + "." + validTokenSecret
 )
 
-var _ = Describe("GetTokenIDSecretFromBootstrapToken", func() {
-	It("splits a well-formed token into id and secret", func() {
-		id, secret, err := bootstraptoken.GetTokenIDSecretFromBootstrapToken(validToken)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(id).To(Equal(validTokenID))
-		Expect(secret).To(Equal(validTokenSecret))
-	})
+func TestGetTokenIDSecretFromBootstrapToken_ValidToken(t *testing.T) {
+	id, secret, err := bootstraptoken.GetTokenIDSecretFromBootstrapToken(validToken)
+	require.NoError(t, err)
+	assert.Equal(t, validTokenID, id)
+	assert.Equal(t, validTokenSecret, secret)
+}
 
-	DescribeTable("rejects malformed tokens",
-		func(tokenStr string) {
-			id, secret, err := bootstraptoken.GetTokenIDSecretFromBootstrapToken(tokenStr)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring(tokenStr))
-			Expect(id).To(BeEmpty())
-			Expect(secret).To(BeEmpty())
-		},
-		Entry("empty string", ""),
-		Entry("missing separator", validTokenID+validTokenSecret),
-		Entry("id too short", "abc."+validTokenSecret),
-		Entry("secret too short", validTokenID+".short"),
-		Entry("uppercase characters", "ABCDEF."+validTokenSecret),
-		Entry("extra segment", validToken+".extra"),
-	)
-})
+func TestGetTokenIDSecretFromBootstrapToken_MalformedToken(t *testing.T) {
+	tests := []struct {
+		name     string
+		tokenStr string
+	}{
+		{"empty string", ""},
+		{"missing separator", validTokenID + validTokenSecret},
+		{"id too short", "abc." + validTokenSecret},
+		{"secret too short", validTokenID + ".short"},
+		{"uppercase characters", "ABCDEF." + validTokenSecret},
+		{"extra segment", validToken + ".extra"},
+	}
 
-var _ = Describe("GenerateSecretFromBootstrapToken", func() {
-	It("returns an error when the token is malformed", func() {
-		secret, err := bootstraptoken.GenerateSecretFromBootstrapToken("not-a-token", time.Hour)
-		Expect(err).To(HaveOccurred())
-		Expect(secret).To(BeNil())
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			id, secret, err := bootstraptoken.GetTokenIDSecretFromBootstrapToken(tt.tokenStr)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.tokenStr)
+			assert.Empty(t, id)
+			assert.Empty(t, secret)
+		})
+	}
+}
 
-	It("builds a well-formed bootstrap token secret", func() {
-		before := time.Now().UTC()
-		secret, err := bootstraptoken.GenerateSecretFromBootstrapToken(validToken, time.Hour)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(secret).NotTo(BeNil())
+func TestGenerateSecretFromBootstrapToken_MalformedToken(t *testing.T) {
+	secret, err := bootstraptoken.GenerateSecretFromBootstrapToken("not-a-token", time.Hour)
+	require.Error(t, err)
+	assert.Nil(t, secret)
+}
 
-		Expect(secret.Name).To(Equal(bootstraputil.BootstrapTokenSecretName(validTokenID)))
-		Expect(secret.Namespace).To(Equal(metav1.NamespaceSystem))
-		Expect(secret.Type).To(Equal(bootstrapapi.SecretTypeBootstrapToken))
+func TestGenerateSecretFromBootstrapToken_ValidToken(t *testing.T) {
+	before := time.Now().UTC()
+	secret, err := bootstraptoken.GenerateSecretFromBootstrapToken(validToken, time.Hour)
+	require.NoError(t, err)
+	require.NotNil(t, secret)
 
-		Expect(string(secret.Data[bootstrapapi.BootstrapTokenIDKey])).To(Equal(validTokenID))
-		Expect(string(secret.Data[bootstrapapi.BootstrapTokenSecretKey])).To(Equal(validTokenSecret))
-		Expect(string(secret.Data[bootstrapapi.BootstrapTokenUsageSigningKey])).To(Equal("true"))
-		Expect(string(secret.Data[bootstrapapi.BootstrapTokenUsageAuthentication])).To(Equal("true"))
-		Expect(string(secret.Data[bootstrapapi.BootstrapTokenDescriptionKey])).To(Equal(infrastructurev1beta1.BootstrapTokenDescription))
-		Expect(string(secret.Data[bootstrapapi.BootstrapTokenExtraGroupsKey])).To(Equal(infrastructurev1beta1.BootstrapTokenExtraGroups))
+	assert.Equal(t, bootstraputil.BootstrapTokenSecretName(validTokenID), secret.Name)
+	assert.Equal(t, metav1.NamespaceSystem, secret.Namespace)
+	assert.Equal(t, bootstrapapi.SecretTypeBootstrapToken, secret.Type)
 
-		expiration, err := time.Parse(time.RFC3339, string(secret.Data[bootstrapapi.BootstrapTokenExpirationKey]))
-		Expect(err).NotTo(HaveOccurred())
-		// RFC3339 truncates sub-second precision, so allow a small tolerance around before+ttl.
-		Expect(expiration).To(BeTemporally("~", before.Add(time.Hour), time.Second))
-	})
-})
+	assert.Equal(t, validTokenID, string(secret.Data[bootstrapapi.BootstrapTokenIDKey]))
+	assert.Equal(t, validTokenSecret, string(secret.Data[bootstrapapi.BootstrapTokenSecretKey]))
+	assert.Equal(t, "true", string(secret.Data[bootstrapapi.BootstrapTokenUsageSigningKey]))
+	assert.Equal(t, "true", string(secret.Data[bootstrapapi.BootstrapTokenUsageAuthentication]))
+	assert.Equal(t, infrastructurev1beta1.BootstrapTokenDescription, string(secret.Data[bootstrapapi.BootstrapTokenDescriptionKey]))
+	assert.Equal(t, infrastructurev1beta1.BootstrapTokenExtraGroups, string(secret.Data[bootstrapapi.BootstrapTokenExtraGroupsKey]))
 
-var _ = Describe("GenerateBootstrapKubeconfigFromBootstrapToken", func() {
+	expiration, err := time.Parse(time.RFC3339, string(secret.Data[bootstrapapi.BootstrapTokenExpirationKey]))
+	require.NoError(t, err)
+	// RFC3339 truncates sub-second precision, so allow a small tolerance around before+ttl.
+	assert.WithinDuration(t, before.Add(time.Hour), expiration, time.Second)
+}
+
+func TestGenerateBootstrapKubeconfigFromBootstrapToken_MalformedToken(t *testing.T) {
 	bootstrapKubeconfig := &infrastructurev1beta1.BootstrapKubeconfig{
 		Spec: infrastructurev1beta1.BootstrapKubeconfigSpec{
 			APIServer:                "https://cluster-a.example.com:6443",
@@ -93,33 +92,39 @@ var _ = Describe("GenerateBootstrapKubeconfigFromBootstrapToken", func() {
 		},
 	}
 
-	It("returns an error when the token is malformed", func() {
-		cfg, err := bootstraptoken.GenerateBootstrapKubeconfigFromBootstrapToken("not-a-token", bootstrapKubeconfig)
-		Expect(err).To(HaveOccurred())
-		Expect(cfg).To(BeNil())
-	})
+	cfg, err := bootstraptoken.GenerateBootstrapKubeconfigFromBootstrapToken("not-a-token", bootstrapKubeconfig)
+	require.Error(t, err)
+	assert.Nil(t, cfg)
+}
 
-	It("builds a kubeconfig wired to the default cluster/context/auth", func() {
-		cfg, err := bootstraptoken.GenerateBootstrapKubeconfigFromBootstrapToken(validToken, bootstrapKubeconfig)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(cfg).NotTo(BeNil())
+func TestGenerateBootstrapKubeconfigFromBootstrapToken_ValidToken(t *testing.T) {
+	bootstrapKubeconfig := &infrastructurev1beta1.BootstrapKubeconfig{
+		Spec: infrastructurev1beta1.BootstrapKubeconfigSpec{
+			APIServer:                "https://cluster-a.example.com:6443",
+			InsecureSkipTLSVerify:    false,
+			CertificateAuthorityData: "test-ca-data",
+		},
+	}
 
-		Expect(cfg.CurrentContext).To(Equal(infrastructurev1beta1.DefaultContext))
+	cfg, err := bootstraptoken.GenerateBootstrapKubeconfigFromBootstrapToken(validToken, bootstrapKubeconfig)
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
 
-		cluster, ok := cfg.Clusters[infrastructurev1beta1.DefaultClusterName]
-		Expect(ok).To(BeTrue())
-		Expect(cluster.Server).To(Equal(bootstrapKubeconfig.Spec.APIServer))
-		Expect(cluster.InsecureSkipTLSVerify).To(Equal(bootstrapKubeconfig.Spec.InsecureSkipTLSVerify))
-		Expect(string(cluster.CertificateAuthorityData)).To(Equal(bootstrapKubeconfig.Spec.CertificateAuthorityData))
+	assert.Equal(t, infrastructurev1beta1.DefaultContext, cfg.CurrentContext)
 
-		authInfo, ok := cfg.AuthInfos[infrastructurev1beta1.DefaultAuth]
-		Expect(ok).To(BeTrue())
-		Expect(authInfo.Token).To(Equal(validTokenID + "." + validTokenSecret))
+	cluster, ok := cfg.Clusters[infrastructurev1beta1.DefaultClusterName]
+	require.True(t, ok)
+	assert.Equal(t, bootstrapKubeconfig.Spec.APIServer, cluster.Server)
+	assert.Equal(t, bootstrapKubeconfig.Spec.InsecureSkipTLSVerify, cluster.InsecureSkipTLSVerify)
+	assert.Equal(t, bootstrapKubeconfig.Spec.CertificateAuthorityData, string(cluster.CertificateAuthorityData))
 
-		context, ok := cfg.Contexts[infrastructurev1beta1.DefaultContext]
-		Expect(ok).To(BeTrue())
-		Expect(context.Cluster).To(Equal(infrastructurev1beta1.DefaultClusterName))
-		Expect(context.AuthInfo).To(Equal(infrastructurev1beta1.DefaultAuth))
-		Expect(context.Namespace).To(Equal(infrastructurev1beta1.DefaultNamespace))
-	})
-})
+	authInfo, ok := cfg.AuthInfos[infrastructurev1beta1.DefaultAuth]
+	require.True(t, ok)
+	assert.Equal(t, validTokenID+"."+validTokenSecret, authInfo.Token)
+
+	context, ok := cfg.Contexts[infrastructurev1beta1.DefaultContext]
+	require.True(t, ok)
+	assert.Equal(t, infrastructurev1beta1.DefaultClusterName, context.Cluster)
+	assert.Equal(t, infrastructurev1beta1.DefaultAuth, context.AuthInfo)
+	assert.Equal(t, infrastructurev1beta1.DefaultNamespace, context.Namespace)
+}
