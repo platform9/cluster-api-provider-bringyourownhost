@@ -1,4 +1,5 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 // nolint: testpackage
@@ -15,6 +16,7 @@ import (
 	"github.com/docker/docker/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
@@ -125,6 +127,14 @@ var _ = Describe("When BYOH joins existing cluster [Installer]", func() {
 			WaitForMachineDeployments:    e2eConfig.GetIntervals(specName, "wait-worker-nodes"),
 		}, clusterResources)
 
+		By("Checking the ByoHost conditions reflect a successful join")
+		for _, byoHostName := range []string{byoHostName1, byoHostName2} {
+			AssertByoHostConditionsTrue(ctx, bootstrapClusterProxy, namespace.Name, byoHostName, specName,
+				infrastructurev1beta1.AgentConnected,
+				infrastructurev1beta1.K8sComponentsInstallationSucceeded,
+				infrastructurev1beta1.K8sNodeBootstrapSucceeded,
+			)
+		}
 	})
 
 	JustAfterEach(func() {
