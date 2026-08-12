@@ -194,9 +194,14 @@ var downloadDebianPackage = func(tempDir string) (string, error) {
 
 	imgpkgPath, _ := exec.LookPath("imgpkg")
 
+	pullArgs := []string{"pull", "-i", byohAgentBundleURL(), "-o", tempDir}
+	if byohAgentBundleInsecure() {
+		pullArgs = append(pullArgs, "--registry-insecure")
+	}
+
 	// Use a buffer to capture the command output
 	var outputBuffer bytes.Buffer
-	pullCmd := exec.Command(imgpkgPath, "pull", "-i", byohAgentBundleURL(), "-o", tempDir)
+	pullCmd := exec.Command(imgpkgPath, pullArgs...)
 	pullCmd.Stdout = &outputBuffer
 	pullCmd.Stderr = &outputBuffer
 

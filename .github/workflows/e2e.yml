@@ -78,6 +78,22 @@ jobs:
     - name: Set netfilter conntrack max
       run: sudo sysctl -w net.netfilter.nf_conntrack_max=131072
 
+    # byohctl's real onboarding flow downloads a published agent .deb bundle from quay.io, tagged
+    # to byohctl's own git-describe version -- a tag that only exists there for commits already on
+    # main/ci-* (see .github/workflows/build-byohctl.yml). Building this branch's own bundle here
+    # lets the byohctl e2e spec (test/e2e/e2e_byohctl_test.go) find it at build/pf9-byohost/debsrc/
+    # and serve it from a throwaway local registry itself (ensureLocalAgentBundleRegistry in
+    # test/e2e/e2e_agent_bundle_registry.go), rather than skip or depend on a tag that doesn't
+    # exist yet for this PR's own code.
+    - name: Install fpm build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends ruby ruby-dev rubygems build-essential
+        sudo gem install --no-document fpm
+
+    - name: Build agent .deb bundle from this branch
+      run: make build-host-agent-deb
+
     - name: Run e2e tests
       env:
         SKIP_BUILD: ${{ github.event_name != 'workflow_dispatch' && '1' || '' }}

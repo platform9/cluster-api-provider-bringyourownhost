@@ -19,13 +19,14 @@ func TestParseSharedSuiteData(t *testing.T) {
 		{
 			name: "typical values",
 			data: sharedSuiteData{
-				artifactFolder:        "/tmp/artifacts",
-				configPath:            "/tmp/e2e-config.yaml",
-				clusterctlConfigPath:  "/tmp/artifacts/repository/clusterctl-config.yaml",
-				kubeconfigPath:        "/tmp/kind-bootstrap.kubeconfig",
-				clusterConName:        "test-ab12cd",
-				pathToHostAgentBinary: "/tmp/agent-binary/byoh-hostagent",
-				pathToByohctlBinary:   "/tmp/byohctl-binary/byohctl",
+				artifactFolder:                  "/tmp/artifacts",
+				configPath:                      "/tmp/e2e-config.yaml",
+				clusterctlConfigPath:            "/tmp/artifacts/repository/clusterctl-config.yaml",
+				kubeconfigPath:                  "/tmp/kind-bootstrap.kubeconfig",
+				clusterConName:                  "test-ab12cd",
+				pathToHostAgentBinary:           "/tmp/agent-binary/byoh-hostagent",
+				pathToByohctlBinary:             "/tmp/byohctl-binary/byohctl",
+				byohAgentBundleURLForContainers: "byohctl-e2e-agent-bundle-registry:5000/agent:e2e",
 			},
 		},
 		{

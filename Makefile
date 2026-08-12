@@ -145,10 +145,14 @@ docker-push: ## Push docker image with the manager.
 IMGPKG_VERSION ?= v0.43.1
 BYOH_AGENT_BUNDLE_IMAGE ?= quay.io/platform9/cluster-api-provider-bringyourownhost/agent
 
-push-agent-bundle: ## Push the built agent .deb bundle to the registry via imgpkg. Requires build-host-agent-deb to have already run.
-	curl -sL -o /tmp/imgpkg "https://github.com/carvel-dev/imgpkg/releases/download/$(IMGPKG_VERSION)/imgpkg-linux-amd64"
-	chmod +x /tmp/imgpkg
-	/tmp/imgpkg push -f build/pf9-byohost/debsrc/ -i $(BYOH_AGENT_BUNDLE_IMAGE):$(TAG)
+# Note the module path is carvel.dev/imgpkg, not github.com/carvel-dev/imgpkg -- the GitHub org
+# name and the Go module path diverged after a rename.
+IMGPKG := $(shell pwd)/bin/imgpkg
+imgpkg: ## Download imgpkg locally if necessary.
+	$(call go-get-tool,$(IMGPKG),carvel.dev/imgpkg/cmd/imgpkg@$(IMGPKG_VERSION))
+
+push-agent-bundle: imgpkg ## Push the built agent .deb bundle to the registry via imgpkg. Requires build-host-agent-deb to have already run.
+	$(IMGPKG) push -f build/pf9-byohost/debsrc/ -i $(BYOH_AGENT_BUNDLE_IMAGE):$(TAG)
 
 ##@ Helm chart
 
