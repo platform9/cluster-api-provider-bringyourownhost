@@ -103,7 +103,7 @@ var _ = Describe("pf9-byohost RPM", func() {
 
 		By("starting a Rocky Linux container")
 		created, err := dockerClient.ContainerCreate(ctx,
-			&container.Config{Image: packagingTestImage},
+			&container.Config{Image: rpmTestImage},
 			&container.HostConfig{
 				Privileged: true,
 				Tmpfs:      map[string]string{"/run": "", "/run/lock": "", "/tmp": ""},
