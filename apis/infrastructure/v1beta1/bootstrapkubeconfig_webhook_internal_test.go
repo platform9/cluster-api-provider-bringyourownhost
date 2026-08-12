@@ -88,12 +88,12 @@ func TestValidateCreateUpdateDelete(t *testing.T) {
 	}}
 	invalid := &BootstrapKubeconfig{Spec: BootstrapKubeconfigSpec{APIServer: ""}}
 
-	assert.NoError(t, valid.ValidateCreate())
-	assert.Error(t, invalid.ValidateCreate())
+	require.NoError(t, valid.ValidateCreate())
+	require.Error(t, invalid.ValidateCreate())
 
-	assert.NoError(t, valid.ValidateUpdate(invalid))
-	assert.Error(t, invalid.ValidateUpdate(valid))
+	require.NoError(t, valid.ValidateUpdate(invalid))
+	require.Error(t, invalid.ValidateUpdate(valid))
 
-	assert.NoError(t, valid.ValidateDelete())
-	assert.NoError(t, invalid.ValidateDelete())
+	require.NoError(t, valid.ValidateDelete())
+	require.NoError(t, invalid.ValidateDelete())
 }

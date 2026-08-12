@@ -6,7 +6,8 @@ package controllers_test
 import (
 	"testing"
 
-	"github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -38,8 +39,6 @@ func installerConfigWithSecret(secret map[string]interface{}) *unstructured.Unst
 }
 
 func TestNestedFieldNoCopy_InstallationSecret(t *testing.T) {
-	g := gomega.NewWithT(t)
-
 	secret := map[string]interface{}{
 		testKindField:       testSecretKind,
 		"namespace":         defaultNamespace,
@@ -48,25 +47,21 @@ func TestNestedFieldNoCopy_InstallationSecret(t *testing.T) {
 	obj := installerConfigWithSecret(secret)
 
 	value, found, err := unstructured.NestedFieldNoCopy(obj.Object, "status", "installationSecret")
-	g.Expect(err).NotTo(gomega.HaveOccurred())
-	g.Expect(found).To(gomega.BeTrue())
-	g.Expect(value).To(gomega.Equal(secret))
+	require.NoError(t, err)
+	assert.True(t, found)
+	assert.Equal(t, secret, value)
 }
 
 func TestNestedFieldNoCopy_MissingInstallationSecret(t *testing.T) {
-	g := gomega.NewWithT(t)
-
 	obj := installerConfigWithSecret(nil)
 
 	value, found, err := unstructured.NestedFieldNoCopy(obj.Object, "status", "installationSecret")
-	g.Expect(err).NotTo(gomega.HaveOccurred())
-	g.Expect(found).To(gomega.BeFalse())
-	g.Expect(value).To(gomega.BeNil())
+	require.NoError(t, err)
+	assert.False(t, found)
+	assert.Nil(t, value)
 }
 
 func TestNestedFieldNoCopy_NonMapIntermediate(t *testing.T) {
-	g := gomega.NewWithT(t)
-
 	// "status" is a string instead of a map — matches what the controller would
 	// see if a CRD ever serialized status unexpectedly (or a conversion webhook misbehaved).
 	obj := &unstructured.Unstructured{
@@ -76,12 +71,10 @@ func TestNestedFieldNoCopy_NonMapIntermediate(t *testing.T) {
 	}
 
 	_, _, err := unstructured.NestedFieldNoCopy(obj.Object, "status", "installationSecret")
-	g.Expect(err).To(gomega.HaveOccurred())
+	assert.Error(t, err)
 }
 
 func TestFromUnstructured_ObjectReferenceRoundTrip(t *testing.T) {
-	g := gomega.NewWithT(t)
-
 	secret := map[string]interface{}{
 		testKindField:       testSecretKind,
 		"namespace":         defaultNamespace,
@@ -91,16 +84,14 @@ func TestFromUnstructured_ObjectReferenceRoundTrip(t *testing.T) {
 
 	secretRef := &corev1.ObjectReference{}
 	err := runtime.DefaultUnstructuredConverter.FromUnstructured(secret, secretRef)
-	g.Expect(err).NotTo(gomega.HaveOccurred())
-	g.Expect(secretRef.Kind).To(gomega.Equal(testSecretKind))
-	g.Expect(secretRef.Namespace).To(gomega.Equal(defaultNamespace))
-	g.Expect(secretRef.Name).To(gomega.Equal(testSecretName))
-	g.Expect(secretRef.APIVersion).To(gomega.Equal(testObjectReferenceAPIVersion))
+	require.NoError(t, err)
+	assert.Equal(t, testSecretKind, secretRef.Kind)
+	assert.Equal(t, defaultNamespace, secretRef.Namespace)
+	assert.Equal(t, testSecretName, secretRef.Name)
+	assert.Equal(t, testObjectReferenceAPIVersion, secretRef.APIVersion)
 }
 
 func TestFromUnstructured_WrongFieldType(t *testing.T) {
-	g := gomega.NewWithT(t)
-
 	// "name" must be a string on ObjectReference; a numeric value should fail
 	// the conversion rather than silently coerce, exactly as the controller expects.
 	secret := map[string]interface{}{
@@ -110,12 +101,10 @@ func TestFromUnstructured_WrongFieldType(t *testing.T) {
 
 	secretRef := &corev1.ObjectReference{}
 	err := runtime.DefaultUnstructuredConverter.FromUnstructured(secret, secretRef)
-	g.Expect(err).To(gomega.HaveOccurred())
+	assert.Error(t, err)
 }
 
 func TestInstallerConfigGVK_TemplateSuffixStripped(t *testing.T) {
-	g := gomega.NewWithT(t)
-
 	// getInstallerConfig() derives the InstallerConfig's GVK from the
 	// InstallerRef's GVK by stripping the "Template" suffix from the Kind
 	// (e.g. K8sInstallerConfigTemplate -> K8sInstallerConfig). Characterize
@@ -131,9 +120,9 @@ func TestInstallerConfigGVK_TemplateSuffixStripped(t *testing.T) {
 	gvk.Kind = testK8sInstallerConfigKind
 	installerConfig.SetGroupVersionKind(gvk)
 
-	g.Expect(installerConfig.GroupVersionKind()).To(gomega.Equal(schema.GroupVersionKind{
+	assert.Equal(t, schema.GroupVersionKind{
 		Group:   "infrastructure.cluster.x-k8s.io",
 		Version: "v1beta1",
 		Kind:    testK8sInstallerConfigKind,
-	}))
+	}, installerConfig.GroupVersionKind())
 }
