@@ -139,6 +139,12 @@ var _ = Describe("When BYO Host rejoins the capacity pool [Reuse]", func() {
 		Expect(ok).To(BeTrue())
 		Expect(cluster).To(Equal(clusterName))
 
+		AssertByoHostConditionsTrue(ctx, bootstrapClusterProxy, namespace.Name, byoHostName2, specName,
+			infrastructurev1beta1.AgentConnected,
+			infrastructurev1beta1.K8sComponentsInstallationSucceeded,
+			infrastructurev1beta1.K8sNodeBootstrapSucceeded,
+		)
+
 		By("Delete the cluster and freeing the ByoHosts")
 		framework.DeleteAllClustersAndWait(ctx, framework.DeleteAllClustersAndWaitInput{
 			Client:    bootstrapClusterProxy.GetClient(),
@@ -187,6 +193,12 @@ var _ = Describe("When BYO Host rejoins the capacity pool [Reuse]", func() {
 		cluster, ok = byoHostToBeReused.Labels[clusterv1.ClusterNameLabel]
 		Expect(ok).To(BeTrue())
 		Expect(cluster).To(Equal(clusterName))
+
+		AssertByoHostConditionsTrue(ctx, bootstrapClusterProxy, namespace.Name, byoHostName2, specName,
+			infrastructurev1beta1.AgentConnected,
+			infrastructurev1beta1.K8sComponentsInstallationSucceeded,
+			infrastructurev1beta1.K8sNodeBootstrapSucceeded,
+		)
 
 	})
 
