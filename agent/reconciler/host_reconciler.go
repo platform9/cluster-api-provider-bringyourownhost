@@ -13,6 +13,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/cloudinit"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/registration"
+	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/version"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/common"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -107,6 +108,12 @@ func (r *HostReconciler) reconcileNormal(ctx context.Context, byoHost *infrastru
 	now := metav1.Now()
 	if byoHost.Status.LastHeartbeatTime == nil || now.Sub(byoHost.Status.LastHeartbeatTime.Time) >= r.HeartbeatInterval {
 		byoHost.Status.LastHeartbeatTime = &now
+		byoHost.Status.AgentVersion = version.Get().GitVersion
+		if machineID, err := registration.GetMachineID(os.ReadFile); err != nil {
+			logger.Error(err, "failed to read /etc/machine-id")
+		} else {
+			byoHost.Status.MachineID = machineID
+		}
 	}
 
 	if byoHost.Status.MachineRef == nil {

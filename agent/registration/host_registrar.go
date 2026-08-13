@@ -1,4 +1,5 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package registration
@@ -173,4 +174,15 @@ func getOperatingSystem(f func(string) ([]byte, error)) (string, error) {
 		return strings.Trim(line[0][2], "\""), nil
 	}
 	return "Unknown", nil
+}
+
+func GetMachineID(f func(string) ([]byte, error)) (string, error) {
+	bytes, err := f("/etc/machine-id")
+	if err != nil && os.IsNotExist(err) {
+		bytes, err = f("/var/lib/dbus/machine-id")
+	}
+	if err != nil {
+		return "", fmt.Errorf("error opening file : %v", err)
+	}
+	return strings.TrimSpace(string(bytes)), nil
 }
