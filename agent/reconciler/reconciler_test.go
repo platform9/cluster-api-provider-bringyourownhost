@@ -893,9 +893,11 @@ func newHostReconcilerForHeartbeatTest(t *testing.T, interval time.Duration) *re
 func newByoHostInAPIServer(t *testing.T, name string) (*infrastructurev1beta1.ByoHost, types.NamespacedName) {
 	t.Helper()
 	byoHost := builder.ByoHost("default", name).Build()
-	require.NoError(t, k8sClient.Create(context.TODO(), byoHost))
+	require.NoError(t, k8sClient.Create(t.Context(), byoHost))
 	t.Cleanup(func() {
-		_ = client.IgnoreNotFound(k8sClient.Delete(context.TODO(), byoHost))
+		// t.Context() is already canceled by the time Cleanup funcs run, so
+		// this delete needs its own context rather than the test's.
+		_ = client.IgnoreNotFound(k8sClient.Delete(context.Background(), byoHost))
 	})
 	return byoHost, types.NamespacedName{Name: byoHost.Name, Namespace: byoHost.Namespace}
 }
@@ -905,12 +907,12 @@ func TestHostReconciler_Heartbeat(t *testing.T) {
 		r := newHostReconcilerForHeartbeatTest(t, 1300*time.Millisecond)
 		_, key := newByoHostInAPIServer(t, "heartbeat-stamps")
 
-		result, err := r.Reconcile(context.TODO(), controllerruntime.Request{NamespacedName: key})
+		result, err := r.Reconcile(t.Context(), controllerruntime.Request{NamespacedName: key})
 		require.NoError(t, err)
 		assert.Equal(t, 1300*time.Millisecond, result.RequeueAfter)
 
 		updated := &infrastructurev1beta1.ByoHost{}
-		require.NoError(t, k8sClient.Get(context.TODO(), key, updated))
+		require.NoError(t, k8sClient.Get(t.Context(), key, updated))
 		assert.NotNil(t, updated.Status.LastHeartbeatTime)
 	})
 
@@ -919,21 +921,21 @@ func TestHostReconciler_Heartbeat(t *testing.T) {
 		_, key := newByoHostInAPIServer(t, "heartbeat-nowrite")
 
 		// First reconcile — stamps the time
-		_, err := r.Reconcile(context.TODO(), controllerruntime.Request{NamespacedName: key})
+		_, err := r.Reconcile(t.Context(), controllerruntime.Request{NamespacedName: key})
 		require.NoError(t, err)
 
 		first := &infrastructurev1beta1.ByoHost{}
-		require.NoError(t, k8sClient.Get(context.TODO(), key, first))
+		require.NoError(t, k8sClient.Get(t.Context(), key, first))
 		require.NotNil(t, first.Status.LastHeartbeatTime)
 		firstRV := first.ResourceVersion
 		firstStamp := first.Status.LastHeartbeatTime.Time
 
 		// Second reconcile immediately — within interval, must not re-stamp
-		_, err = r.Reconcile(context.TODO(), controllerruntime.Request{NamespacedName: key})
+		_, err = r.Reconcile(t.Context(), controllerruntime.Request{NamespacedName: key})
 		require.NoError(t, err)
 
 		second := &infrastructurev1beta1.ByoHost{}
-		require.NoError(t, k8sClient.Get(context.TODO(), key, second))
+		require.NoError(t, k8sClient.Get(t.Context(), key, second))
 		assert.Equal(t, firstRV, second.ResourceVersion, "resourceVersion must not change on a no-op heartbeat")
 		assert.Equal(t, firstStamp, second.Status.LastHeartbeatTime.Time, "LastHeartbeatTime must not change within interval")
 	})
@@ -943,22 +945,22 @@ func TestHostReconciler_Heartbeat(t *testing.T) {
 		r := newHostReconcilerForHeartbeatTest(t, interval)
 		_, key := newByoHostInAPIServer(t, "heartbeat-refresh")
 
-		_, err := r.Reconcile(context.TODO(), controllerruntime.Request{NamespacedName: key})
+		_, err := r.Reconcile(t.Context(), controllerruntime.Request{NamespacedName: key})
 		require.NoError(t, err)
 
 		first := &infrastructurev1beta1.ByoHost{}
-		require.NoError(t, k8sClient.Get(context.TODO(), key, first))
+		require.NoError(t, k8sClient.Get(t.Context(), key, first))
 		require.NotNil(t, first.Status.LastHeartbeatTime)
 
 		// metav1.Time has second-precision through the API server; sleep enough
 		// to cross a whole-second boundary regardless of test start alignment.
 		time.Sleep(interval + 1200*time.Millisecond)
 
-		_, err = r.Reconcile(context.TODO(), controllerruntime.Request{NamespacedName: key})
+		_, err = r.Reconcile(t.Context(), controllerruntime.Request{NamespacedName: key})
 		require.NoError(t, err)
 
 		second := &infrastructurev1beta1.ByoHost{}
-		require.NoError(t, k8sClient.Get(context.TODO(), key, second))
+		require.NoError(t, k8sClient.Get(t.Context(), key, second))
 		require.NotNil(t, second.Status.LastHeartbeatTime)
 		assert.True(t, second.Status.LastHeartbeatTime.After(first.Status.LastHeartbeatTime.Time),
 			"LastHeartbeatTime should advance after interval elapsed")
@@ -974,11 +976,11 @@ func TestHostReconciler_AgentVersion(t *testing.T) {
 		r := newHostReconcilerForHeartbeatTest(t, 1300*time.Millisecond)
 		_, key := newByoHostInAPIServer(t, "agent-version-stamps")
 
-		_, err := r.Reconcile(context.TODO(), controllerruntime.Request{NamespacedName: key})
+		_, err := r.Reconcile(t.Context(), controllerruntime.Request{NamespacedName: key})
 		require.NoError(t, err)
 
 		updated := &infrastructurev1beta1.ByoHost{}
-		require.NoError(t, k8sClient.Get(context.TODO(), key, updated))
+		require.NoError(t, k8sClient.Get(t.Context(), key, updated))
 		assert.Equal(t, "v-test-1", updated.Status.AgentVersion)
 		assert.NotNil(t, updated.Status.LastHeartbeatTime)
 	})
