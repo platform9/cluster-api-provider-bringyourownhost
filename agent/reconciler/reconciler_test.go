@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/cloudinit/cloudinitfakes"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/reconciler"
+	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/version"
 	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/test/builder"
 	eventutils "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/test/utils/events"
@@ -961,5 +962,24 @@ func TestHostReconciler_Heartbeat(t *testing.T) {
 		require.NotNil(t, second.Status.LastHeartbeatTime)
 		assert.True(t, second.Status.LastHeartbeatTime.After(first.Status.LastHeartbeatTime.Time),
 			"LastHeartbeatTime should advance after interval elapsed")
+	})
+}
+
+func TestHostReconciler_AgentVersion(t *testing.T) {
+	t.Run("stamps AgentVersion on the same tick as LastHeartbeatTime", func(t *testing.T) {
+		original := version.GitVersion
+		version.GitVersion = "v-test-1"
+		t.Cleanup(func() { version.GitVersion = original })
+
+		r := newHostReconcilerForHeartbeatTest(t, 1300*time.Millisecond)
+		_, key := newByoHostInAPIServer(t, "agent-version-stamps")
+
+		_, err := r.Reconcile(context.TODO(), controllerruntime.Request{NamespacedName: key})
+		require.NoError(t, err)
+
+		updated := &infrastructurev1beta1.ByoHost{}
+		require.NoError(t, k8sClient.Get(context.TODO(), key, updated))
+		assert.Equal(t, "v-test-1", updated.Status.AgentVersion)
+		assert.NotNil(t, updated.Status.LastHeartbeatTime)
 	})
 }

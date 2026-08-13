@@ -1,4 +1,5 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package v1beta1
@@ -93,6 +94,23 @@ type ByoHostStatus struct {
 	// host agent does.
 	// +optional
 	LastHeartbeatTime *metav1.Time `json:"lastHeartbeatTime,omitempty"`
+
+	// AgentVersion is the version.GitVersion of the agent binary currently
+	// running on this host, as reported by the agent itself. The management
+	// cluster only reads it.
+	// +optional
+	AgentVersion string `json:"agentVersion,omitempty"`
+
+	// MachineID uniquely identifies the underlying machine this host runs on,
+	// read from /etc/machine-id (falling back per systemd's machine-id(5)
+	// convention where absent) and reported by the agent itself. Unlike the
+	// ByoHost name — derived from os.Hostname(), which can change, collide, or
+	// be reused across a re-provisioned machine — this does not change unless
+	// the machine itself is reimaged. It is a fact, not an enforcement
+	// mechanism: this ADR only surfaces it, it does not compare it against
+	// anything or reject a mismatch.
+	// +optional
+	MachineID string `json:"machineID,omitempty"`
 }
 
 //+kubebuilder:object:root=true

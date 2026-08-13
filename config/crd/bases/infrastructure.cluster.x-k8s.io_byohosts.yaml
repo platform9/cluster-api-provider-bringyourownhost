@@ -191,6 +191,12 @@ spec:
             status:
               description: ByoHostStatus defines the observed state of ByoHost
               properties:
+                agentVersion:
+                  description: |-
+                    AgentVersion is the version.GitVersion of the agent binary currently
+                    running on this host, as reported by the agent itself. The management
+                    cluster only reads it.
+                  type: string
                 conditions:
                   description: Conditions defines current service state of the BYOMachine.
                   items:
@@ -259,6 +265,17 @@ spec:
                     AgentConnected; it does not read or write this field itself — only the
                     host agent does.
                   format: date-time
+                  type: string
+                machineID:
+                  description: |-
+                    MachineID uniquely identifies the underlying machine this host runs on,
+                    read from /etc/machine-id (falling back per systemd's machine-id(5)
+                    convention where absent) and reported by the agent itself. Unlike the
+                    ByoHost name — derived from os.Hostname(), which can change, collide, or
+                    be reused across a re-provisioned machine — this does not change unless
+                    the machine itself is reimaged. It is a fact, not an enforcement
+                    mechanism: this ADR only surfaces it, it does not compare it against
+                    anything or reject a mismatch.
                   type: string
                 machineRef:
                   description: |-

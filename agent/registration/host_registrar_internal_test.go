@@ -1,4 +1,5 @@
 // Copyright 2022 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package registration
@@ -68,6 +69,34 @@ var _ = Describe("Host Registrar Tests", func() {
 			detectedOS, err := getOperatingSystem(func(string) ([]byte, error) { return []byte("some_file_without_PRETTY_NAME"), nil })
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(detectedOS).To(Equal("Unknown"))
+		})
+	})
+
+	Context("When the machine ID is read", func() {
+		It("Should return the machine ID from /etc/machine-id", func() {
+			machineID, err := GetMachineID(func(string) ([]byte, error) { return []byte("deadbeefdeadbeefdeadbeefdeadbeef\n"), nil })
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(machineID).To(Equal("deadbeefdeadbeefdeadbeefdeadbeef"))
+		})
+
+		It("Should fall back to /var/lib/dbus/machine-id when /etc/machine-id is missing", func() {
+			machineID, err := GetMachineID(func(path string) ([]byte, error) {
+				if path == "/etc/machine-id" {
+					return nil, os.ErrNotExist
+				}
+				return []byte("cafebabecafebabecafebabecafebabe\n"), nil
+			})
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(machineID).To(Equal("cafebabecafebabecafebabecafebabe"))
+		})
+	})
+
+	Context("When both machine-id locations are missing", func() {
+		It("Should return error", func() {
+			_, err := GetMachineID(func(string) ([]byte, error) {
+				return nil, os.ErrNotExist
+			})
+			Expect(err.Error()).To(Equal("error opening file : file does not exist"))
 		})
 	})
 })
