@@ -89,6 +89,11 @@ var _ = Describe("Host Registrar Tests", func() {
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(machineID).To(Equal("cafebabecafebabecafebabecafebabe"))
 		})
+
+		It("Should not error with the real machine-id", func() {
+			_, err := GetMachineID(os.ReadFile)
+			Expect(err).ShouldNot(HaveOccurred())
+		})
 	})
 
 	Context("When both machine-id locations are missing", func() {
