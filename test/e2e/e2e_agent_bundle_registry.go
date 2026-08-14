@@ -14,8 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
@@ -94,12 +94,12 @@ func ensureLocalAgentBundleRegistry(ctx context.Context, dockerClient *client.Cl
 func startAgentBundleRegistry(ctx context.Context, dockerClient *client.Client, dockerNetwork string) error {
 	// Best-effort cleanup of a leftover container from a prior interrupted run -- ignore errors,
 	// this is purely so ContainerCreate below doesn't fail on a name conflict.
-	_ = dockerClient.ContainerRemove(ctx, agentBundleRegistryContainerName, types.ContainerRemoveOptions{Force: true})
+	_ = dockerClient.ContainerRemove(ctx, agentBundleRegistryContainerName, container.RemoveOptions{Force: true})
 
 	// Unlike the docker CLI, the SDK's ContainerCreate doesn't auto-pull a missing image -- it
 	// just fails with "No such image". Pull explicitly first; the returned reader must be drained
 	// for the pull to actually complete before ContainerCreate runs.
-	pullReader, err := dockerClient.ImagePull(ctx, "registry:2", types.ImagePullOptions{})
+	pullReader, err := dockerClient.ImagePull(ctx, "registry:2", image.PullOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to pull registry:2: %w", err)
 	}
@@ -124,7 +124,7 @@ func startAgentBundleRegistry(ctx context.Context, dockerClient *client.Client, 
 	if err != nil {
 		return fmt.Errorf("failed to create local agent-bundle registry container: %w", err)
 	}
-	if err := dockerClient.ContainerStart(ctx, created.ID, types.ContainerStartOptions{}); err != nil {
+	if err := dockerClient.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
 		return fmt.Errorf("failed to start local agent-bundle registry container: %w", err)
 	}
 	return nil
