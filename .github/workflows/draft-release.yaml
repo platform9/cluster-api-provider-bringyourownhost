@@ -7,12 +7,8 @@ on:
       - "v*.*.*"
 
 jobs:
-  go-version:
-    uses: ./.github/workflows/_go.yml
-
   build:
     runs-on: ubuntu-22.04
-    needs: go-version
     steps:
 
       - name: Checkout
@@ -21,7 +17,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version: ${{ needs.go-version.outputs.version }}
+          go-version-file: go.mod
 
       - name: Build Release Artifacts
         run: IMG="projects.registry.vmware.com/cluster_api_provider_bringyourownhost/cluster-api-byoh-controller:${{ github.ref_name }}" make build-release-artifacts

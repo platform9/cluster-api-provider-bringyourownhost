@@ -22,12 +22,8 @@ on:
       - 'SECURITY_CONTACTS'
 
 jobs:
-  go-version:
-    uses: ./.github/workflows/_go.yml
-
   unit-test:
     if: ${{ !github.event.pull_request.draft }}
-    needs: go-version
     runs-on: ubuntu-22.04
     steps:
     - name: Check Docker Version
@@ -45,7 +41,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: ${{ needs.go-version.outputs.version }}
+        go-version-file: go.mod
     - name: Install prequisit packages
       run: sudo apt update && sudo apt install -qq --yes socat ebtables ethtool conntrack
     - name: Run test make target
