@@ -24,9 +24,10 @@ revision note below).
 > packaging decision. Design review concluded that deferral bought flexibility nobody actually
 > needed, at the cost of a real security surface (arbitrary root-privileged script content run
 > continuously, not once) and extra machinery (per-host Secret creation and templating). This
-> revision commits to one narrow mechanism instead — fetch a `.deb` or `.rpm` and hand it to the
-> host's own package manager — and removes the script/Secret path entirely. See §2.2 and §4 for
-> the reasoning and the alternative it replaces.
+> revision commits to one narrow mechanism instead — pull an OCI-packaged `.deb`/`.rpm` via
+> `imgpkg` (the same mechanism already used elsewhere in this repo, not a new one) and hand it to
+> the host's own package manager — and removes the script/Secret path entirely. See §2.2 and §4
+> for the reasoning and the alternative it replaces.
 
 ---
 
@@ -98,21 +99,29 @@ kubelet at runtime. This means an agent process *restarting* (not just re-exec'i
 disrupt kubelet either — worth noting up front because §2.2 step 5's original justification for
 avoiding a restart got this wrong.
 
-**Fetching a package and installing it with the host's own package manager already has precedent
-in this repo**, even though today it only runs during initial onboarding: `downloadDebianPackage`
-/ `installDebianPackage` (`cmd/byohctl/service/agent.go`) fetch a `.deb` and run
-`dpkg -i <path>`. §2.2 proposes the same two-step shape — fetch, then hand off to the package
-manager — reused for in-place agent upgrades on an already-registered host, generalized to also
-cover `.rpm` via `rpm -Uvh`.
+**Pulling an OCI-packaged artifact and installing it with the host's own package manager already
+has precedent in this repo, twice over.** `downloadDebianPackage` / `installDebianPackage`
+(`cmd/byohctl/service/agent.go:192-240`) run `imgpkg pull -i <ref> -o <dir>` then `dpkg -i` on the
+extracted `.deb` — during initial onboarding only, today. Separately, the k8s-component installer
+does the exact same `imgpkg pull` for a different artifact
+(`installer/internal/algo/ubuntu-templates/install.sh.tmpl:29`), and that same script also
+self-installs `imgpkg` from GitHub releases if it isn't already on `PATH`
+(`install.sh.tmpl:9-24`) — meaning `imgpkg` is already expected to be present on any host that has
+completed initial k8s-component installation, which every host eligible for an agent upgrade
+necessarily has. §2.2 reuses this exact mechanism rather than a plain HTTP(S) fetch: `imgpkg pull`,
+then hand the extracted `.deb`/`.rpm` to the host's own package manager. If `imgpkg` is somehow
+missing on an eligible host, that's a legitimate `AgentUpgradeFailed` — this design does not
+reimplement `install.sh.tmpl`'s self-install fallback for it.
 
 ---
 
 ## 2. Decision
 
 When the management cluster wants a host on a different agent version, it tells the host exactly
-which package to install — a full URL to a `.deb` or `.rpm`, resolved by whoever creates the
-upgrade CR, not by the agent or controller — and the agent's only job is to fetch it, hand it to
-`dpkg`/`rpm`, and on success re-exec itself. A new **rollout controller** stages this across a
+which package to install — an OCI image reference, pulled via `imgpkg`, resolved by whoever
+creates the upgrade CR, not by the agent or controller — and the agent's only job is to pull it,
+extract the `.deb`/`.rpm` matching its own package family, hand it to `dpkg`/`rpm`, and on success
+re-exec itself. A new **rollout controller** stages this across a
 fleet, gating on the existing heartbeat/`AgentConnected` signal and the new `AgentVersion` field,
 and halting hard on any explicit failure while tolerating pre-existing or transient unavailability
 by simply pausing rather than failing.
@@ -131,18 +140,26 @@ On top of `ByoHostStatus.AgentVersion`
 // +optional
 DesiredAgentVersion string `json:"desiredAgentVersion,omitempty"`
 
-// DesiredAgentPackageURL is a full URL to the .deb or .rpm that installs
-// DesiredAgentVersion on this specific host. It is not templated and does
-// not point at a Secret — a package URL is not sensitive, unlike the
-// opaque-script content an earlier draft of this ADR used. The agent picks
-// `dpkg -i` or `rpm -Uvh` based on its own already-known package manager;
-// nothing else is executed.
+// DesiredAgentPackageURL is an OCI image reference — pulled via `imgpkg
+// pull`, the same mechanism already used for k8s-component bundles and the
+// byohctl onboarding .deb pull — for a bundle containing the .deb/.rpm that
+// installs DesiredAgentVersion. Not templated and does not point at a
+// Secret — an image reference is not sensitive, unlike the opaque-script
+// content an earlier draft of this ADR used. The agent extracts the bundle,
+// picks the single *.deb or *.rpm inside it matching its own already-known
+// package manager, and runs `dpkg -i`/`rpm -Uvh`; nothing else is executed.
+// Pinning this reference by digest (`@sha256:...`) rather than a mutable
+// tag is the primary integrity mechanism — see DesiredAgentPackageChecksum
+// for a secondary, narrower check.
 // +optional
 DesiredAgentPackageURL string `json:"desiredAgentPackageURL,omitempty"`
 
-// DesiredAgentPackageChecksum, if set, is the expected checksum of the
-// fetched artifact ("sha256:<hex>"). The agent refuses to install on
-// mismatch and marks AgentUpgradeFailed with reason PackageChecksumMismatch.
+// DesiredAgentPackageChecksum, if set, is the expected checksum
+// ("sha256:<hex>") of the specific .deb/.rpm file extracted from the
+// DesiredAgentPackageURL bundle — not of the OCI image itself, which
+// digest-pinning the reference above already covers. The agent refuses to
+// install on mismatch and marks AgentUpgradeFailed with reason
+// PackageChecksumMismatch.
 // +optional
 DesiredAgentPackageChecksum string `json:"desiredAgentPackageChecksum,omitempty"`
 ```
@@ -201,7 +218,7 @@ TargetVersion string `json:"targetVersion"`
 matching the same strict-semver shape `hack/version.sh:55` already enforces at build time (and
 rejecting `latest` as a side effect, since it doesn't match).
 
-### 2.2 Agent-side: fetch, install, re-exec
+### 2.2 Agent-side: pull, install, re-exec
 
 New function on the existing `HostReconciler`, `executeAgentUpgrade`, invoked from the same
 reconcile tick that already writes the heartbeat:
@@ -211,10 +228,14 @@ reconcile tick that already writes the heartbeat:
 2. On mismatch, require `Spec.DesiredAgentPackageURL` — if unset, wait (same pattern as
    `executeInstallerController` waiting on `InstallationSecret`,
    `agent/reconciler/host_reconciler.go:142-146`).
-3. Fetch the artifact from `DesiredAgentPackageURL`. If `DesiredAgentPackageChecksum` is set,
-   verify it before doing anything else — mismatch marks `AgentUpgradeFailed`, reason
-   `PackageChecksumMismatch`, and stops here without installing.
-4. Hand the artifact to the host's own package manager — a **fixed, two-way branch based on the
+3. `imgpkg pull -i <DesiredAgentPackageURL> -o <tempDir>`, then find the single `*.deb` (package
+   family `debian`) or `*.rpm` (package family `rhel`) in `tempDir` — the agent already knows
+   which via `registration.GetOSFamily`, the same probe used to set `HostOSFamilyLabel` at
+   registration (§2.1). Zero or more than one match is a hard error (`AgentUpgradeFailed`, reason
+   `PackageBundleInvalid`) — not something to guess at. If `DesiredAgentPackageChecksum` is set,
+   verify it against that extracted file before doing anything else — mismatch marks
+   `AgentUpgradeFailed`, reason `PackageChecksumMismatch`, and stops here without installing.
+4. Hand the extracted file to the host's own package manager — a **fixed, two-way branch based on the
    agent's own already-known package format**, never an operator-supplied command:
    `dpkg -i <path>` or `rpm -Uvh <path>` — no `--oldpackage`/force-downgrade flag, ever (see §2.4:
    a downgrade failing here is the intended backstop, not a bug to route around).
@@ -278,7 +299,7 @@ already uses:
 type ByoHostAgentUpgradeSpec struct {
     Selector         metav1.LabelSelector // which ByoHosts this rollout targets, within this CR's own namespace
     TargetVersion    string               // strict semver only, see §2.1
-    PackageURL       string               // full URL to the .deb/.rpm for this cohort
+    PackageURL       string               // OCI image ref (imgpkg-pulled) for this cohort's .deb/.rpm bundle
     PackageChecksum  string               // optional, "sha256:<hex>"
     MaxUnavailable   *intstr.IntOrString  // default 1
     PerHostTimeout   metav1.Duration      // default 10m
@@ -535,7 +556,7 @@ original draft — a trivially small `.deb` (and, if the fleet mix is real rathe
 | Agent runs under a process supervisor (systemd, in this repo's reference implementation) with `Restart=always`, a fixed restart delay, and a tight burst limit — no exponential backoff; exact burst/interval values are a deployment tunable, not cited as an architectural constant | current reference implementation's agent unit file (not cited by path — see revision note, this ADR treats the mechanism as general systemd `Restart=`/`StartLimitBurst` behavior, not this repo's specific tuning) |
 | Kubelet is its own package, started via a one-shot script the agent runs to completion and exits — never parented or supervised by the agent process | `installer/internal/algo/ubuntu-templates/install.sh.tmpl:50`; `agent/cloudinit/cmd_runner.go:24` |
 | Existing opaque-script hand-off pattern this design's *agent-side execution shape* reuses (not its content model) | `agent/reconciler/host_reconciler.go:142-146,181-214` |
-| Existing fetch-then-package-manager-install precedent | `cmd/byohctl/service/agent.go` (`downloadDebianPackage`/`installDebianPackage`, `dpkg -i`) |
+| Existing `imgpkg`-pull-then-package-manager-install precedent (used twice already: onboarding and k8s-component install) | `cmd/byohctl/service/agent.go:192-240`; `installer/internal/algo/ubuntu-templates/install.sh.tmpl:9-29` |
 | Strict-semver validation precedent this ADR's `TargetVersion` pattern reuses | `hack/version.sh:55` |
 | `ByoHost`/`ByoCluster` are namespace-scoped today | `apis/infrastructure/v1beta1/byohost_types.go:117`; `apis/infrastructure/v1beta1/byocluster_types.go:53` |
 | Existing docker-backed e2e host harness this plan's tests build on | `test/e2e/docker_helper.go`; `test/e2e/cluster_upgrade_test.go:65-103` |
