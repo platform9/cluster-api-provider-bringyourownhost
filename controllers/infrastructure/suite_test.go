@@ -60,6 +60,7 @@ var (
 	bootstrapKubeconfigReconciler         *controllers.BootstrapKubeconfigReconciler
 	byoHostReconciler                     *controllers.ByoHostReconciler
 	byoHostAgentUpgradeReconciler         *controllers.ByoHostAgentUpgradeReconciler
+	directClient                          client.Client
 	recorder                              *record.FakeRecorder
 	byoCluster                            *infrastructurev1beta1.ByoCluster
 	capiCluster                           *clusterv1.Cluster
@@ -131,7 +132,8 @@ func setupReconcilers() {
 
 	// byoHostReconciler uses a direct (non-cached) client so tests can patch
 	// objects and call Reconcile immediately without waiting for cache sync.
-	directClient, err := client.New(cfg, client.Options{Scheme: scheme.Scheme})
+	var err error
+	directClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
 	if err != nil {
 		panic(err)
 	}

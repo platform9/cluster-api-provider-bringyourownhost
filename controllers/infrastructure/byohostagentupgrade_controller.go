@@ -45,8 +45,6 @@ type ByoHostAgentUpgradeReconciler struct {
 //+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 func (r *ByoHostAgentUpgradeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reterr error) {
-	logger := log.FromContext(ctx)
-
 	upgrade := &infrastructurev1beta1.ByoHostAgentUpgrade{}
 	if err := r.Get(ctx, req.NamespacedName, upgrade); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
@@ -86,40 +84,37 @@ func (r *ByoHostAgentUpgradeReconciler) Reconcile(ctx context.Context, req ctrl.
 
 	summary := summarizeHosts(hosts, upgrade.Spec.TargetVersion, startedAt, perHostTimeout)
 	upgrade.Status.Upgraded = int32(len(summary.converged))
-	upgrade.Status.UnavailableCount = int32(len(summary.unavailable))
-	upgrade.Status.InFlightHosts = toUpgradeAttempts(summary.inFlight, startedAt)
 
 	if len(summary.failed) > 0 {
 		return r.markFailed(upgrade, summary.failed)
 	}
 
 	if len(summary.unavailable) >= maxUnavailable {
+		upgrade.Status.UnavailableCount = int32(len(summary.unavailable))
+		upgrade.Status.InFlightHosts = toUpgradeAttempts(summary.inFlight, startedAt)
 		conditions.MarkFalse(upgrade, infrastructurev1beta1.RolloutAvailable, infrastructurev1beta1.InsufficientAvailabilityBudgetReason, clusterv1.ConditionSeverityWarning, "")
 		return ctrl.Result{RequeueAfter: requeueInterval}, nil
 	}
 	conditions.MarkTrue(upgrade, infrastructurev1beta1.RolloutAvailable)
 
-	slots := maxUnavailable - len(summary.unavailable)
-	picked := pickHosts(summary.notYetUpgraded, slots)
-	for _, host := range picked {
-		host.Spec.DesiredAgentVersion = upgrade.Spec.TargetVersion
-		host.Spec.DesiredAgentPackageURL = upgrade.Spec.PackageURL
-		host.Spec.DesiredAgentPackageChecksum = upgrade.Spec.PackageChecksum
-		if err := r.Update(ctx, host); err != nil {
-			logger.Error(err, "failed to assign agent upgrade to host", "host", host.Name)
-			return ctrl.Result{}, err
-		}
-		if r.Recorder != nil {
-			r.Recorder.Eventf(upgrade, corev1.EventTypeNormal, "HostSelected", "assigned agent upgrade to host %s", host.Name)
-		}
+	picked, err := r.pickAndAssign(ctx, upgrade, &summary, maxUnavailable)
+	if err != nil {
+		return ctrl.Result{}, err
 	}
+
+	// Reflect this tick's own picks immediately rather than waiting for the
+	// next reconcile to notice them - summary alone only knows about state
+	// from before this tick started picking.
+	allInFlight := append(append([]*infrastructurev1beta1.ByoHost{}, summary.inFlight...), picked...)
+	upgrade.Status.InFlightHosts = toUpgradeAttempts(allInFlight, startedAt)
+	upgrade.Status.UnavailableCount = int32(len(summary.unavailable) + len(picked))
 
 	if len(summary.converged) == len(hosts) && len(hosts) > 0 {
 		upgrade.Status.Phase = infrastructurev1beta1.ByoHostAgentUpgradePhaseCompleted
 		upgrade.Status.InFlightHosts = nil
 		return ctrl.Result{}, nil
 	}
-	if len(summary.inFlight) > 0 || len(picked) > 0 {
+	if len(allInFlight) > 0 {
 		upgrade.Status.Phase = infrastructurev1beta1.ByoHostAgentUpgradePhaseProgressing
 	}
 	return ctrl.Result{RequeueAfter: requeueInterval}, nil
@@ -153,6 +148,31 @@ func resolvePerHostTimeout(upgrade *infrastructurev1beta1.ByoHostAgentUpgrade) t
 		return upgrade.Spec.PerHostTimeout.Duration
 	}
 	return defaultPerHostTimeout
+}
+
+func (r *ByoHostAgentUpgradeReconciler) pickAndAssign(ctx context.Context, upgrade *infrastructurev1beta1.ByoHostAgentUpgrade, summary *hostSummary, maxUnavailable int) ([]*infrastructurev1beta1.ByoHost, error) {
+	candidates := make([]*infrastructurev1beta1.ByoHost, 0, len(summary.notYetUpgraded))
+	for _, host := range summary.notYetUpgraded {
+		if _, unavailable := summary.unavailable[host.Name]; !unavailable {
+			candidates = append(candidates, host)
+		}
+	}
+	picked := pickHosts(candidates, maxUnavailable-len(summary.unavailable))
+	for _, host := range picked {
+		host.Spec.DesiredAgent = &infrastructurev1beta1.DesiredAgentSpec{
+			Version:         upgrade.Spec.TargetVersion,
+			PackageURL:      upgrade.Spec.PackageURL,
+			PackageChecksum: upgrade.Spec.PackageChecksum,
+		}
+		if err := r.Update(ctx, host); err != nil {
+			log.FromContext(ctx).Error(err, "failed to assign agent upgrade to host", "host", host.Name)
+			return nil, err
+		}
+		if r.Recorder != nil {
+			r.Recorder.Eventf(upgrade, corev1.EventTypeNormal, "HostSelected", "assigned agent upgrade to host %s", host.Name)
+		}
+	}
+	return picked, nil
 }
 
 func (r *ByoHostAgentUpgradeReconciler) markFailed(upgrade *infrastructurev1beta1.ByoHostAgentUpgrade, failed []*infrastructurev1beta1.ByoHost) (ctrl.Result, error) {
