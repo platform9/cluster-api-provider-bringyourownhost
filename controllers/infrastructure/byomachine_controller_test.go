@@ -938,7 +938,7 @@ func TestClusterToByoMachines(t *testing.T) {
 
 	t.Run("returns requests only for ByoMachines labeled with the cluster", func(t *testing.T) {
 		cluster := &clusterv1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: testMapFuncClusterName, Namespace: defaultNamespace}}
-		requests := mapFunc(cluster)
+		requests := mapFunc(t.Context(), cluster)
 		require.Len(t, requests, 1)
 		assert.Equal(t, "byomachine-in-cluster", requests[0].Name)
 		assert.Equal(t, defaultNamespace, requests[0].Namespace)
@@ -946,7 +946,7 @@ func TestClusterToByoMachines(t *testing.T) {
 
 	t.Run("returns nothing for a cluster with no matching ByoMachines", func(t *testing.T) {
 		cluster := &clusterv1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster-with-no-machines", Namespace: defaultNamespace}}
-		assert.Empty(t, mapFunc(cluster))
+		assert.Empty(t, mapFunc(t.Context(), cluster))
 	})
 
 	t.Run("skips clusters with a deletion timestamp", func(t *testing.T) {
@@ -959,11 +959,11 @@ func TestClusterToByoMachines(t *testing.T) {
 				Finalizers:        []string{"keep-for-test"},
 			},
 		}
-		assert.Empty(t, mapFunc(cluster))
+		assert.Empty(t, mapFunc(t.Context(), cluster))
 	})
 
 	t.Run("returns nil for a non-Cluster object", func(t *testing.T) {
-		assert.Nil(t, mapFunc(&corev1.Pod{}))
+		assert.Nil(t, mapFunc(t.Context(), &corev1.Pod{}))
 	})
 }
 
@@ -982,14 +982,14 @@ func TestByoHostToByoMachineMapFunc(t *testing.T) {
 				},
 			},
 		}
-		requests := mapFunc(host)
+		requests := mapFunc(t.Context(), host)
 		require.Len(t, requests, 1)
 		assert.Equal(t, client.ObjectKey{Namespace: defaultNamespace, Name: "referenced-byomachine"}, requests[0].NamespacedName)
 	})
 
 	t.Run("returns nil when MachineRef is not set", func(t *testing.T) {
 		host := &infrastructurev1beta1.ByoHost{}
-		assert.Nil(t, mapFunc(host))
+		assert.Nil(t, mapFunc(t.Context(), host))
 	})
 
 	t.Run("returns nil when MachineRef points at a different GroupKind", func(t *testing.T) {
@@ -1003,10 +1003,10 @@ func TestByoHostToByoMachineMapFunc(t *testing.T) {
 				},
 			},
 		}
-		assert.Nil(t, mapFunc(host))
+		assert.Nil(t, mapFunc(t.Context(), host))
 	})
 
 	t.Run("returns nil for a non-ByoHost object", func(t *testing.T) {
-		assert.Nil(t, mapFunc(&corev1.Pod{}))
+		assert.Nil(t, mapFunc(t.Context(), &corev1.Pod{}))
 	})
 }

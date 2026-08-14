@@ -22,7 +22,9 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	byohcontrollers "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/controllers/infrastructure"
 
@@ -77,12 +79,12 @@ func setFlags() {
 // nolint: funlen, gocyclo
 func main() {
 	setFlags()
-	ctrl.SetLogger(klogr.New())
+	ctrl.SetLogger(klogr.New()) //nolint: staticcheck // klogr predates the textlogger migration; swapping formats is a separate, deliberate change outside this dependency bump's scope
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
-		MetricsBindAddress:     metricsAddr,
-		Port:                   9443,
+		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
+		WebhookServer:          webhook.NewServer(webhook.Options{Port: 9443}),
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "controller-leader-election-caph",
@@ -92,15 +94,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	// remote.ClusterCacheTracker/ClusterCacheReconciler are deprecated in favor of
+	// controllers/clustercache as of CAPI v1.10, but still fully supported at v1.10.10 (the
+	// version this repo targets). Migrating to clustercache.SetupWithManager changes the
+	// underlying workload-cluster connection/cache lifecycle and deserves its own dedicated
+	// verification pass rather than riding along with this dependency bump.
 	remoteLogger := ctrl.Log.WithName("remote").WithName("ClusterCacheTracker")
-	options := remote.ClusterCacheTrackerOptions{Log: &remoteLogger}
-	tracker, err := remote.NewClusterCacheTracker(mgr, options)
+	options := remote.ClusterCacheTrackerOptions{Log: &remoteLogger} //nolint: staticcheck
+	tracker, err := remote.NewClusterCacheTracker(mgr, options)      //nolint: staticcheck
 	if err != nil {
 		setupLog.Error(err, "unable to create cluster cache tracker")
 		os.Exit(1)
 	}
 
-	if err = (&remote.ClusterCacheReconciler{
+	if err = (&remote.ClusterCacheReconciler{ //nolint: staticcheck
 		Client:  mgr.GetClient(),
 		Tracker: tracker,
 	}).SetupWithManager(context.TODO(), mgr, concurrency(0)); err != nil {
@@ -171,7 +178,8 @@ func main() {
 	}
 
 	mgr.GetWebhookServer().Register("/validate-infrastructure-cluster-x-k8s-io-v1beta1-byohost", &webhook.Admission{Handler: &infrastructurev1beta1.ByoHostValidator{
-		Client: mgr.GetClient(),
+		Client:  mgr.GetClient(),
+		Decoder: admission.NewDecoder(mgr.GetScheme()),
 	}})
 
 	if err = (&byohcontrollers.BootstrapKubeconfigReconciler{
