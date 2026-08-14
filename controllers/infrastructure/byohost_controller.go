@@ -6,11 +6,13 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
@@ -94,6 +96,32 @@ func (r *ByoHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ 
 	return ctrl.Result{RequeueAfter: r.HeartbeatTimeoutPeriod / 2}, nil
 }
 
+// lastHeartbeatWriteTime scans for whichever managedFields entry owns the
+// status.lastHeartbeatTime field path, since server-side field tracking
+// transfers ownership of a field to its most recent writer -- rather than
+// matching a specific manager name, so this doesn't depend on knowing the
+// agent's client identity in advance.
+func lastHeartbeatWriteTime(byoHost *infrastructurev1beta1.ByoHost) *metav1.Time {
+	for i := range byoHost.ManagedFields {
+		entry := &byoHost.ManagedFields[i]
+		if entry.Subresource != "status" || entry.FieldsV1 == nil {
+			continue
+		}
+		var fields struct {
+			Status struct {
+				LastHeartbeatTime json.RawMessage `json:"f:lastHeartbeatTime"`
+			} `json:"f:status"`
+		}
+		if err := json.Unmarshal(entry.FieldsV1.Raw, &fields); err != nil {
+			continue
+		}
+		if fields.Status.LastHeartbeatTime != nil {
+			return entry.Time
+		}
+	}
+	return nil
+}
+
 // reconcileHeartbeat evaluates whether the host agent's last heartbeat is
 // within HeartbeatTimeoutPeriod, sets AgentConnected accordingly, and emits
 // an Event only on an actual connect/disconnect transition.
@@ -101,7 +129,8 @@ func (r *ByoHostReconciler) reconcileHeartbeat(ctx context.Context, byoHost *inf
 	logger := log.FromContext(ctx)
 
 	wasConnected := conditions.IsTrue(byoHost, infrastructurev1beta1.AgentConnected)
-	if byoHost.Status.LastHeartbeatTime != nil && time.Since(byoHost.Status.LastHeartbeatTime.Time) < r.HeartbeatTimeoutPeriod {
+	writeTime := lastHeartbeatWriteTime(byoHost)
+	if writeTime != nil && time.Since(writeTime.Time) < r.HeartbeatTimeoutPeriod {
 		conditions.MarkTrue(byoHost, infrastructurev1beta1.AgentConnected)
 	} else {
 		logger.Info("Heartbeat timeout detected", "HeartbeatTimeoutPeriod", r.HeartbeatTimeoutPeriod)

@@ -81,7 +81,7 @@ const (
 // ByoHostReconciler based on agent heartbeats — as opposed to the ByoHost
 // conditions above, which are set by the host agent itself.
 const (
-	// AgentConnected reports whether the host agent has sent a heartbeat
+	// AgentConnected reports whether the host agent has written a heartbeat
 	// (ByoHost.Status.LastHeartbeatTime) within HeartbeatTimeoutPeriod.
 	AgentConnected clusterv1.ConditionType = "AgentConnected"
 
