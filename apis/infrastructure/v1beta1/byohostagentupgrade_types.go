@@ -16,7 +16,7 @@ type ByoHostAgentUpgradePhase string
 const (
 	// ByoHostAgentUpgradePhasePending means no host has been selected for
 	// upgrade yet - either the rollout hasn't started reconciling, or it is
-	// blocked (see RolloutBlocked) before ever picking a host.
+	// blocked (see RolloutAvailable) before ever picking a host.
 	ByoHostAgentUpgradePhasePending ByoHostAgentUpgradePhase = "Pending"
 	// ByoHostAgentUpgradePhaseProgressing means at least one host has
 	// converged or is in flight, and no host has failed.
@@ -32,13 +32,13 @@ const (
 
 // Conditions and reasons defined on ByoHostAgentUpgrade.
 const (
-	// RolloutBlocked documents that the rollout is not currently selecting
-	// new hosts because MaxUnavailable's budget is already consumed by
-	// hosts that are unavailable for a reason unrelated to this rollout
-	// having touched them - not a failure, and not terminal: it clears on
-	// its own once the budget frees up. See
-	// docs/proposals/agent-self-upgrade-adr.md §2.3 step 4.
-	RolloutBlocked clusterv1.ConditionType = "RolloutBlocked"
+	// RolloutAvailable is False (with reason) exactly while the rollout is
+	// not currently selecting new hosts because MaxUnavailable's budget is
+	// already consumed - possibly by hosts unavailable for a reason
+	// unrelated to this rollout having touched them. Not a failure, and not
+	// terminal: it clears back to True on its own once the budget frees up.
+	// See docs/proposals/agent-self-upgrade-adr.md §2.3 step 4.
+	RolloutAvailable clusterv1.ConditionType = "RolloutAvailable"
 
 	// InsufficientAvailabilityBudgetReason indicates
 	// |InFlight ∪ Disconnected| >= MaxUnavailable.

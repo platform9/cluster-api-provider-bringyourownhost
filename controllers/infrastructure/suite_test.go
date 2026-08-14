@@ -59,6 +59,7 @@ var (
 	k8sInstallerConfigReconciler          *controllers.K8sInstallerConfigReconciler
 	bootstrapKubeconfigReconciler         *controllers.BootstrapKubeconfigReconciler
 	byoHostReconciler                     *controllers.ByoHostReconciler
+	byoHostAgentUpgradeReconciler         *controllers.ByoHostAgentUpgradeReconciler
 	recorder                              *record.FakeRecorder
 	byoCluster                            *infrastructurev1beta1.ByoCluster
 	capiCluster                           *clusterv1.Cluster
@@ -145,6 +146,18 @@ func setupReconcilers() {
 		Recorder:               record.NewFakeRecorder(32),
 	}
 	if err := byoHostReconciler.SetupWithManager(k8sManager); err != nil {
+		panic(err)
+	}
+
+	// byoHostAgentUpgradeReconciler also uses the direct client, for the same
+	// reason as byoHostReconciler above: tests call Reconcile directly and
+	// need to see their own just-written state without waiting on cache sync.
+	byoHostAgentUpgradeReconciler = &controllers.ByoHostAgentUpgradeReconciler{
+		Client:   directClient,
+		Scheme:   scheme.Scheme,
+		Recorder: record.NewFakeRecorder(32),
+	}
+	if err := byoHostAgentUpgradeReconciler.SetupWithManager(k8sManager); err != nil {
 		panic(err)
 	}
 

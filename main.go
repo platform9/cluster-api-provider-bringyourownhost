@@ -134,6 +134,14 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "ByoHost")
 		os.Exit(1)
 	}
+	if err = (&byohcontrollers.ByoHostAgentUpgradeReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("byohostagentupgrade-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ByoHostAgentUpgrade")
+		os.Exit(1)
+	}
 	if err = (&byohcontrollers.ByoMachineTemplateReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
