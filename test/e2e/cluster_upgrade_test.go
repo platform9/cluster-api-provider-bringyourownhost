@@ -46,12 +46,6 @@ var _ = Describe("Cluster upgrade test [K8s-Upgrade-Cluster]", func() {
 	})
 
 	It("Should successfully upgrade cluster", func() {
-		// Skip fast: no Kubernetes version in this project's OCI bundle registry
-		// (quay.io/platform9, v1.31.0+ only) can complete a kubeadm upgrade against the vendored
-		// CAPI v1.4.4 — its kubeadm-config decoder predates the kubeadm.k8s.io/v1beta4 API that
-		// v1.31+ writes. Needs CAPI bumped past v1.4.4 before this can run.
-		Skip("blocked on CAPI v1.4.4 -> kubeadm v1beta4 incompatibility")
-
 		clusterName := fmt.Sprintf("%s-%s", specName, util.RandomString(6))
 		var err error
 		dockerClient, err = client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
