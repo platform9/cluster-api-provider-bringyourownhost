@@ -97,18 +97,18 @@ func (hr *HostRegistrar) UpdateHost(ctx context.Context, byoHost *infrastructure
 		byoHost.Labels = map[string]string{}
 	}
 	byoHost.Labels[infrastructurev1beta1.HostArchitectureLabel] = byoHost.Status.HostDetails.Architecture
-	if family := getOSFamily(exec.LookPath); family != "" {
+	if family := GetOSFamily(exec.LookPath); family != "" {
 		byoHost.Labels[infrastructurev1beta1.HostOSFamilyLabel] = family
 	}
 
 	return helper.Patch(ctx, byoHost)
 }
 
-// getOSFamily reports which package manager this host uses, by probing for
+// GetOSFamily reports which package manager this host uses, by probing for
 // dpkg or rpm on PATH. This is what actually determines which install
 // command an agent upgrade can run — unlike parsing the free-text OS name
 // getOperatingSystem returns, which was never meant to answer that question.
-func getOSFamily(lookPath func(string) (string, error)) string {
+func GetOSFamily(lookPath func(string) (string, error)) string {
 	if _, err := lookPath("dpkg"); err == nil {
 		return infrastructurev1beta1.HostOSFamilyDebian
 	}

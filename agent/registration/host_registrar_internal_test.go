@@ -109,7 +109,7 @@ var _ = Describe("Host Registrar Tests", func() {
 
 	Context("When the OS family is detected", func() {
 		It("Should return debian when dpkg is on PATH", func() {
-			family := getOSFamily(func(file string) (string, error) {
+			family := GetOSFamily(func(file string) (string, error) {
 				if file == "dpkg" {
 					return "/usr/bin/dpkg", nil
 				}
@@ -119,7 +119,7 @@ var _ = Describe("Host Registrar Tests", func() {
 		})
 
 		It("Should return rhel when dpkg is absent but rpm is on PATH", func() {
-			family := getOSFamily(func(file string) (string, error) {
+			family := GetOSFamily(func(file string) (string, error) {
 				if file == "rpm" {
 					return "/usr/bin/rpm", nil
 				}
@@ -129,12 +129,12 @@ var _ = Describe("Host Registrar Tests", func() {
 		})
 
 		It("Should prefer debian when both dpkg and rpm are present", func() {
-			family := getOSFamily(func(string) (string, error) { return "/usr/bin/whatever", nil })
+			family := GetOSFamily(func(string) (string, error) { return "/usr/bin/whatever", nil })
 			Expect(family).To(Equal(infrastructurev1beta1.HostOSFamilyDebian))
 		})
 
 		It("Should return empty when neither is on PATH", func() {
-			family := getOSFamily(func(string) (string, error) { return "", fmt.Errorf("not found") })
+			family := GetOSFamily(func(string) (string, error) { return "", fmt.Errorf("not found") })
 			Expect(family).To(BeEmpty())
 		})
 	})
