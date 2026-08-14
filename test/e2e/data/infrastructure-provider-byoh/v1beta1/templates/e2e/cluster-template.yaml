@@ -35,6 +35,13 @@ spec:
           kubeletExtraArgs:
             cgroup-driver: systemd
             eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
+            resolv-conf: /etc/kubernetes/resolv.conf
+      preKubeadmCommands:
+      - |
+        cat <<'EOF' > /etc/kubernetes/resolv.conf
+        nameserver 8.8.8.8
+        nameserver 8.8.4.4
+        EOF
 ---
 apiVersion: cluster.x-k8s.io/v1beta1
 kind: Cluster
@@ -170,6 +177,7 @@ spec:
         kubeletExtraArgs:
           cgroup-driver: systemd
           eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
+          resolv-conf: /etc/kubernetes/resolv.conf
     joinConfiguration:
       nodeRegistration:
         criSocket: /var/run/containerd/containerd.sock
@@ -181,6 +189,10 @@ spec:
         kubeletExtraArgs:
           cgroup-driver: systemd
           eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
+          resolv-conf: /etc/kubernetes/resolv.conf
+    postKubeadmCommands:
+    - '[[ -s /etc/kubernetes/super-admin.conf ]] || { rm -f /etc/kubernetes/super-admin.conf
+      && kubeadm init phase kubeconfig super-admin; }'
     preKubeadmCommands:
     - |
       cat <<'EOF' >> /run/kubeadm/kubeadm.yaml
@@ -190,12 +202,18 @@ spec:
       conntrack:
         maxPerCore: 0
       EOF
+    - |
+      cat <<'EOF' > /etc/kubernetes/resolv.conf
+      nameserver 8.8.8.8
+      nameserver 8.8.4.4
+      EOF
   machineTemplate:
     infrastructureRef:
       apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
       kind: ByoMachineTemplate
       name: ${CLUSTER_NAME}-control-plane
       namespace: ${NAMESPACE}
+    nodeDeletionTimeout: 60s
   replicas: ${CONTROL_PLANE_MACHINE_COUNT}
   version: ${KUBERNETES_VERSION}
 ---

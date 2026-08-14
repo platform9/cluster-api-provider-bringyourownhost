@@ -59,6 +59,14 @@ spec:
       apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
       name: "${CLUSTER_NAME}-control-plane"
       namespace: "${NAMESPACE}"
+    # Deleting a control-plane Machine's etcd member briefly disrupts the
+    # workload API (kube-vip fails over, that node's own apiserver/etcd shut
+    # down). CAPI's Node-deletion retry budget defaults to 10s
+    # (NodeDeletionTimeoutSeconds), which can be shorter than that failover
+    # blip -- when it is, CAPI gives up on deleting the old Node and finishes
+    # deleting the Machine anyway, leaving a stale Node (and its mirrored
+    # static pods, e.g. etcd) behind forever. Give it more retries/time.
+    nodeDeletionTimeout: 60s
   kubeadmConfigSpec:
     # kube-proxy's conntrack tuning tries to raise net.netfilter.nf_conntrack_max,
     # a global (non-namespaced) sysctl a privileged container can read but never
@@ -76,6 +84,28 @@ spec:
         conntrack:
           maxPerCore: 0
         EOF
+      # Every byohost container's /etc/resolv.conf points at Docker's embedded
+      # per-container DNS proxy (127.0.0.11), which loops back to the pod's own
+      # CoreDNS instance and fatals CoreDNS's self-check ("plugin/loop"). Write
+      # a separate resolv-conf with a real nameserver and point kubelet at it
+      # (see kubeletExtraArgs.resolv-conf below), leaving the node's own
+      # /etc/resolv.conf untouched.
+      - |
+        cat <<'EOF' > /etc/kubernetes/resolv.conf
+        nameserver 8.8.8.8
+        nameserver 8.8.4.4
+        EOF
+    # kubeadm init creates super-admin.conf; kubeadm join --control-plane does
+    # not. kube-vip's static pod needs this file on every control-plane node,
+    # so it crash-loops on any node added after the first one.
+    #
+    # This line does nothing on the init node (file already has content).
+    # On a join node, it deletes the empty placeholder that kubelet's
+    # FileOrCreate volume leaves behind and generates the real file locally
+    # -- a joining control-plane node already has the CA cert+key needed to
+    # do that itself.
+    postKubeadmCommands:
+      - "[[ -s /etc/kubernetes/super-admin.conf ]] || { rm -f /etc/kubernetes/super-admin.conf && kubeadm init phase kubeconfig super-admin; }"
     clusterConfiguration:
       controllerManager:
         extraArgs: {enable-hostpath-provisioner: 'true'}
@@ -146,6 +176,7 @@ spec:
         kubeletExtraArgs:
           cgroup-driver: systemd
           eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
+          resolv-conf: /etc/kubernetes/resolv.conf
     joinConfiguration:
       nodeRegistration:
         ignorePreflightErrors:
@@ -157,6 +188,7 @@ spec:
         kubeletExtraArgs:
           cgroup-driver: systemd
           eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
+          resolv-conf: /etc/kubernetes/resolv.conf
   version: ${KUBERNETES_VERSION}
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
