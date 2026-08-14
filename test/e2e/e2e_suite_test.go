@@ -17,7 +17,7 @@ import (
 	"strings"
 	"testing"
 
-	dockertypes "github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -268,7 +268,7 @@ var _ = SynchronizedAfterSuite(func() {
 
 	if byohAgentBundleURLForContainers != "" {
 		if dockerClientForRegistry, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation()); err == nil {
-			_ = dockerClientForRegistry.ContainerRemove(context.Background(), agentBundleRegistryContainerName, dockertypes.ContainerRemoveOptions{Force: true})
+			_ = dockerClientForRegistry.ContainerRemove(context.Background(), agentBundleRegistryContainerName, container.RemoveOptions{Force: true})
 		}
 	}
 })
@@ -296,7 +296,7 @@ func createClusterctlLocalRepository(config *clusterctl.E2EConfig, repositoryFol
 
 	// Ensuring a CNI file is defined in the config and register a FileTransformation to inject the referenced file in place of the CNI_RESOURCES envSubst variable.
 	Expect(config.Variables).To(HaveKey(CNIPath), "Missing %s variable in the config", CNIPath)
-	cniPath := config.GetVariable(CNIPath)
+	cniPath := config.GetVariableOrEmpty(CNIPath)
 	Expect(cniPath).To(BeAnExistingFile(), "The %s variable should resolve to an existing file", CNIPath)
 
 	createRepositoryInput.RegisterClusterResourceSetConfigMapTransformation(cniPath, CNIResources)
@@ -315,7 +315,7 @@ func setupBootstrapCluster(config *clusterctl.E2EConfig, scheme *runtime.Scheme,
 			KubernetesVersion:  "v1.26.6",
 			RequiresDockerSock: config.HasDockerProvider(),
 			Images:             config.Images,
-			IPFamily:           config.GetVariable(IPFamily),
+			IPFamily:           config.GetVariableOrEmpty(IPFamily),
 		})
 		Expect(clusterProvider).NotTo(BeNil(), "Failed to create a bootstrap cluster")
 
@@ -394,9 +394,11 @@ func dumpSpecResourcesAndCleanup(ctx context.Context, specName string, clusterPr
 
 	// Dump all Cluster API related resources to artifacts before deleting them.
 	framework.DumpAllResources(ctx, framework.DumpAllResourcesInput{
-		Lister:    clusterProxy.GetClient(),
-		Namespace: namespace.Name,
-		LogPath:   filepath.Join(artifactFolder, "clusters", clusterProxy.GetName(), "resources"),
+		Lister:               clusterProxy.GetClient(),
+		KubeConfigPath:       clusterProxy.GetKubeconfigPath(),
+		ClusterctlConfigPath: clusterctlConfigPath,
+		Namespace:            namespace.Name,
+		LogPath:              filepath.Join(artifactFolder, "clusters", clusterProxy.GetName(), "resources"),
 	})
 
 	if !skipCleanup {
@@ -405,8 +407,9 @@ func dumpSpecResourcesAndCleanup(ctx context.Context, specName string, clusterPr
 		// that cluster variable is not set even if the cluster exists, so we are calling DeleteAllClustersAndWait
 		// instead of DeleteClusterAndWait
 		framework.DeleteAllClustersAndWait(ctx, framework.DeleteAllClustersAndWaitInput{
-			Client:    clusterProxy.GetClient(),
-			Namespace: namespace.Name,
+			ClusterProxy:         clusterProxy,
+			ClusterctlConfigPath: clusterctlConfigPath,
+			Namespace:            namespace.Name,
 		}, intervalsGetter(specName, "wait-delete-cluster")...)
 
 		Byf("Deleting namespace used for hosting the %q test spec", specName)
