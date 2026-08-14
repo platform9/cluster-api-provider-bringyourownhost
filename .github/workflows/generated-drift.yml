@@ -28,11 +28,13 @@ jobs:
         run: |
           make generate
           make manifests
+          make cluster-templates-v1beta1
+          make cluster-templates-e2e
 
       - name: Check for uncommitted generated changes
         run: |
           if [[ -n "$(git status --porcelain)" ]]; then
-            echo "::error::Generated files are out of date. Run 'make generate manifests' and commit the result."
+            echo "::error::Generated files are out of date. Run 'make generate manifests cluster-templates-v1beta1 cluster-templates-e2e' and commit the result."
             git status --porcelain
             git diff
             exit 1
