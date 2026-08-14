@@ -122,6 +122,24 @@ func lastHeartbeatWriteTime(byoHost *infrastructurev1beta1.ByoHost) *metav1.Time
 	return nil
 }
 
+// clockSkewWarningThreshold is the minimum |skew| worth logging about.
+// Diagnostic only -- liveness no longer depends on clock accuracy (ADR 0001).
+const clockSkewWarningThreshold = time.Minute
+
+// clockSkew returns |writeTime - lastHeartbeatTime| and whether it exceeds
+// clockSkewWarningThreshold. exceedsThreshold is false if either timestamp
+// is unavailable.
+func clockSkew(writeTime, lastHeartbeatTime *metav1.Time) (skew time.Duration, exceedsThreshold bool) {
+	if writeTime == nil || lastHeartbeatTime == nil {
+		return 0, false
+	}
+	skew = writeTime.Sub(lastHeartbeatTime.Time)
+	if skew < 0 {
+		skew = -skew
+	}
+	return skew, skew > clockSkewWarningThreshold
+}
+
 // reconcileHeartbeat evaluates whether the host agent's last heartbeat is
 // within HeartbeatTimeoutPeriod, sets AgentConnected accordingly, and emits
 // an Event only on an actual connect/disconnect transition.
@@ -135,6 +153,10 @@ func (r *ByoHostReconciler) reconcileHeartbeat(ctx context.Context, byoHost *inf
 	} else {
 		logger.Info("Heartbeat timeout detected", "HeartbeatTimeoutPeriod", r.HeartbeatTimeoutPeriod)
 		conditions.MarkFalse(byoHost, infrastructurev1beta1.AgentConnected, infrastructurev1beta1.HeartbeatTimeoutReason, clusterv1.ConditionSeverityWarning, "Heartbeat timeout detected")
+	}
+
+	if skew, exceeds := clockSkew(writeTime, byoHost.Status.LastHeartbeatTime); exceeds {
+		logger.Info("clock skew detected between host and management cluster", "skew", skew)
 	}
 
 	if r.Recorder == nil {
