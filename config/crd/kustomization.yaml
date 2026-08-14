@@ -14,6 +14,7 @@ resources:
 - bases/infrastructure.cluster.x-k8s.io_k8sinstallerconfigs.yaml
 - bases/infrastructure.cluster.x-k8s.io_k8sinstallerconfigtemplates.yaml
 - bases/infrastructure.cluster.x-k8s.io_bootstrapkubeconfigs.yaml
+- bases/infrastructure.cluster.x-k8s.io_byohostagentupgrades.yaml
 #+kubebuilder:scaffold:crdkustomizeresource
 
 patchesStrategicMerge:
