@@ -1,0 +1,43 @@
+# Copyright 2026 Platform9, Inc. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Generated files drift
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  go-version:
+    uses: ./.github/workflows/_go.yml
+
+  check-generated-drift:
+    name: Check for uncommitted generated changes
+    needs: go-version
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ needs.go-version.outputs.version }}
+
+      - name: Run generators
+        run: |
+          make generate
+          make manifests
+
+      - name: Check for uncommitted generated changes
+        run: |
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo "::error::Generated files are out of date. Run 'make generate manifests' and commit the result."
+            git status --porcelain
+            git diff
+            exit 1
+          fi
