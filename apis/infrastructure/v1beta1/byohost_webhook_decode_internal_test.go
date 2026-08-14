@@ -22,11 +22,10 @@ func newTestByoHostValidator(t *testing.T) *ByoHostValidator {
 	t.Helper()
 	scheme := runtime.NewScheme()
 	require.NoError(t, AddToScheme(scheme))
-	decoder, err := admission.NewDecoder(scheme)
-	require.NoError(t, err)
+	decoder := admission.NewDecoder(scheme)
 	return &ByoHostValidator{
 		Client:  fake.NewClientBuilder().WithScheme(scheme).Build(),
-		decoder: decoder,
+		Decoder: decoder,
 	}
 }
 
