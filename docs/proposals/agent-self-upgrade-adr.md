@@ -1,0 +1,568 @@
+# ADR: Controller-driven, staged self-upgrade of the BYOH host agent
+
+**Status:** Proposed — not yet accepted
+**Date:** 2026-08-10 (revised 2026-08-14)
+**Deciders:** TBD
+**Depends on:** [agent-version-reporting-adr.md](agent-version-reporting-adr.md) — this ADR assumes
+`ByoHostStatus.AgentVersion` already exists and only adds fields on top of it.
+`Status.AgentVersion` and the heartbeat mechanism it rides alongside are already implemented on
+`main`, independent of whether this ADR is accepted (`agent/reconciler/host_reconciler.go:111`).
+**Related:** existing agent packaging (the `Makefile`'s `build-host-agent-deb`/`build-host-agent-rpm`
+targets, and the process-supervisor unit this repo's reference implementation runs the agent under)
+— this design builds directly on that packaging output rather than deferring around it (see the
+revision note below).
+
+> §1 describes the current state, checked directly against the code cited inline. §2 onward is
+> new design — none of it is built yet. Open questions are listed in §8, not hidden inside the
+> decision.
+>
+> Kubernetes-version upgrades (kubelet/control-plane) are a separate, already-implemented
+> mechanism and are explicitly **not** in scope.
+>
+> **Revision note (2026-08-14):** the original draft of this ADR deferred the upgrade's deployment
+> mechanism entirely — an "opaque script," content unspecified — to avoid coupling to an in-flight
+> packaging decision. Design review concluded that deferral bought flexibility nobody actually
+> needed, at the cost of a real security surface (arbitrary root-privileged script content run
+> continuously, not once) and extra machinery (per-host Secret creation and templating). This
+> revision commits to one narrow mechanism instead — fetch a `.deb` or `.rpm` and hand it to the
+> host's own package manager — and removes the script/Secret path entirely. See §2.2 and §4 for
+> the reasoning and the alternative it replaces.
+
+---
+
+## 1. Context
+
+### 1.1 There is currently no way to upgrade the agent binary on an already-registered host
+
+- The agent reports its own build version only via a CLI flag: `agent/main.go` parses `--version`
+  and prints `version.Get()` (`agent/version/version.go`, ldflags-populated by `hack/version.sh`
+  at build time) to stdout, then exits. `Status.AgentVersion`
+  ([agent-version-reporting-adr.md](agent-version-reporting-adr.md)) now also reports it to the
+  management cluster every heartbeat tick (`agent/reconciler/host_reconciler.go:111`) — that half
+  of the gap is closed; this ADR is about the other half, driving and staging the upgrade itself.
+- `ByoHostSpec` (`apis/infrastructure/v1beta1/byohost_types.go:37-53`) has only `BootstrapSecret`,
+  `InstallationSecret`, `UninstallationSecret` — nothing that lets the management cluster tell a
+  host to change its agent version.
+- No controller anywhere compares a desired vs. observed agent version.
+- The repo already produces the agent as **both** package formats — `build-host-agent-deb` and
+  `build-host-agent-rpm` (`Makefile:428-480`), with separate `debsrc`/`rpmbuild` source trees. Any
+  upgrade mechanism that only handles one of the two silently strands hosts running the other.
+- `ByoHost.Status.HostDetails` (`HostInfo`, `apis/infrastructure/v1beta1/byohost_types.go:55-64`)
+  already carries `OSName`, `OSImage`, and `Architecture` — the last set by the agent itself via
+  `runtime.GOARCH` at registration (`agent/registration/host_registrar.go:149`). These live only
+  in `Status` today, not on `.Labels`, so they are visible (e.g. via the existing `Arch`
+  `+kubebuilder:printcolumn`, `byohost_types.go:121`) but not currently selectable by a
+  `metav1.LabelSelector` — relevant to §2.1.
+- No e2e test exercises an agent-binary upgrade. `test/e2e/cluster_upgrade_test.go` and
+  `clusterclass_upgrade_test.go` are Kubernetes-version upgrade tests: they run one fixed agent
+  binary for the whole test and validate success purely via `framework.WaitForNodesReady` against
+  the target `KubernetesVersion`. That is a different axis entirely and this ADR does not touch
+  it.
+
+**Net effect:** there is no mechanism today to *drive* an agent upgrade across a fleet from the
+management cluster — staged, observable, or otherwise. An operator can already upgrade a host by
+hand (SSH, Ansible), and can now *validate* that with
+[agent-version-reporting-adr.md](agent-version-reporting-adr.md) alone; what's still missing is
+staging that across many hosts with a blast-radius limit, from inside the cluster rather than from
+Ansible's own batching.
+
+### 1.2 What the design can build on
+
+**The heartbeat loop and `AgentConnected` already give a validated, continuously-updated liveness
+signal.** The agent writes `Status.LastHeartbeatTime` from its own reconcile loop no more often
+than `HeartbeatInterval` (`agent/reconciler/host_reconciler.go:41,103-109`). The management-cluster
+`ByoHostReconciler` compares that timestamp against `HeartbeatTimeoutPeriod`
+(`controllers/infrastructure/byohost_controller.go:31,94,103-108`) and sets the `AgentConnected`
+condition (`apis/infrastructure/v1beta1/condition_consts.go:84-96`) accordingly. Between that and
+`Status.AgentVersion`, a rollout controller has everything it needs — no new liveness plumbing.
+
+**The agent already runs under a process supervisor that restarts on crash, with a hard limit, not
+backoff.** This repo's current reference implementation uses a systemd unit with `Restart=always`,
+a fixed (not exponential) restart delay, and a tight `StartLimitBurst`/`StartLimitIntervalSec`
+pairing — a binary that crashes immediately after an upgrade gets a small, fixed number of quick
+retries, then the supervisor stops trying (`start-limit-hit`) until an operator intervenes. Treat
+the exact numbers as a deployment tunable, not an architectural constant this ADR depends on — the
+property that matters is qualitative: **no indefinite retry, and no exponential backoff**, so
+recovery from a truly broken binary is manual (SSH/Ansible) by design, matching this ADR's decision
+not to build automatic rollback (§2.4). One detail that matters for §2.2's re-exec-vs-restart
+choice, true of systemd's `Restart=` accounting generally, not specific to any one unit's tuning:
+`StartLimitBurst` counts every supervisor-triggered relaunch, regardless of exit code — a clean,
+successful, intentional exit consumes the same budget as a crash.
+
+**Kubelet is already fully independent of the agent's process lifecycle, unconditionally.**
+`kubelet` is installed as its own package (`for pkg in cri-tools kubernetes-cni kubectl kubelet
+kubeadm`, `installer/internal/algo/ubuntu-templates/install.sh.tmpl:50`) and ends up running under
+its own systemd unit; the agent's own `CmdRunner` only ever shells out to run the install script
+to completion and exits (`agent/cloudinit/cmd_runner.go:24`) — it never parents or supervises
+kubelet at runtime. This means an agent process *restarting* (not just re-exec'ing) would not
+disrupt kubelet either — worth noting up front because §2.2 step 5's original justification for
+avoiding a restart got this wrong.
+
+**Fetching a package and installing it with the host's own package manager already has precedent
+in this repo**, even though today it only runs during initial onboarding: `downloadDebianPackage`
+/ `installDebianPackage` (`cmd/byohctl/service/agent.go`) fetch a `.deb` and run
+`dpkg -i <path>`. §2.2 proposes the same two-step shape — fetch, then hand off to the package
+manager — reused for in-place agent upgrades on an already-registered host, generalized to also
+cover `.rpm` via `rpm -Uvh`.
+
+---
+
+## 2. Decision
+
+When the management cluster wants a host on a different agent version, it tells the host exactly
+which package to install — a full URL to a `.deb` or `.rpm`, resolved by whoever creates the
+upgrade CR, not by the agent or controller — and the agent's only job is to fetch it, hand it to
+`dpkg`/`rpm`, and on success re-exec itself. A new **rollout controller** stages this across a
+fleet, gating on the existing heartbeat/`AgentConnected` signal and the new `AgentVersion` field,
+and halting hard on any explicit failure while tolerating pre-existing or transient unavailability
+by simply pausing rather than failing.
+
+### 2.1 API changes
+
+On top of `ByoHostStatus.AgentVersion`
+([agent-version-reporting-adr.md](agent-version-reporting-adr.md)), `ByoHostSpec` gains:
+
+```go
+// DesiredAgentVersion, when set, is the agent version this host should be
+// running. The agent compares this against its own version.Get().GitVersion
+// on every reconcile tick (cheap — no fetch) and only acts on a mismatch.
+// Unset means "no managed upgrade in progress" — a host with it unset
+// behaves exactly as it does today.
+// +optional
+DesiredAgentVersion string `json:"desiredAgentVersion,omitempty"`
+
+// DesiredAgentPackageURL is a full URL to the .deb or .rpm that installs
+// DesiredAgentVersion on this specific host. It is not templated and does
+// not point at a Secret — a package URL is not sensitive, unlike the
+// opaque-script content an earlier draft of this ADR used. The agent picks
+// `dpkg -i` or `rpm -Uvh` based on its own already-known package manager;
+// nothing else is executed.
+// +optional
+DesiredAgentPackageURL string `json:"desiredAgentPackageURL,omitempty"`
+
+// DesiredAgentPackageChecksum, if set, is the expected checksum of the
+// fetched artifact ("sha256:<hex>"). The agent refuses to install on
+// mismatch and marks AgentUpgradeFailed with reason PackageChecksumMismatch.
+// +optional
+DesiredAgentPackageChecksum string `json:"desiredAgentPackageChecksum,omitempty"`
+```
+
+Both fields are copied down from `ByoHostAgentUpgradeSpec` onto each targeted `ByoHost` by the
+rollout controller, rather than having the agent read the `ByoHostAgentUpgrade` CR directly — this
+isn't incidental duplication, it's the same shape `InstallationSecret`/`BootstrapSecret` already
+use. The agent only ever reads/updates its own `ByoHost` object; it has no way to know which
+`ByoHostAgentUpgrade` (if any) targets it without List/Watch access to a CRD it currently has no
+business touching, and re-evaluating `Selector` matches on the host side would duplicate logic the
+controller already owns and risks two different answers if it ever disagreed with itself.
+Selector evaluation stays the controller's job alone, for every host, all the time.
+`DesiredAgentPackageChecksum` follows for the identical reason, not a separate one: since the
+agent can't reach the CR at all, anything it needs to act on has to be pushed down alongside the
+URL — there's no cheaper alternative once the URL is already there.
+
+Two new labels, mirroring the existing `AttachedByoMachineLabel` domain and pattern
+(`byoh.infrastructure.cluster.x-k8s.io/...`, `apis/infrastructure/v1beta1/byohost_types.go:21`,
+applied by controller code the same way `clusterv1.ClusterNameLabel` already is,
+`controllers/infrastructure/byomachine_controller.go:588`):
+
+```go
+// HostArchitectureLabel mirrors Status.HostDetails.Architecture onto
+// .Labels so it becomes selectable — Kubernetes label selectors cannot
+// match on arbitrary status fields.
+HostArchitectureLabel = "byoh.infrastructure.cluster.x-k8s.io/architecture"
+
+// HostOSFamilyLabel mirrors a coarse package-family derived from
+// Status.HostDetails.OSName/OSImage ("debian" or "rhel"), for the same
+// reason.
+HostOSFamilyLabel = "byoh.infrastructure.cluster.x-k8s.io/os-family"
+```
+
+These are set once, at registration, alongside the existing `HostInfo` write
+(`agent/registration/host_registrar.go:149`) — the agent already knows both values about itself at
+that point, so this is a label added to an object the agent is already creating, not a new
+control-flow path or a new management-side controller.
+
+**Why labels instead of automatic per-host resolution:** an earlier iteration of this design had
+the rollout controller resolve the correct package URL per host automatically (mirroring how
+`installer/registry.go`'s `AddOsFilter` resolves OS-specific k8s-component bundles,
+`registry.go:141-147`). That was dropped in favor of manual cohort-splitting via `Selector`: there
+is no existing version→package-URL naming convention for the agent to build a resolver on top of,
+and a fleet is expected to be genuinely mixed (deb/rpm, amd64/arm64) with no single
+`ByoHostAgentUpgrade` needing to span more than one cohort. An operator (or UI) creates one CR per
+cohort, each with its own explicit `PackageURL` — see §8 Q9 for the gap this trades away.
+
+`ByoHostAgentUpgradeSpec.TargetVersion` (§2.3) must be an explicit, fully-resolved version string —
+never `latest` or any other floating reference — enforced at the API level, not by convention:
+
+```go
+// +kubebuilder:validation:Pattern=`^v[0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`
+TargetVersion string `json:"targetVersion"`
+```
+
+matching the same strict-semver shape `hack/version.sh:55` already enforces at build time (and
+rejecting `latest` as a side effect, since it doesn't match).
+
+### 2.2 Agent-side: fetch, install, re-exec
+
+New function on the existing `HostReconciler`, `executeAgentUpgrade`, invoked from the same
+reconcile tick that already writes the heartbeat:
+
+1. Compare `ByoHost.Spec.DesiredAgentVersion` to `version.Get().GitVersion`. Equal or empty →
+   no-op. Pure function, no fakes needed to test.
+2. On mismatch, require `Spec.DesiredAgentPackageURL` — if unset, wait (same pattern as
+   `executeInstallerController` waiting on `InstallationSecret`,
+   `agent/reconciler/host_reconciler.go:142-146`).
+3. Fetch the artifact from `DesiredAgentPackageURL`. If `DesiredAgentPackageChecksum` is set,
+   verify it before doing anything else — mismatch marks `AgentUpgradeFailed`, reason
+   `PackageChecksumMismatch`, and stops here without installing.
+4. Hand the artifact to the host's own package manager — a **fixed, two-way branch based on the
+   agent's own already-known package format**, never an operator-supplied command:
+   `dpkg -i <path>` or `rpm -Uvh <path>` — no `--oldpackage`/force-downgrade flag, ever (see §2.4:
+   a downgrade failing here is the intended backstop, not a bug to route around).
+   `CmdRunner.RunCmd` runs it, same interface
+   `executeInstallerController` already uses (`agent/reconciler/host_reconciler.go:206`), but with
+   no template parsing involved at all — the command is constructed by the agent, not supplied as
+   content from outside. This is deliberately narrower than the original opaque-script design
+   (§4): no arbitrary root-privileged script content, ever.
+5. On success: resolve the agent's own binary path via `os.Executable()` (not `os.Args[0]`, which
+   does not resolve symlinks) and `syscall.Exec` into it, rather than the simpler-looking
+   `os.Exit(0)` and letting systemd's `Restart=always` relaunch it. Both were weighed directly:
+   - **Not "protects kubelet" — that turned out to be the wrong reason.** The obvious argument for
+     `syscall.Exec` over a restart is "an agent restart must not disrupt kubelet." That doesn't
+     actually hold up on inspection (§1.2): kubelet is its own package running under its own
+     systemd unit, never parented or supervised by the agent at runtime. A plain process restart
+     wouldn't touch kubelet any more than `syscall.Exec` does — kubelet's independence is
+     unconditional, not something either mechanism needs to preserve.
+   - **The real reason: `syscall.Exec` never touches the supervisor's restart accounting.**
+     `Restart=always` relaunches count toward `StartLimitBurst`/`StartLimitIntervalSec` (§1.2)
+     regardless of exit code — a clean, successful, planned exit consumes the same tight,
+     fixed-size budget as a crash. Routing a routine, successful upgrade through `os.Exit(0)`
+     risks tripping that crash-protection limit for a reason that has nothing to do with
+     instability — two upgrades close together, or an unrelated restart landing in the same
+     window. `syscall.Exec` keeps the same PID under the same supervisor-tracked "start"; from the
+     supervisor's point of view the service never stopped, so none of that budget is spent. This
+     holds regardless of exactly how a given deployment tunes the burst/interval values — the
+     mechanism, not the specific numbers, is what `syscall.Exec` sidesteps.
+   `syscall.Exec` keeps the same PID and open file descriptors as a side effect of this, which is
+   worth confirming empirically in e2e regardless (§5.3) since it's still relied on elsewhere in
+   this design (no container/service restart visible to anything watching the container ID). The
+   call sits behind a small `IExecer` interface alongside the existing `ICmdRunner`/`IFileWriter`
+   fields so tests can assert it was — or wasn't — invoked without actually replacing the test
+   process.
+6. On `dpkg`/`rpm` failure: don't exec. Mark `AgentUpgradeFailed`, reason
+   `PackageInstallFailed`, emit an event — the identical pattern `executeInstallerController`
+   already uses for `InstallScriptExecutionFailed`. Leave `Spec.DesiredAgentVersion` /
+   `DesiredAgentPackageURL` untouched; retrying with a fixed URL is the rollout controller's job
+   (§2.3), not the agent's. In practice this is the failure signal that fires *fastest* and most
+   often — `dpkg`/`rpm` exit non-zero on most real breakage (bad package, unmet dependencies,
+   failed postinst), unlike an arbitrary script which could silently exit 0 having done nothing.
+7. On re-exec, the new process starts normally and its next heartbeat tick writes
+   `Status.AgentVersion = version.Get().GitVersion` alongside `LastHeartbeatTime`. **This is also
+   how a silently-ineffective install gets caught**: if the install "succeeded" but
+   `os.Executable()` didn't actually change, the re-exec'd process is still the old binary,
+   `Status.AgentVersion` never moves, and the rollout controller's convergence check (§2.3) treats
+   it identically to any other stuck host.
+8. If the new binary crashes immediately after step 5, there is nothing left to report that
+   explicitly — `exec` replaced the process image, so no process survives to write a condition.
+   Recovery is whatever the systemd unit does (§1.2: two retries, five seconds apart, then it
+   stops trying) — this is caught by the rollout controller's availability accounting (§2.3) via
+   `AgentConnected`, not by an agent-side signal, and is expected to require manual (SSH/Ansible)
+   recovery, consistent with §2.4.
+
+### 2.3 Management-side: a rollout controller
+
+A new namespaced CRD, `ByoHostAgentUpgrade`, and controller `byohostagentupgrade_controller.go`,
+modeled on the `maxUnavailable` rolling-update pattern Cluster API's own `MachineDeployment`
+already uses:
+
+```go
+type ByoHostAgentUpgradeSpec struct {
+    Selector         metav1.LabelSelector // which ByoHosts this rollout targets, within this CR's own namespace
+    TargetVersion    string               // strict semver only, see §2.1
+    PackageURL       string               // full URL to the .deb/.rpm for this cohort
+    PackageChecksum  string               // optional, "sha256:<hex>"
+    MaxUnavailable   *intstr.IntOrString  // default 1
+    PerHostTimeout   metav1.Duration      // default 10m
+}
+
+type ByoHostAgentUpgradeStatus struct {
+    Phase             string // Pending | Progressing | Completed | Failed
+    Total             int32
+    Upgraded          int32
+    UnavailableCount  int32  // the live union count below, exposed for observability/tests
+    FailedHosts       []string
+    Conditions        clusterv1.Conditions
+}
+```
+
+**Scope is namespace, not a new concept.** `ByoHost`/`ByoCluster` are already `Namespaced`-scope
+CRDs (`byohost_types.go:117`, `byocluster_types.go:53`). A `ByoHostAgentUpgrade` created in a given
+namespace only ever selects `ByoHost`s in that same namespace — namespace boundaries already
+provide whatever isolation an operator uses namespaces for, with zero new API surface. `Selector`
+handles any further sub-scoping within that namespace (e.g. one `ByoCluster`'s hosts via
+`clusterv1.ClusterNameLabel`, or one OS/arch cohort via the labels added in §2.1).
+
+**Availability accounting.** Define, over the set of `ByoHost`s matching `Selector` (within this
+CR's namespace):
+
+```
+InFlight     = { h : h.Spec.DesiredAgentVersion == TargetVersion
+                     AND h.Status.AgentVersion != TargetVersion
+                     AND NOT AgentUpgradeFailed(h) }
+
+Disconnected = { h : AgentConnected(h) != True }
+
+Unavailable  = InFlight ∪ Disconnected     // union — a host in both sets counts once
+```
+
+`InFlight` is scoped to hosts *this rollout has already assigned* `DesiredAgentVersion` to — not
+every not-yet-touched host in the selected fleet (which would trivially include the whole cohort
+at the start of any rollout and permanently block step 3 below). `Disconnected`, in contrast, is
+computed over the **entire** selected cohort, touched or not — this is what gives continuous
+protection against a host that already converged and later crashed, without a bake/soak duration
+(see §4 for why a duration was considered and rejected).
+
+Reconcile loop, once per tick:
+
+1. List `ByoHost`s matching `Selector` in this CR's namespace. Compute `Unavailable` as above;
+   write `Status.UnavailableCount = |Unavailable|`.
+2. If `|Unavailable| < MaxUnavailable`, pick `MaxUnavailable - |Unavailable|` more not-yet-upgraded
+   hosts, set their `Spec.DesiredAgentVersion = TargetVersion`,
+   `Spec.DesiredAgentPackageURL = PackageURL`, `Spec.DesiredAgentPackageChecksum = PackageChecksum`
+   directly — no Secret is created, unlike the original opaque-script draft (§4).
+3. For each `InFlight` host, check convergence: `Status.AgentVersion == TargetVersion` AND
+   `AgentConnected == True`, evaluated as current state, not a required transition (an earlier
+   draft required `AgentConnected` to have gone `False→True`, which doesn't hold for a healthy,
+   no-downtime `syscall.Exec` — dropped as incorrect). Converged → increment `Upgraded`, this host
+   leaves `InFlight`. `AgentUpgradeFailed == True`, or `PerHostTimeout` elapsed with neither →
+   failed (see step 5).
+4. **Two distinct "can't proceed" states, not one:**
+   - **Blocked (soft, self-healing):** `|Unavailable| >= MaxUnavailable` with no
+     `AgentUpgradeFailed` anywhere in `InFlight`. `Phase` stays `Pending` (if nothing has been
+     picked yet) or `Progressing` (if some hosts already converged). No new hosts are picked, but
+     nothing is marked failed either — if a `Disconnected` host recovers (including one entirely
+     unrelated to this rollout), the budget frees up and picking resumes automatically next tick.
+     Surface the reason in a condition/event (e.g. `Reason: InsufficientAvailabilityBudget`,
+     `Message: "N of M selected hosts already unavailable; MaxUnavailable is K"`) so an operator
+     doesn't mistake a starved rollout — which can happen entirely from pre-existing, unrelated
+     unavailability in the selected cohort — for a stuck controller.
+   - **Failed (hard, terminal, needs an operator):** any `InFlight` host reaches
+     `AgentUpgradeFailed == True` (explicit `dpkg`/`rpm` failure or checksum mismatch) or
+     `PerHostTimeout` (silent failure — install "succeeded" but nothing ever converged, or the new
+     binary never comes back). `Phase = Failed`, that host recorded in `FailedHosts`, and — the
+     deliberate choice from the original draft, unchanged — **no further hosts are ever selected
+     by this CR again.** Already-upgraded hosts are left as-is; this design does not attempt
+     automatic rollback, fleet-wide or per-host (§2.4).
+5. All `Selector`-matched hosts converged, none failed → `Phase = Completed`.
+
+### 2.4 Rollback
+
+**Not performed through this mechanism at all — always a manual, out-of-band operator action
+(SSH/Ansible), never a CR.** This was an open question in the original draft (previously §8 Q4);
+resolved, and resolved more strictly than "no automatic rollback": there is no supported path for
+`ByoHostAgentUpgrade`/the agent's fixed install step to move a host to an *older* version, full
+stop. `rpm -Uvh` (§2.2 step 4) is deliberately never given `--oldpackage` or any equivalent
+force-downgrade flag — not conditionally omitted, never added, by decision. A `ByoHostAgentUpgrade`
+whose `TargetVersion` happens to be older than a selected host's current version simply fails that
+host's install step every time, the same as any other bad package would. That's the intended
+backstop, not a gap: **downgrading a host that runs continuously as root is judged to always
+warrant a human looking at it directly**, not a CR someone could create (however deliberately)
+without necessarily understanding what a downgrade does to that specific version pair. If a fleet
+needs to move backward, that happens the same way recovering a host stuck after a bad upgrade
+already does (§1.2) — SSH/Ansible, entirely outside this design — not by pointing this mechanism
+at an old version and expecting it to work.
+
+---
+
+## 3. Consequences
+
+**Positive.** A blast-radius-limited, observable way to converge agent versions across a fleet
+without touching packaging or requiring re-onboarding. The agent-side change reuses an existing,
+already-tested execution pattern (`executeInstallerController`) with *less* new surface than the
+original draft, not more: no template parsing, no per-host Secret, no arbitrary script content —
+just a fetch and a fixed two-command branch. `Unavailable`'s union accounting gives continuous
+post-convergence protection (a host that crashes after converging blocks the *next* batch) without
+a bake/soak timer, using a signal (`AgentConnected`) that already exists.
+
+**Negative / cost.** A new controller, CRD, and two new host labels to maintain. Committing to
+`dpkg`/`rpm` specifically (rather than an opaque, deployment-agnostic script) means this ADR now
+*is* coupled to package-manager-based deployment — if a future packaging format ever replaces
+`.deb`/`.rpm` for this agent, this mechanism needs revisiting rather than being deployment-agnostic
+by construction. That coupling was accepted deliberately: it's a small, enumerable, already-in-use
+set (Makefile already builds both formats today) versus arbitrary script content with no
+provenance story (§8 Q3). Manual cohort-splitting via `Selector` + explicit `PackageURL` per CR
+means an operator (or their UI) is responsible for pointing each cohort at the right artifact —
+nothing in this design catches an accidental deb-URL-to-an-rpm-host mismatch before it fails at
+install time (§8 Q9).
+
+**Risk if not done.** Fleet-wide rollouts stay dependent on whatever staging and failure-handling
+external tooling (Ansible or otherwise) provides, with no in-cluster visibility beyond what
+[agent-version-reporting-adr.md](agent-version-reporting-adr.md) gives per-host.
+
+---
+
+## 4. Alternatives considered
+
+| Alternative | Why rejected (or: why it might actually be the right call) |
+|---|---|
+| **Manual upgrades via Ansible/SSH, validated by [agent-version-reporting-adr.md](agent-version-reporting-adr.md) alone, and nothing more** | Not clearly wrong — Ansible already has `serial`/`max_fail_percentage` for staged rollout and halt-on-failure, the two properties this ADR's controller exists to provide. The case for building this anyway is teams that want the safety net enforced from the cluster side rather than trusted to a script someone might run with `serial: 0` by mistake, or that want in-cluster visibility without depending on Ansible's own reporting. Shipping only the version-reporting ADR and stopping there remains a legitimate outcome. |
+| **Opaque upgrade script, content unspecified (the original draft of this ADR)** | Rejected on revision: deferring the deployment mechanism bought flexibility nobody needed, at the cost of a real security surface (arbitrary root-privileged script, run continuously, not once — a larger blast radius than the already-existing `InstallationSecret`, which at least only runs once during bootstrap) and extra machinery (per-host Secret creation and templating on the controller side). The fleet has exactly two real package formats today (§1.1); naming them directly is simpler and safer than staying agnostic to a set of one-or-two known things. |
+| **Automatic per-host resolution of the correct package URL by host OS/arch** (mirroring `installer/registry.go`'s OS-filtered bundle resolution) | Considered, dropped in favor of manual `Selector`-based cohort splitting (§2.1). There's no existing version→package-URL naming convention for the agent to resolve against, unlike k8s components which already have one; building that convention now would be new machinery nobody asked for, for a benefit (avoiding manual cohort-splitting) that a `Selector` already delivers with zero new code. |
+| **Minimum bake/soak duration after convergence, before a host is considered "done" and its slot freed** | Considered, rejected. Any fixed duration still has an escape case — a delayed crash after the window elapses — so it only shifts the threshold at which delayed failures slip past the blast-radius limit, it doesn't remove the risk. The `Unavailable` union (§2.3) already gives continuous protection against *fast* post-convergence regressions using an existing signal and no new duration field or state tracking; slow-onset regressions past that point are accepted residual risk, same as any staged rollout (including vanilla Kubernetes `minReadySeconds`). |
+| **Automatic rollback**, fleet-wide or per-host, on failure | Rejected (§2.4). Halting and waiting for an explicit operator action is safer than any automatic corrective action touching more hosts on the controller's own initiative, and a broken host already needs manual recovery regardless of whether rollback is automatic (§1.2's `StartLimitBurst` behavior). |
+| **`os.Exit(0)` and let the process supervisor relaunch**, instead of `syscall.Exec` | Considered directly (§2.2 step 5). The obvious justification for rejecting it — "a restart would disrupt kubelet" — turned out to be false: kubelet runs under its own supervision, never parented by the agent, so it's unaffected either way (§1.2). Rejected anyway, for a better reason: `Restart=always`-style relaunches count toward the supervisor's crash-protection limit regardless of exit code, so a routine successful upgrade would spend the same budget a real crash uses. `syscall.Exec` never touches that accounting, independent of how any given deployment tunes it. |
+| **DaemonSet-style rolling update** | BYOH hosts are not Kubernetes-managed compute the way a DaemonSet's nodes are — the agent is what makes a host *become* part of the cluster. |
+| **Imperative per-host Task objects instead of desired-state fields** | Every other mechanism in this repo (`K8sVersionAnnotation`, `InstallationSecret`) is declarative desired-state reconciliation; matching that shape keeps this code looking like the rest of the codebase. |
+
+---
+
+## 5. Testing plan
+
+### 5.1 Unit / envtest coverage (agent side)
+
+Extends `agent/reconciler/reconciler_test.go`'s existing suite for `executeInstallerController`,
+using `cloudinitfakes`, plus a new fake for `IExecer` and a fake package fetcher/installer:
+
+- Version comparison is a pure function: equal, empty, mismatched — no fakes needed.
+- Mismatch with `DesiredAgentPackageURL` unset → waits, does not error.
+- Checksum set and mismatched → `AgentUpgradeFailed`, reason `PackageChecksumMismatch`; install
+  never attempted; `IExecer` never invoked.
+- `dpkg`/`rpm` selection is a pure function of the agent's own detected package manager — test
+  both branches directly, no host-provided input involved.
+- Fetch+install succeeds → `IExecer` invoked exactly once with the path `os.Executable()` would
+  resolve to.
+- `dpkg`/`rpm` returns non-zero → `IExecer` **not** invoked, `AgentUpgradeFailed` set with reason
+  `PackageInstallFailed`, event fires, `Spec.DesiredAgentVersion`/`DesiredAgentPackageURL` left
+  untouched (so a retry with a corrected URL doesn't need anything else to change).
+
+### 5.2 Controller (envtest) coverage — `byohostagentupgrade_controller_test.go`
+
+This is where most of the edge-case surface lives — the `Unavailable` union accounting needs
+direct coverage, not just the happy path:
+
+- Batch sizing never exceeds `MaxUnavailable` in-flight hosts regardless of total hosts matching
+  `Selector`.
+- `InFlight`-only unavailability (no unrelated disconnections): count equals in-flight hosts,
+  batch sizing gates correctly.
+- `Disconnected`-only unavailability, entirely unrelated to this rollout (a host down before the
+  CR was even created): counts toward the budget; with `MaxUnavailable` already consumed, **zero**
+  hosts get picked — `Phase` stays `Pending`, condition/event explains why (not silently stuck).
+- Overlap: a host that is both `InFlight` and `Disconnected` (the common case right after
+  `syscall.Exec`) counts **once**, not twice — union, not sum.
+- A host converges (`AgentVersion == TargetVersion`, `AgentConnected == True`), then later goes
+  `AgentConnected == False` with no `AgentUpgradeFailed`: `Upgraded` was already incremented and
+  does not decrement, but it re-enters `Disconnected`, raising `UnavailableCount` and blocking the
+  *next* batch from starting — without ever being marked failed itself. This is the specific case
+  the union accounting exists to catch instead of a bake timer.
+- `PerHostTimeout` transitions a silently-stuck host to failed and halts the rollout — selecting
+  no further hosts even though others haven't been touched yet. `Phase = Failed` is terminal: a
+  later tick must not resume picking even if `Disconnected` later drops back below
+  `MaxUnavailable`.
+- `Blocked` (soft) vs. `Failed` (hard) are distinct and don't get confused: a rollout blocked
+  purely by pre-existing/unrelated disconnection self-resolves and resumes picking once the budget
+  frees up; a rollout halted by `AgentUpgradeFailed` never resumes on its own.
+- `Phase` transitions (`Pending → Progressing → Completed`, and the `→ Failed` branch) exercised
+  directly via `ByoHost.Status` manipulation, no real agents needed.
+- `TargetVersion` admission: `latest` and other non-strict-semver values are rejected by the CRD's
+  validation pattern before the controller ever sees them.
+
+### 5.3 e2e: `test/e2e/agent_upgrade_test.go`
+
+Follows the existing `ByoHostRunner` / docker capacity-pool pattern
+(`test/e2e/cluster_upgrade_test.go:65-103`). Fixture packages replace the fixture scripts from the
+original draft — a trivially small `.deb` (and, if the fleet mix is real rather than legacy, a
+`.rpm`) that installs a second prebuilt test binary and exits 0/non-zero as needed.
+
+**Spec: "Should stage an agent upgrade across the fleet respecting maxUnavailable."**
+- Build two agent binaries with different `-X agent/version.GitVersion=...` values, stand up a
+  4-host capacity pool running the old one, confirm all reach `AgentConnected=True`, attach at
+  least one to a real `ByoMachine`.
+- Create a `ByoHostAgentUpgrade` with a fixture package, `TargetVersion` set to the new version,
+  `MaxUnavailable: 1`.
+- **Poll continuously during the rollout**: `UnavailableCount` never exceeds `MaxUnavailable` at
+  any sampled instant, and the workload-cluster Node stays `Ready=True` throughout (the empirical
+  check on §2.2 step 5's kubelet-independence claim).
+- After completion: all 4 `ByoHost.Status.AgentVersion` at the new version;
+  `Phase == Completed`, `Upgraded == 4`, `FailedHosts` empty; each host's docker container ID is
+  unchanged from before the rollout — proof the upgrade was an in-place `syscall.Exec`, not a
+  container/service restart.
+
+**Spec: "Should halt on explicit failure without affecting unaffected hosts."**
+- A fixture package whose postinst deliberately exits non-zero.
+- Assert exactly one host shows `AgentUpgradeFailed=True, Reason=PackageInstallFailed`, its
+  `AgentVersion` never changes, `Phase == Failed`, and the other 3 hosts' `DesiredAgentVersion`
+  stays unset — matching hard-halt behavior.
+
+**Spec: "Should pause, not fail, on pre-existing unrelated unavailability, and resume once it clears."**
+- Stand up the same 4-host pool; before creating the CR, kill (not upgrade-related) one host's
+  agent process so it goes `AgentConnected=False`.
+- Create a `ByoHostAgentUpgrade` with `MaxUnavailable: 1` targeting all 4.
+- Assert zero hosts get `DesiredAgentVersion` set while the pre-existing host stays disconnected,
+  `Phase` stays `Pending` with the `InsufficientAvailabilityBudget` condition — not `Failed`.
+- Restart the killed host's agent; assert the rollout resumes picking hosts on its own within the
+  next few reconcile ticks, with no operator action beyond fixing the unrelated host.
+
+---
+
+## 6. Rough sequencing
+
+- **Phase 0 (prerequisite, separate ADR, already done).**
+  [agent-version-reporting-adr.md](agent-version-reporting-adr.md) — `Status.AgentVersion` exists.
+- **Phase 1.** §2.1 API additions (`DesiredAgentVersion`, `DesiredAgentPackageURL`,
+  `DesiredAgentPackageChecksum`, the two host labels) plus `make generate` and `make manifests`.
+  Purely additive, safe to land alone. Mirroring the labels at registration time
+  (`agent/registration/host_registrar.go`) is a small, separate, low-risk change.
+- **Phase 2.** §2.2 agent-side fetch/install/re-exec, with unit coverage (§5.1). Testable in
+  isolation with fakes, before the controller exists.
+- **Phase 3.** §2.3 `ByoHostAgentUpgrade` CRD and controller, including the `Unavailable` union
+  accounting, with envtest coverage (§5.2) — this is the highest-edge-case-density piece.
+- **Phase 4.** §5.3 e2e specs, using small fixture packages rather than a production build.
+- **Phase 5 (follow-up, not blocking).** §8 open questions — package-URL provenance/signing
+  beyond a plain checksum, who/what produces the right URL for a given `TargetVersion` at scale,
+  and the Selector-mismatch gap (§8 Q9).
+
+---
+
+## 7. Evidence index
+
+| Claim | Location |
+|---|---|
+| No spec-side field to tell a host to upgrade today | `apis/infrastructure/v1beta1/byohost_types.go:37-53` |
+| Agent builds both `.deb` and `.rpm` today | `Makefile:428-480` |
+| `HostInfo` (`OSName`/`OSImage`/`Architecture`) lives only in `Status`, not `.Labels` | `apis/infrastructure/v1beta1/byohost_types.go:55-64,121`; `agent/registration/host_registrar.go:149` |
+| Existing label-mirroring pattern this design's new labels follow | `apis/infrastructure/v1beta1/byohost_types.go:21`; `controllers/infrastructure/byomachine_controller.go:588` |
+| Heartbeat write cadence (agent side) | `agent/reconciler/host_reconciler.go:41,103-109` |
+| `AgentConnected` computed from `LastHeartbeatTime` vs. `HeartbeatTimeoutPeriod` (management side) | `controllers/infrastructure/byohost_controller.go:31,94,103-108`; `apis/infrastructure/v1beta1/condition_consts.go:84-96` |
+| Agent runs under a process supervisor (systemd, in this repo's reference implementation) with `Restart=always`, a fixed restart delay, and a tight burst limit — no exponential backoff; exact burst/interval values are a deployment tunable, not cited as an architectural constant | current reference implementation's agent unit file (not cited by path — see revision note, this ADR treats the mechanism as general systemd `Restart=`/`StartLimitBurst` behavior, not this repo's specific tuning) |
+| Kubelet is its own package, started via a one-shot script the agent runs to completion and exits — never parented or supervised by the agent process | `installer/internal/algo/ubuntu-templates/install.sh.tmpl:50`; `agent/cloudinit/cmd_runner.go:24` |
+| Existing opaque-script hand-off pattern this design's *agent-side execution shape* reuses (not its content model) | `agent/reconciler/host_reconciler.go:142-146,181-214` |
+| Existing fetch-then-package-manager-install precedent | `cmd/byohctl/service/agent.go` (`downloadDebianPackage`/`installDebianPackage`, `dpkg -i`) |
+| Strict-semver validation precedent this ADR's `TargetVersion` pattern reuses | `hack/version.sh:55` |
+| `ByoHost`/`ByoCluster` are namespace-scoped today | `apis/infrastructure/v1beta1/byohost_types.go:117`; `apis/infrastructure/v1beta1/byocluster_types.go:53` |
+| Existing docker-backed e2e host harness this plan's tests build on | `test/e2e/docker_helper.go`; `test/e2e/cluster_upgrade_test.go:65-103` |
+
+---
+
+## 8. Open questions
+
+1. **Who produces `PackageURL` for a given `TargetVersion`, and how does it stay in sync with
+   published agent builds?** Treated as an opaque input the CR's creator supplies (UI or external
+   automation, per this ADR's decision that `TargetVersion` is always explicit — §2.1). In
+   practice something — a release process, a UI backed by a build pipeline — needs to produce the
+   right URL for a given version and OS/arch cohort. Not decided here.
+2. **Package provenance/integrity beyond a plain checksum.** `DesiredAgentPackageChecksum` catches
+   accidental corruption or a wrong URL, not a deliberately malicious artifact — there's no
+   signing story. Worth deciding whether this needs to go further, given a compromised agent
+   upgrade artifact has a larger blast radius (continuous root execution) than a compromised
+   install script (runs once).
+3. **RBAC for the new CRD** — which principal may create a `ByoHostAgentUpgrade`. Not
+   investigated.
+4. **Where should `MaxUnavailable`'s default and `PerHostTimeout`'s default actually land?**
+   §2.3/§5.2 specify the mechanism; the numbers need sizing against a real package once one
+   exists, informed by real install duration plus the systemd restart-exhaustion window (~10-15s
+   per §1.2).
+5. **Selector/cohort mismatches aren't caught proactively.** Since cohort-splitting (deb vs. rpm,
+   amd64 vs. arm64) is manual (§2.1), nothing stops an operator from pointing a `PackageURL` at
+   the wrong cohort — it only surfaces as an install failure per host, not as an upfront
+   validation error on the CR. Worth deciding whether the CRD (or an admission webhook) should
+   cross-check `Selector`-matched hosts' `HostArchitectureLabel`/`HostOSFamilyLabel` for
+   homogeneity before allowing the CR to proceed at all.
