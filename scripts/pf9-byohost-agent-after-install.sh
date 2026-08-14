@@ -5,10 +5,10 @@ mkdir -p /var/log/pf9/byoh
 mkdir -p /root/.byoh/
 
 touch  /var/log/pf9/byoh/byoh-agent.log
-if [ -f /binary/pf9-byoh-hostagent-linux-amd64 ]; then
-	    chmod +x /binary/pf9-byoh-hostagent-linux-amd64
+if [ -f /binary/pf9-byoh-hostagent ]; then
+	    chmod +x /binary/pf9-byoh-hostagent
 	else
-	    echo "Error: Binary file not found at /binary/pf9-byoh-hostagent-linux-amd64"
+	    echo "Error: Binary file not found at /binary/pf9-byoh-hostagent"
 	    exit 1
 	fi
 

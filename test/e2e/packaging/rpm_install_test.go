@@ -140,7 +140,7 @@ var _ = Describe("pf9-byohost RPM", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(exitCode).To(Equal(0))
 		Expect(strings.Fields(filesOutput)).To(ConsistOf(
-			"/binary/pf9-byoh-hostagent-linux-amd64",
+			"/binary/pf9-byoh-hostagent",
 			"/etc/systemd/system/pf9-byohost-agent.service",
 		))
 
@@ -167,7 +167,7 @@ var _ = Describe("pf9-byohost RPM", func() {
 
 		By("asserting the binary and unit file are gone")
 		for _, path := range []string{
-			"/binary/pf9-byoh-hostagent-linux-amd64",
+			"/binary/pf9-byoh-hostagent",
 			"/etc/systemd/system/pf9-byohost-agent.service",
 		} {
 			_, exitCode, err := execInContainer(ctx, containerID, []string{"test", "-e", path}, nil)

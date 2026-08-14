@@ -3,12 +3,16 @@
 # Exit immediately if a command fails
 set -e
 
-LOG_FILE="/var/log/pf9/byoh-agent-uninstall.log"
+LOG_FILE="/var/log/pf9/byoh/byoh-agent-uninstall.log"
+
+# Don't assume after-install.sh already created this - e.g. a partially-failed install.
+# Explicit mode, not the ambient umask: a shared log dir shouldn't shift with the caller's umask.
+mkdir -p -m 0755 /var/log/pf9/byoh
 
 echo "Starting uninstallation of pf9-byoh-hostagent..." | tee -a "$LOG_FILE"
 
 # Attempt to stop the agent using the binary
-if /binary/pf9-byoh-hostagent-linux-amd64 phases stop --force --skip-pre-check >> "$LOG_FILE" 2>&1; then
+if /binary/pf9-byoh-hostagent phases stop --force --skip-pre-check >> "$LOG_FILE" 2>&1; then
     echo "pf9-byoh-hostagent stopped successfully before uninstallation" | tee -a "$LOG_FILE"
 else
     echo "WARNING: pf9-byoh-hostagent could not be stopped before uninstallation" | tee -a "$LOG_FILE"
@@ -29,9 +33,9 @@ systemctl daemon-reload >> "$LOG_FILE" 2>&1
 echo "Systemd daemon reloaded" | tee -a "$LOG_FILE"
 
 # Remove binary
-if [ -f /binary/pf9-byoh-hostagent-linux-amd64 ]; then
+if [ -f /binary/pf9-byoh-hostagent ]; then
     echo "Removing binary..." | tee -a "$LOG_FILE"
-    rm -f /binary/pf9-byoh-hostagent-linux-amd64
+    rm -f /binary/pf9-byoh-hostagent
     echo "Binary removed successfully" | tee -a "$LOG_FILE"
 else
     echo "Binary already removed or not found" | tee -a "$LOG_FILE"
@@ -55,11 +59,11 @@ else
     echo "Log files already removed or not found" | tee -a "$LOG_FILE"
 fi
 
-if [ -f /etc/pf9-byohost* ]; then
+if [ -e /etc/pf9-byohost-agent.service.d ]; then
 	echo "Removing Pf9 conf files" | tee -a "$LOG_FILE"
-	rm -f /etc/pf9-byohost*
+	rm -rf /etc/pf9-byohost-agent.service.d
 	echo "conf files Removed Successfully" | tee -a "$LOG_FILE"
-else 
+else
 	echo "Conf files already removed or not found " | tee -a "$LOG_FILE"
 fi
 
