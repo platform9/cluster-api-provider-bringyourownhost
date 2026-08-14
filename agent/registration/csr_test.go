@@ -160,7 +160,7 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 			Expect(err).NotTo(HaveOccurred())
 			_, err = k8sClientSet.CertificatesV1().CertificateSigningRequests().Create(ctx, byohCSR, metav1.CreateOptions{})
 			Expect(err).ShouldNot(HaveOccurred())
-			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration)
+			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
 			_, _, err = CSRRegistrar.RequestBYOHClientCert(hostName)
 			Expect(err).Should(HaveOccurred())
@@ -170,7 +170,7 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 		})
 		It("should timeout if the CSR is not approved", func() {
 			registration.CSRApprovalTimeout = time.Second * 5
-			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration)
+			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
 			err = CSRRegistrar.BootstrapKubeconfig(hostName)
 			Expect(err).Should(HaveOccurred())
@@ -217,7 +217,7 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 			}()
 
 			registration.ConfigPath = filepath.Join(blockingFile.Name(), "config")
-			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration)
+			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
 			err = CSRRegistrar.BootstrapKubeconfig(hostName)
 			Expect(err).Should(HaveOccurred())
@@ -249,7 +249,7 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 					return
 				}
 			}()
-			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration)
+			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
 			err = CSRRegistrar.BootstrapKubeconfig(hostName)
 			Expect(err).ShouldNot(HaveOccurred())
