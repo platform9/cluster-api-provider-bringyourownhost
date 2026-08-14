@@ -6,13 +6,17 @@ package reconciler
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"time"
 
 	"github.com/pkg/errors"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/cloudinit"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/registration"
+	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/version"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/common"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -37,6 +41,13 @@ type HostReconciler struct {
 	Recorder            record.EventRecorder
 	SkipK8sInstallation bool
 	DownloadPath        string
+	// PackagePull fetches an OCI-packaged artifact for an agent upgrade.
+	// Defaults to cloudinit.Pull in agent/main.go; overridden in tests.
+	PackagePull func(ctx context.Context, ref, destDir string) error
+	// Exit terminates the process after a successful agent upgrade install.
+	// Defaults to os.Exit(0) in agent/main.go; overridden in tests so a
+	// successful upgrade doesn't kill the test binary.
+	Exit func()
 	// HeartbeatInterval is the minimum time between LastHeartbeatTime writes,
 	// and the interval this reconciler self-requeues on. Wired from the
 	// --heartbeat-interval flag in agent/main.go.
@@ -116,6 +127,10 @@ func (r *HostReconciler) reconcileNormal(ctx context.Context, byoHost *infrastru
 	// avoid during a long kubeadm install/join.
 	if err := r.patchHeartbeat(ctx, byoHost.Name, byoHost.Namespace); err != nil {
 		logger.Error(err, "failed to patch heartbeat")
+	}
+
+	if err := r.executeAgentUpgrade(ctx, byoHost); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	if byoHost.Status.MachineRef == nil {
@@ -215,6 +230,134 @@ func (r *HostReconciler) executeInstallerController(ctx context.Context, byoHost
 		return err
 	}
 	return nil
+}
+
+// executeAgentUpgrade compares the host's running agent version against
+// Spec.DesiredAgent.Version and, on a mismatch, pulls, verifies, and installs
+// the package at Spec.DesiredAgent.PackageURL, then re-execs into the newly
+// installed binary. See docs/proposals/agent-self-upgrade-adr.md §2.2.
+func (r *HostReconciler) executeAgentUpgrade(ctx context.Context, byoHost *infrastructurev1beta1.ByoHost) error {
+	logger := ctrl.LoggerFrom(ctx)
+
+	desiredAgent := byoHost.Spec.DesiredAgent
+	if desiredAgent == nil {
+		return nil
+	}
+	if desiredAgent.Version == version.Get().GitVersion {
+		// Converged - clear any stale failure from a prior attempt. A
+		// successful upgrade itself never reaches this line directly: it
+		// re-execs and never returns, so convergence is only ever observed
+		// on the tick after.
+		conditions.MarkTrue(byoHost, infrastructurev1beta1.AgentUpgradeSucceeded)
+		return nil
+	}
+	if desiredAgent.PackageURL == "" {
+		logger.Info("DesiredAgent.PackageURL not ready")
+		return nil
+	}
+
+	tempDir, err := os.MkdirTemp("", "byoh-agent-upgrade-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tempDir) //nolint:errcheck // best-effort cleanup of a temp dir
+
+	logger.Info("pulling agent upgrade package", "ref", byoHost.Spec.DesiredAgentPackageURL)
+	if err := r.PackagePuller.Pull(ctx, byoHost.Spec.DesiredAgentPackageURL, tempDir); err != nil {
+		logger.Error(err, "error pulling agent upgrade package")
+		r.Recorder.Event(byoHost, corev1.EventTypeWarning, "AgentPackagePullFailed", "agent upgrade package pull failed")
+		conditions.MarkFalse(byoHost, infrastructurev1beta1.AgentUpgradeSucceeded, infrastructurev1beta1.AgentPackagePullFailedReason, clusterv1.ConditionSeverityWarning, "")
+		return err
+	}
+
+	family := registration.GetOSFamily(exec.LookPath)
+	artifactPath, err := findPackageArtifact(tempDir, family)
+	if err != nil {
+		logger.Error(err, "invalid agent upgrade package bundle")
+		r.Recorder.Event(byoHost, corev1.EventTypeWarning, "PackageBundleInvalid", "agent upgrade package bundle invalid")
+		conditions.MarkFalse(byoHost, infrastructurev1beta1.AgentUpgradeSucceeded, infrastructurev1beta1.PackageBundleInvalidReason, clusterv1.ConditionSeverityWarning, "")
+		return err
+	}
+
+	if byoHost.Spec.DesiredAgentPackageChecksum != "" {
+		if err := verifyChecksum(artifactPath, byoHost.Spec.DesiredAgentPackageChecksum); err != nil {
+			logger.Error(err, "agent upgrade package checksum mismatch")
+			r.Recorder.Event(byoHost, corev1.EventTypeWarning, "PackageChecksumMismatch", "agent upgrade package checksum mismatch")
+			conditions.MarkFalse(byoHost, infrastructurev1beta1.AgentUpgradeSucceeded, infrastructurev1beta1.PackageChecksumMismatchReason, clusterv1.ConditionSeverityWarning, "")
+			return err
+		}
+	}
+
+	installCmd, err := agentPackageInstallCommand(family, artifactPath)
+	if err != nil {
+		logger.Error(err, "invalid agent upgrade package bundle")
+		r.Recorder.Event(byoHost, corev1.EventTypeWarning, "PackageBundleInvalid", "agent upgrade package bundle invalid")
+		conditions.MarkFalse(byoHost, infrastructurev1beta1.AgentUpgradeSucceeded, infrastructurev1beta1.PackageBundleInvalidReason, clusterv1.ConditionSeverityWarning, "")
+		return err
+	}
+
+	logger.Info("installing agent upgrade package", "family", family)
+	if err := r.CmdRunner.RunCmd(ctx, installCmd); err != nil {
+		logger.Error(err, "error installing agent upgrade package")
+		r.Recorder.Event(byoHost, corev1.EventTypeWarning, "PackageInstallFailed", "agent upgrade package install failed")
+		conditions.MarkFalse(byoHost, infrastructurev1beta1.AgentUpgradeSucceeded, infrastructurev1beta1.PackageInstallFailedReason, clusterv1.ConditionSeverityWarning, "")
+		return err
+	}
+
+	logger.Info("install succeeded, exiting for the process supervisor to relaunch the upgraded binary")
+	r.Exit()
+	// Unreachable on a real os.Exit(0): it terminates this process
+	// immediately and never returns. Only reachable with a stub Exit func in
+	// tests.
+	return nil
+}
+
+// findPackageArtifact returns the single *.deb (family ==
+// infrastructurev1beta1.HostOSFamilyDebian) or *.rpm (family ==
+// infrastructurev1beta1.HostOSFamilyRHEL) file in dir. Zero or more than one
+// match is an error — an ambiguous bundle, not something to guess at.
+func findPackageArtifact(dir, family string) (string, error) {
+	ext := ".rpm"
+	if family == infrastructurev1beta1.HostOSFamilyDebian {
+		ext = ".deb"
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, "*"+ext))
+	if err != nil {
+		return "", err
+	}
+	if len(matches) != 1 {
+		return "", fmt.Errorf("expected exactly one %s file in agent upgrade bundle, found %d", ext, len(matches))
+	}
+	return matches[0], nil
+}
+
+// verifyChecksum checks path's sha256 against expected, formatted
+// "sha256:<hex>".
+func verifyChecksum(path, expected string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	actual := fmt.Sprintf("sha256:%x", sha256.Sum256(data))
+	if actual != expected {
+		return fmt.Errorf("checksum mismatch: expected %s, got %s", expected, actual)
+	}
+	return nil
+}
+
+// agentPackageInstallCommand returns the fixed install command for family —
+// never operator-supplied content, and never includes a force-downgrade
+// flag (see docs/proposals/agent-self-upgrade-adr.md §2.4: a downgrade
+// failing here is the intended backstop, not a bug to route around).
+func agentPackageInstallCommand(family, artifactPath string) (string, error) {
+	switch family {
+	case infrastructurev1beta1.HostOSFamilyDebian:
+		return fmt.Sprintf("dpkg -i %s", artifactPath), nil
+	case infrastructurev1beta1.HostOSFamilyRHEL:
+		return fmt.Sprintf("rpm -Uvh %s", artifactPath), nil
+	default:
+		return "", fmt.Errorf("unrecognized package family %q", family)
+	}
 }
 
 func (r *HostReconciler) reconcileDelete(ctx context.Context, byoHost *infrastructurev1beta1.ByoHost) (ctrl.Result, error) {

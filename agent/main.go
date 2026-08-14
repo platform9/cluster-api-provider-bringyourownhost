@@ -232,10 +232,18 @@ func main() {
 		CmdRunner:           cloudinit.CmdRunner{},
 		FileWriter:          cloudinit.FileWriter{},
 		TemplateParser:      setupTemplateParser(),
+		PackagePull:         cloudinit.Pull,
 		Recorder:            mgr.GetEventRecorderFor("hostagent-controller"),
 		SkipK8sInstallation: skipInstallation,
 		DownloadPath:        downloadpath,
-		HeartbeatInterval:   heartbeatInterval,
+		// Exit terminates the process after a successful agent upgrade
+		// install, so the process supervisor (systemd's Restart=always)
+		// relaunches from the same fixed ExecStart path, which by then
+		// points at the newly installed binary. See
+		// docs/proposals/agent-self-upgrade-adr.md §2.2 step 5 for why this
+		// is preferred over syscall.Exec.
+		Exit:              func() { os.Exit(0) },
+		HeartbeatInterval: heartbeatInterval,
 		MaxBlockingDuration: maxBlockingDuration,
 	}
 	if err = hostReconciler.SetupWithManager(context.TODO(), mgr); err != nil {

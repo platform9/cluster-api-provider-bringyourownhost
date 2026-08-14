@@ -69,6 +69,8 @@ var _ = Describe("Byohost Agent Tests", func() {
 			CmdRunner:           fakeCommandRunner,
 			FileWriter:          fakeFileWriter,
 			TemplateParser:      fakeTemplateParser,
+			PackagePull:         func(context.Context, string, string) error { return nil },
+			Exit:                func() {},
 			Recorder:            recorder,
 			SkipK8sInstallation: false,
 		}
@@ -990,6 +992,8 @@ func newHostReconcilerForHeartbeatTest(t *testing.T, interval time.Duration) *re
 		CmdRunner:           &cloudinitfakes.FakeICmdRunner{},
 		FileWriter:          &cloudinitfakes.FakeIFileWriter{},
 		TemplateParser:      &cloudinitfakes.FakeITemplateParser{},
+		PackagePull:         func(context.Context, string, string) error { return nil },
+		Exit:                func() {},
 		Recorder:            record.NewFakeRecorder(32),
 		SkipK8sInstallation: true,
 		HeartbeatInterval:   interval,
