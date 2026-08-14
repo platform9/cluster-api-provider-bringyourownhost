@@ -120,14 +120,20 @@ spec:
   template:
     spec:
       # Deleting a control-plane Machine's etcd member briefly disrupts the
-      # workload API (kube-vip fails over, that node's own apiserver/etcd shut
-      # down). CAPI's Node-deletion retry budget defaults to 10s
-      # (NodeDeletionTimeoutSeconds), which can be shorter than that failover
-      # blip -- when it is, CAPI gives up on deleting the old Node and finishes
-      # deleting the Machine anyway, leaving a stale Node (and its mirrored
-      # static pods, e.g. etcd) behind forever. Give it more retries/time.
+      # workload API: kube-vip fails over to a surviving control-plane host,
+      # and that host's kube-vip static pod has to cold-pull its container
+      # image first (byohost containers cache nothing between runs). A real
+      # e2e run measured that pull taking just under 3 minutes, during which
+      # the workload API stayed unreachable -- longer than the 60s this
+      # field was previously set to. CAPI's Node-deletion retry budget
+      # defaults to 10s (NodeDeletionTimeoutSeconds); once it elapses, CAPI
+      # gives up on deleting the old Node and finishes deleting the Machine
+      # anyway, leaving a stale Node (and its mirrored static pods, e.g.
+      # etcd) behind forever, which then fails the upgrade test's own
+      # etcd-image-tag check. Give it enough margin to absorb a slow image
+      # pull.
       machineTemplate:
-        nodeDeletionTimeout: 60s
+        nodeDeletionTimeout: 5m
       kubeadmConfigSpec:
         # kube-proxy's conntrack tuning tries to raise net.netfilter.nf_conntrack_max,
         # a global (non-namespaced) sysctl a privileged container can read but never

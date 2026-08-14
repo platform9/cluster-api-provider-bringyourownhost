@@ -213,7 +213,7 @@ spec:
       kind: ByoMachineTemplate
       name: ${CLUSTER_NAME}-control-plane
       namespace: ${NAMESPACE}
-    nodeDeletionTimeout: 60s
+    nodeDeletionTimeout: 5m
   replicas: ${CONTROL_PLANE_MACHINE_COUNT}
   version: ${KUBERNETES_VERSION}
 ---
