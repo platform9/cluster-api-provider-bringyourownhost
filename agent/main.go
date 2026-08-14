@@ -104,7 +104,8 @@ func setupflags() {
 
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	hiddenFlags := []string{"log-flush-frequency", "alsologtostderr", "log-backtrace-at", "log-dir", "logtostderr", "stderrthreshold", "vmodule", "azure-container-registry-config",
-		"log_backtrace_at", "log_dir", "log_file", "log_file_max_size", "add_dir_header", "skip_headers", "skip_log_headers", "one_output", "kubeconfig"}
+		"log_backtrace_at", "log_dir", "log_file", "log_file_max_size", "add_dir_header", "skip_headers", "skip_log_headers", "one_output", "kubeconfig",
+		"alsologtostderrthreshold", "legacy_stderr_threshold_behavior"}
 	for _, hiddenFlag := range hiddenFlags {
 		_ = pflag.CommandLine.MarkHidden(hiddenFlag)
 	}
