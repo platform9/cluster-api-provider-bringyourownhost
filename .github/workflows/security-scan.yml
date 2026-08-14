@@ -7,12 +7,8 @@ on:
   pull_request:
 
 jobs:
-  go-version:
-    uses: ./.github/workflows/_go.yml
-
   gosec_scan:
     name: Gosec Security Scan (Full)
-    needs: go-version
     runs-on: ubuntu-latest
     outputs:
       gosec_high_found: ${{ steps.scan.outputs.gosec_high_found }}
@@ -26,7 +22,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version: '${{ needs.go-version.outputs.version }}'
+          go-version-file: go.mod
 
       - name: Install gosec
         run: |
@@ -95,7 +91,6 @@ jobs:
 
   trivy_scan:
     name: Trivy Security Scan (Full)
-    needs: go-version
     runs-on: ubuntu-latest
     outputs:
       trivy_high_found: ${{ steps.scan.outputs.trivy_high_found }}
