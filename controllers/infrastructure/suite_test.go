@@ -35,6 +35,7 @@ import (
 	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1beta1"
 	"sigs.k8s.io/cluster-api/controllers/remote"
 	ctrl "sigs.k8s.io/controller-runtime"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to
@@ -100,7 +101,7 @@ func setupReconcilers() {
 	recorder = record.NewFakeRecorder(32)
 	reconciler = &controllers.ByoMachineReconciler{
 		Client:   cl,
-		Tracker:  remote.NewTestClusterCacheTracker(logr.New(logf.NullLogSink{}), clientFake, scheme.Scheme, client.ObjectKey{Name: capiCluster.Name, Namespace: capiCluster.Namespace}),
+		Tracker:  remote.NewTestClusterCacheTracker(logr.New(logf.NullLogSink{}), cl, clientFake, scheme.Scheme, client.ObjectKey{Name: capiCluster.Name, Namespace: capiCluster.Namespace}), //nolint: staticcheck // mirrors the deprecated-but-supported remote.ClusterCacheTracker used by ByoMachineReconciler.Tracker
 		Recorder: recorder,
 	}
 	if err := reconciler.SetupWithManager(context.TODO(), k8sManager); err != nil {
@@ -168,8 +169,8 @@ func TestMain(m *testing.M) {
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
 			filepath.Join("..", "..", "config", "crd", "bases"),
-			filepath.Join(build.Default.GOPATH, "pkg", "mod", "sigs.k8s.io", "cluster-api@v1.4.4", "config", "crd", "bases"),
-			filepath.Join(build.Default.GOPATH, "pkg", "mod", "sigs.k8s.io", "cluster-api@v1.4.4", "bootstrap", "kubeadm", "config", "crd", "bases"),
+			filepath.Join(build.Default.GOPATH, "pkg", "mod", "sigs.k8s.io", "cluster-api@v1.10.10", "config", "crd", "bases"),
+			filepath.Join(build.Default.GOPATH, "pkg", "mod", "sigs.k8s.io", "cluster-api@v1.10.10", "bootstrap", "kubeadm", "config", "crd", "bases"),
 		},
 		ErrorIfCRDPathMissing: true,
 	}
@@ -191,8 +192,8 @@ func TestMain(m *testing.M) {
 	}
 
 	k8sManager, err = ctrl.NewManager(cfg, ctrl.Options{
-		Scheme:             scheme.Scheme,
-		MetricsBindAddress: ":6080",
+		Scheme:  scheme.Scheme,
+		Metrics: metricsserver.Options{BindAddress: ":6080"},
 	})
 	if err != nil {
 		panic(err)
