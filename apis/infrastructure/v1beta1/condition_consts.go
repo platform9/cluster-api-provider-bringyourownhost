@@ -1,4 +1,5 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package v1beta1
@@ -52,6 +53,33 @@ const (
 	// K8sComponentsInstallationFailedReason indicates that the installer failed to install all the
 	// k8s components on this host
 	K8sComponentsInstallationFailedReason = "K8sComponentsInstallationFailed"
+
+	// AgentUpgradeSucceeded documents whether the most recently attempted
+	// management-cluster-directed agent upgrade (ByoHostSpec.DesiredAgent)
+	// on this host succeeded. Marked False with a specific reason on
+	// failure. A successful upgrade itself never marks this True directly
+	// — it re-execs into the new binary and never returns to this
+	// reconcile tick — so this is instead cleared back to True on the
+	// *next* tick, once Status.AgentVersion has converged with
+	// DesiredAgent.Version.
+	AgentUpgradeSucceeded clusterv1.ConditionType = "AgentUpgradeSucceeded"
+
+	// AgentPackagePullFailedReason indicates `imgpkg pull` of
+	// DesiredAgent.PackageURL failed.
+	AgentPackagePullFailedReason = "AgentPackagePullFailed"
+
+	// PackageBundleInvalidReason indicates the OCI bundle pulled from
+	// DesiredAgent.PackageURL did not contain exactly one .deb/.rpm file
+	// matching this host's package family (HostOSFamilyLabel).
+	PackageBundleInvalidReason = "PackageBundleInvalid"
+
+	// PackageChecksumMismatchReason indicates the extracted .deb/.rpm did not
+	// match DesiredAgent.PackageChecksum.
+	PackageChecksumMismatchReason = "PackageChecksumMismatch"
+
+	// PackageInstallFailedReason indicates dpkg/rpm exited non-zero while
+	// installing the extracted artifact.
+	PackageInstallFailedReason = "PackageInstallFailed"
 )
 
 // Conditions and Reasons defined on BYOMachine
