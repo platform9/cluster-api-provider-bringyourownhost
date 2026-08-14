@@ -12,12 +12,8 @@ permissions:
   contents: read
 
 jobs:
-  go-version:
-    uses: ./.github/workflows/_go.yml
-
   check-generated-drift:
     name: Check for uncommitted generated changes
-    needs: go-version
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout code
@@ -26,7 +22,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: ${{ needs.go-version.outputs.version }}
+          go-version-file: go.mod
 
       - name: Run generators
         run: |
