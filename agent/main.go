@@ -33,6 +33,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
 // labelFlags is a flag that holds a map of label key values.
@@ -152,7 +153,9 @@ func main() {
 	_ = clusterv1.AddToScheme(scheme)
 	_ = certv1.AddToScheme(scheme)
 
-	logger := klogr.New()
+	// klogr predates the textlogger migration; swapping formats is a separate, deliberate
+	// change outside this dependency bump's scope (see main.go for the same rationale).
+	logger := klogr.New() //nolint: staticcheck
 	ctrl.SetLogger(logger)
 	hostName, err := os.Hostname()
 	if err != nil {
@@ -192,19 +195,19 @@ func main() {
 	}
 
 	mgr, err := ctrl.NewManager(config, ctrl.Options{
-		Scheme:    scheme,
-		Namespace: namespace,
-		// this enables filtered watch of ByoHost based on the host name
-		// only ByoHost running for this host will be cached
-		NewCache: cache.BuilderWithOptions(cache.Options{
-			SelectorsByObject: cache.SelectorsByObject{
+		Scheme: scheme,
+		Cache: cache.Options{
+			// Scope the cache to this host's own namespace...
+			DefaultNamespaces: map[string]cache.Config{namespace: {}},
+			// ...and, within it, to the filtered watch of ByoHost based on the host
+			// name so only the ByoHost running for this host will be cached.
+			ByObject: map[client.Object]cache.ByObject{
 				&infrastructurev1beta1.ByoHost{}: {
 					Field: fields.SelectorFromSet(fields.Set{"metadata.name": hostName}),
 				},
 			},
 		},
-		),
-		MetricsBindAddress: metricsbindaddress,
+		Metrics: metricsserver.Options{BindAddress: metricsbindaddress},
 	})
 	if err != nil {
 		logger.Error(err, "unable to start manager")
