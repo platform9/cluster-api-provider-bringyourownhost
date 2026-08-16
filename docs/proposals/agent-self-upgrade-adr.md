@@ -85,19 +85,28 @@ retries, then the supervisor stops trying (`start-limit-hit`) until an operator 
 the exact numbers as a deployment tunable, not an architectural constant this ADR depends on — the
 property that matters is qualitative: **no indefinite retry, and no exponential backoff**, so
 recovery from a truly broken binary is manual (SSH/Ansible) by design, matching this ADR's decision
-not to build automatic rollback (§2.4). One detail that matters for §2.2's re-exec-vs-restart
-choice, true of systemd's `Restart=` accounting generally, not specific to any one unit's tuning:
-`StartLimitBurst` counts every supervisor-triggered relaunch, regardless of exit code — a clean,
-successful, intentional exit consumes the same budget as a crash.
+not to build automatic rollback (§2.4). One detail that matters for §2.2 step 5, true of systemd's
+`Restart=` accounting generally, not specific to any one unit's tuning: `StartLimitBurst` counts
+every supervisor-triggered relaunch, regardless of exit code — a clean, successful, intentional
+exit consumes the same budget as a crash.
 
-**Kubelet is already fully independent of the agent's process lifecycle, unconditionally.**
+**Revision (post-implementation review):** §2.2 step 5 originally used `syscall.Exec` specifically
+to avoid spending one of that budget's slots on the deliberate switch to a new binary. Reviewed
+after Phase 3 landed and the complexity was visible end to end, that trade wasn't worth it — see
+§2.2 step 5 and §4 for the full reasoning. The budget concern is real but is bought more cheaply by
+simply giving the unit one more slot than it would otherwise need: **this repo's reference
+implementation now sets `StartLimitBurst=3`** (`service/pf9-byohostagent.service`) — one for the
+deliberate `os.Exit(0)` an upgrade always does, two remaining for genuine crash-loop protection,
+matching the original two-retry intent.
+
+**Kubelet is already fully independent of the agent's process lifecycle, unconditionally** —
+relevant because it means the choice between exiting and re-exec'ing never actually turned on
+kubelet safety, even though that was the original justification for the more complex option.
 `kubelet` is installed as its own package (`for pkg in cri-tools kubernetes-cni kubectl kubelet
 kubeadm`, `installer/internal/algo/ubuntu-templates/install.sh.tmpl:50`) and ends up running under
 its own systemd unit; the agent's own `CmdRunner` only ever shells out to run the install script
 to completion and exits (`agent/cloudinit/cmd_runner.go:24`) — it never parents or supervises
-kubelet at runtime. This means an agent process *restarting* (not just re-exec'ing) would not
-disrupt kubelet either — worth noting up front because §2.2 step 5's original justification for
-avoiding a restart got this wrong.
+kubelet at runtime. An agent process restarting doesn't disrupt kubelet either way.
 
 **Pulling an OCI-packaged artifact and installing it with the host's own package manager already
 has precedent in this repo, twice over.** `downloadDebianPackage` / `installDebianPackage`
@@ -110,8 +119,8 @@ self-installs `imgpkg` from GitHub releases if it isn't already on `PATH`
 completed initial k8s-component installation, which every host eligible for an agent upgrade
 necessarily has. §2.2 reuses this exact mechanism rather than a plain HTTP(S) fetch: `imgpkg pull`,
 then hand the extracted `.deb`/`.rpm` to the host's own package manager. If `imgpkg` is somehow
-missing on an eligible host, that's a legitimate `AgentUpgradeFailed` — this design does not
-reimplement `install.sh.tmpl`'s self-install fallback for it.
+missing on an eligible host, that's a legitimate `AgentUpgradeSucceeded=False` — this design does
+not reimplement `install.sh.tmpl`'s self-install fallback for it.
 
 ---
 
@@ -121,7 +130,8 @@ When the management cluster wants a host on a different agent version, it tells 
 which package to install — an OCI image reference, pulled via `imgpkg`, resolved by whoever
 creates the upgrade CR, not by the agent or controller — and the agent's only job is to pull it,
 extract the `.deb`/`.rpm` matching its own package family, hand it to `dpkg`/`rpm`, and on success
-re-exec itself. A new **rollout controller** stages this across a
+exit so the process supervisor relaunches it running the new binary. A new **rollout controller**
+stages this across a
 fleet, gating on the existing heartbeat/`AgentConnected` signal and the new `AgentVersion` field,
 and halting hard on any explicit failure while tolerating pre-existing or transient unavailability
 by simply pausing rather than failing.
@@ -158,7 +168,7 @@ DesiredAgentPackageURL string `json:"desiredAgentPackageURL,omitempty"`
 // ("sha256:<hex>") of the specific .deb/.rpm file extracted from the
 // DesiredAgentPackageURL bundle — not of the OCI image itself, which
 // digest-pinning the reference above already covers. The agent refuses to
-// install on mismatch and marks AgentUpgradeFailed with reason
+// install on mismatch and marks AgentUpgradeSucceeded=False with reason
 // PackageChecksumMismatch.
 // +optional
 DesiredAgentPackageChecksum string `json:"desiredAgentPackageChecksum,omitempty"`
@@ -218,7 +228,7 @@ TargetVersion string `json:"targetVersion"`
 matching the same strict-semver shape `hack/version.sh:55` already enforces at build time (and
 rejecting `latest` as a side effect, since it doesn't match).
 
-### 2.2 Agent-side: pull, install, re-exec
+### 2.2 Agent-side: pull, install, exit
 
 New function on the existing `HostReconciler`, `executeAgentUpgrade`, invoked from the same
 reconcile tick that already writes the heartbeat:
@@ -231,10 +241,11 @@ reconcile tick that already writes the heartbeat:
 3. `imgpkg pull -i <DesiredAgentPackageURL> -o <tempDir>`, then find the single `*.deb` (package
    family `debian`) or `*.rpm` (package family `rhel`) in `tempDir` — the agent already knows
    which via `registration.GetOSFamily`, the same probe used to set `HostOSFamilyLabel` at
-   registration (§2.1). Zero or more than one match is a hard error (`AgentUpgradeFailed`, reason
-   `PackageBundleInvalid`) — not something to guess at. If `DesiredAgentPackageChecksum` is set,
-   verify it against that extracted file before doing anything else — mismatch marks
-   `AgentUpgradeFailed`, reason `PackageChecksumMismatch`, and stops here without installing.
+   registration (§2.1). Zero or more than one match is a hard error (`AgentUpgradeSucceeded=False`,
+   reason `PackageBundleInvalid`) — not something to guess at. If `DesiredAgentPackageChecksum` is
+   set, verify it against that extracted file before doing anything else — mismatch marks
+   `AgentUpgradeSucceeded=False`, reason `PackageChecksumMismatch`, and stops here without
+   installing.
 4. Hand the extracted file to the host's own package manager — a **fixed, two-way branch based on the
    agent's own already-known package format**, never an operator-supplied command:
    `dpkg -i <path>` or `rpm -Uvh <path>` — no `--oldpackage`/force-downgrade flag, ever (see §2.4:
@@ -244,49 +255,40 @@ reconcile tick that already writes the heartbeat:
    no template parsing involved at all — the command is constructed by the agent, not supplied as
    content from outside. This is deliberately narrower than the original opaque-script design
    (§4): no arbitrary root-privileged script content, ever.
-5. On success: resolve the agent's own binary path via `os.Executable()` (not `os.Args[0]`, which
-   does not resolve symlinks) and `syscall.Exec` into it, rather than the simpler-looking
-   `os.Exit(0)` and letting systemd's `Restart=always` relaunch it. Both were weighed directly:
-   - **Not "protects kubelet" — that turned out to be the wrong reason.** The obvious argument for
-     `syscall.Exec` over a restart is "an agent restart must not disrupt kubelet." That doesn't
-     actually hold up on inspection (§1.2): kubelet is its own package running under its own
-     systemd unit, never parented or supervised by the agent at runtime. A plain process restart
-     wouldn't touch kubelet any more than `syscall.Exec` does — kubelet's independence is
-     unconditional, not something either mechanism needs to preserve.
-   - **The real reason: `syscall.Exec` never touches the supervisor's restart accounting.**
-     `Restart=always` relaunches count toward `StartLimitBurst`/`StartLimitIntervalSec` (§1.2)
-     regardless of exit code — a clean, successful, planned exit consumes the same tight,
-     fixed-size budget as a crash. Routing a routine, successful upgrade through `os.Exit(0)`
-     risks tripping that crash-protection limit for a reason that has nothing to do with
-     instability — two upgrades close together, or an unrelated restart landing in the same
-     window. `syscall.Exec` keeps the same PID under the same supervisor-tracked "start"; from the
-     supervisor's point of view the service never stopped, so none of that budget is spent. This
-     holds regardless of exactly how a given deployment tunes the burst/interval values — the
-     mechanism, not the specific numbers, is what `syscall.Exec` sidesteps.
-   `syscall.Exec` keeps the same PID and open file descriptors as a side effect of this, which is
-   worth confirming empirically in e2e regardless (§5.3) since it's still relied on elsewhere in
-   this design (no container/service restart visible to anything watching the container ID). The
-   call sits behind a small `IExecer` interface alongside the existing `ICmdRunner`/`IFileWriter`
-   fields so tests can assert it was — or wasn't — invoked without actually replacing the test
-   process.
-6. On `dpkg`/`rpm` failure: don't exec. Mark `AgentUpgradeFailed`, reason
+5. On success: `os.Exit(0)` and let the process supervisor's `Restart=always` relaunch the
+   service. **Revision (post-implementation review):** the original design here was
+   `syscall.Exec` into the freshly installed binary — same PID, in-place, no service restart —
+   specifically to avoid spending one of the supervisor's `StartLimitBurst` slots (§1.2) on the
+   deliberate switch itself. That benefit was real but narrow (it only changes how many *further*
+   automatic retries a freshly-installed binary gets before `start-limit-hit` demands a human —
+   one fewer, without it), and came at a real cost once actually built: a new `IExecer` interface
+   and fake (~150 lines), and an `os.Executable()`/`os.Args`/`os.Environ()`-preservation assumption
+   that no test ever validated against a real re-exec — every test used a fake `IExecer`, so
+   whether the re-exec'd process genuinely comes back up with the right flags was unverified.
+   Reviewed after Phase 3 landed and the actual shape of the complexity was visible: the same
+   headroom is available for a one-line config change — §1.2's revision note bumps
+   `StartLimitBurst` by exactly the amount the deliberate switch would otherwise consume — with no
+   new Go code, no unvalidated assumption, and one restart code path (systemd's) instead of two.
+   See §4 for the alternative this replaces.
+6. On `dpkg`/`rpm` failure: don't exit. Mark `AgentUpgradeSucceeded=False`, reason
    `PackageInstallFailed`, emit an event — the identical pattern `executeInstallerController`
    already uses for `InstallScriptExecutionFailed`. Leave `Spec.DesiredAgentVersion` /
    `DesiredAgentPackageURL` untouched; retrying with a fixed URL is the rollout controller's job
    (§2.3), not the agent's. In practice this is the failure signal that fires *fastest* and most
    often — `dpkg`/`rpm` exit non-zero on most real breakage (bad package, unmet dependencies,
    failed postinst), unlike an arbitrary script which could silently exit 0 having done nothing.
-7. On re-exec, the new process starts normally and its next heartbeat tick writes
-   `Status.AgentVersion = version.Get().GitVersion` alongside `LastHeartbeatTime`. **This is also
-   how a silently-ineffective install gets caught**: if the install "succeeded" but
-   `os.Executable()` didn't actually change, the re-exec'd process is still the old binary,
+7. The new process, once systemd relaunches it, starts normally and its next heartbeat tick
+   writes `Status.AgentVersion = version.Get().GitVersion` alongside `LastHeartbeatTime`. **This is
+   also how a silently-ineffective install gets caught**: if the install "succeeded" but the
+   binary on disk didn't actually change, the relaunched process is still the old binary,
    `Status.AgentVersion` never moves, and the rollout controller's convergence check (§2.3) treats
    it identically to any other stuck host.
-8. If the new binary crashes immediately after step 5, there is nothing left to report that
-   explicitly — `exec` replaced the process image, so no process survives to write a condition.
-   Recovery is whatever the systemd unit does (§1.2: two retries, five seconds apart, then it
-   stops trying) — this is caught by the rollout controller's availability accounting (§2.3) via
-   `AgentConnected`, not by an agent-side signal, and is expected to require manual (SSH/Ansible)
+8. If the new binary crashes immediately after relaunch, there is nothing left for *this* agent
+   process to report — it already exited cleanly in step 5, on its own terms, before the crash
+   happened in the *next* process. Recovery is whatever the systemd unit does (§1.2: three retries
+   within the interval, one already spent on the deliberate switch, then it stops trying) — this is
+   caught by the rollout controller's availability accounting (§2.3) via `AgentConnected`, not by
+   an agent-side signal, and is expected to require manual (SSH/Ansible)
    recovery, consistent with §2.4.
 
 ### 2.3 Management-side: a rollout controller
@@ -328,7 +330,7 @@ CR's namespace):
 ```
 InFlight     = { h : h.Spec.DesiredAgentVersion == TargetVersion
                      AND h.Status.AgentVersion != TargetVersion
-                     AND NOT AgentUpgradeFailed(h) }
+                     AND AgentUpgradeSucceeded(h) != False }
 
 Disconnected = { h : AgentConnected(h) != True }
 
@@ -352,22 +354,23 @@ Reconcile loop, once per tick:
    directly — no Secret is created, unlike the original opaque-script draft (§4).
 3. For each `InFlight` host, check convergence: `Status.AgentVersion == TargetVersion` AND
    `AgentConnected == True`, evaluated as current state, not a required transition (an earlier
-   draft required `AgentConnected` to have gone `False→True`, which doesn't hold for a healthy,
-   no-downtime `syscall.Exec` — dropped as incorrect). Converged → increment `Upgraded`, this host
-   leaves `InFlight`. `AgentUpgradeFailed == True`, or `PerHostTimeout` elapsed with neither →
-   failed (see step 5).
+   draft required `AgentConnected` to have gone `False→True`, which doesn't hold for a healthy
+   exit-and-relaunch cycle short enough to never miss a heartbeat — dropped as incorrect).
+   Converged → increment `Upgraded`, this host leaves `InFlight`.
+   `AgentUpgradeSucceeded == False`, or `PerHostTimeout` elapsed with neither → failed (see step 5).
 4. **Two distinct "can't proceed" states, not one:**
    - **Blocked (soft, self-healing):** `|Unavailable| >= MaxUnavailable` with no
-     `AgentUpgradeFailed` anywhere in `InFlight`. `Phase` stays `Pending` (if nothing has been
-     picked yet) or `Progressing` (if some hosts already converged). No new hosts are picked, but
-     nothing is marked failed either — if a `Disconnected` host recovers (including one entirely
-     unrelated to this rollout), the budget frees up and picking resumes automatically next tick.
-     Surface the reason in a condition/event (e.g. `Reason: InsufficientAvailabilityBudget`,
-     `Message: "N of M selected hosts already unavailable; MaxUnavailable is K"`) so an operator
-     doesn't mistake a starved rollout — which can happen entirely from pre-existing, unrelated
-     unavailability in the selected cohort — for a stuck controller.
+     `AgentUpgradeSucceeded == False` anywhere in `InFlight`. `Phase` stays `Pending` (if nothing
+     has been picked yet) or `Progressing` (if some hosts already converged). No new hosts are
+     picked, but nothing is marked failed either — if a `Disconnected` host recovers (including one
+     entirely unrelated to this rollout), the budget frees up and picking resumes automatically
+     next tick. Surface the reason in a condition/event (e.g. `Reason:
+     InsufficientAvailabilityBudget`, `Message: "N of M selected hosts already unavailable;
+     MaxUnavailable is K"`) so an operator doesn't mistake a starved rollout — which can happen
+     entirely from pre-existing, unrelated unavailability in the selected cohort — for a stuck
+     controller.
    - **Failed (hard, terminal, needs an operator):** any `InFlight` host reaches
-     `AgentUpgradeFailed == True` (explicit `dpkg`/`rpm` failure or checksum mismatch) or
+     `AgentUpgradeSucceeded == False` (explicit `dpkg`/`rpm` failure or checksum mismatch) or
      `PerHostTimeout` (silent failure — install "succeeded" but nothing ever converged, or the new
      binary never comes back). `Phase = Failed`, that host recorded in `FailedHosts`, and — the
      deliberate choice from the original draft, unchanged — **no further hosts are ever selected
@@ -430,7 +433,7 @@ external tooling (Ansible or otherwise) provides, with no in-cluster visibility 
 | **Automatic per-host resolution of the correct package URL by host OS/arch** (mirroring `installer/registry.go`'s OS-filtered bundle resolution) | Considered, dropped in favor of manual `Selector`-based cohort splitting (§2.1). There's no existing version→package-URL naming convention for the agent to resolve against, unlike k8s components which already have one; building that convention now would be new machinery nobody asked for, for a benefit (avoiding manual cohort-splitting) that a `Selector` already delivers with zero new code. |
 | **Minimum bake/soak duration after convergence, before a host is considered "done" and its slot freed** | Considered, rejected. Any fixed duration still has an escape case — a delayed crash after the window elapses — so it only shifts the threshold at which delayed failures slip past the blast-radius limit, it doesn't remove the risk. The `Unavailable` union (§2.3) already gives continuous protection against *fast* post-convergence regressions using an existing signal and no new duration field or state tracking; slow-onset regressions past that point are accepted residual risk, same as any staged rollout (including vanilla Kubernetes `minReadySeconds`). |
 | **Automatic rollback**, fleet-wide or per-host, on failure | Rejected (§2.4). Halting and waiting for an explicit operator action is safer than any automatic corrective action touching more hosts on the controller's own initiative, and a broken host already needs manual recovery regardless of whether rollback is automatic (§1.2's `StartLimitBurst` behavior). |
-| **`os.Exit(0)` and let the process supervisor relaunch**, instead of `syscall.Exec` | Considered directly (§2.2 step 5). The obvious justification for rejecting it — "a restart would disrupt kubelet" — turned out to be false: kubelet runs under its own supervision, never parented by the agent, so it's unaffected either way (§1.2). Rejected anyway, for a better reason: `Restart=always`-style relaunches count toward the supervisor's crash-protection limit regardless of exit code, so a routine successful upgrade would spend the same budget a real crash uses. `syscall.Exec` never touches that accounting, independent of how any given deployment tunes it. |
+| **`syscall.Exec` into the freshly installed binary** (this ADR's original §2.2 step 5, in place through Phase 2/3), instead of `os.Exit(0)` + process-supervisor restart | **Reversed on post-implementation review** — this is now the rejected alternative, not the decision. The original justification, "a restart would disrupt kubelet," was wrong from the start: kubelet runs under its own supervision, never parented by the agent, so it's unaffected either way (§1.2). The real benefit — never spending a `StartLimitBurst` slot on the deliberate switch — was real but narrow (one fewer automatic crash-retry for the new binary without it), and cost a new `IExecer` interface plus fake (~150 lines) and an `os.Executable()`/argv/env-preservation assumption no test ever exercised against a real re-exec. Once Phase 3 was built and the complexity was visible, the team judged the trade not worth it: the same budget headroom is available for a one-line `StartLimitBurst` bump (§1.2), with no new code and no unvalidated assumption. |
 | **DaemonSet-style rolling update** | BYOH hosts are not Kubernetes-managed compute the way a DaemonSet's nodes are — the agent is what makes a host *become* part of the cluster. |
 | **Imperative per-host Task objects instead of desired-state fields** | Every other mechanism in this repo (`K8sVersionAnnotation`, `InstallationSecret`) is declarative desired-state reconciliation; matching that shape keeps this code looking like the rest of the codebase. |
 
@@ -441,19 +444,18 @@ external tooling (Ansible or otherwise) provides, with no in-cluster visibility 
 ### 5.1 Unit / envtest coverage (agent side)
 
 Extends `agent/reconciler/reconciler_test.go`'s existing suite for `executeInstallerController`,
-using `cloudinitfakes`, plus a new fake for `IExecer` and a fake package fetcher/installer:
+using `cloudinitfakes`, plus a fake for `IExiter` and a fake package fetcher/installer:
 
 - Version comparison is a pure function: equal, empty, mismatched — no fakes needed.
 - Mismatch with `DesiredAgentPackageURL` unset → waits, does not error.
-- Checksum set and mismatched → `AgentUpgradeFailed`, reason `PackageChecksumMismatch`; install
-  never attempted; `IExecer` never invoked.
+- Checksum set and mismatched → `AgentUpgradeSucceeded=False`, reason `PackageChecksumMismatch`;
+  install never attempted; `IExiter` never invoked.
 - `dpkg`/`rpm` selection is a pure function of the agent's own detected package manager — test
   both branches directly, no host-provided input involved.
-- Fetch+install succeeds → `IExecer` invoked exactly once with the path `os.Executable()` would
-  resolve to.
-- `dpkg`/`rpm` returns non-zero → `IExecer` **not** invoked, `AgentUpgradeFailed` set with reason
-  `PackageInstallFailed`, event fires, `Spec.DesiredAgentVersion`/`DesiredAgentPackageURL` left
-  untouched (so a retry with a corrected URL doesn't need anything else to change).
+- Fetch+install succeeds → `IExiter` invoked exactly once.
+- `dpkg`/`rpm` returns non-zero → `IExiter` **not** invoked, `AgentUpgradeSucceeded=False` set with
+  reason `PackageInstallFailed`, event fires, `Spec.DesiredAgentVersion`/`DesiredAgentPackageURL`
+  left untouched (so a retry with a corrected URL doesn't need anything else to change).
 
 ### 5.2 Controller (envtest) coverage — `byohostagentupgrade_controller_test.go`
 
@@ -467,20 +469,20 @@ direct coverage, not just the happy path:
 - `Disconnected`-only unavailability, entirely unrelated to this rollout (a host down before the
   CR was even created): counts toward the budget; with `MaxUnavailable` already consumed, **zero**
   hosts get picked — `Phase` stays `Pending`, condition/event explains why (not silently stuck).
-- Overlap: a host that is both `InFlight` and `Disconnected` (the common case right after
-  `syscall.Exec`) counts **once**, not twice — union, not sum.
+- Overlap: a host that is both `InFlight` and `Disconnected` (the common case right after the
+  exit-and-relaunch cycle, briefly) counts **once**, not twice — union, not sum.
 - A host converges (`AgentVersion == TargetVersion`, `AgentConnected == True`), then later goes
-  `AgentConnected == False` with no `AgentUpgradeFailed`: `Upgraded` was already incremented and
-  does not decrement, but it re-enters `Disconnected`, raising `UnavailableCount` and blocking the
-  *next* batch from starting — without ever being marked failed itself. This is the specific case
-  the union accounting exists to catch instead of a bake timer.
+  `AgentConnected == False` with no `AgentUpgradeSucceeded=False`: `Upgraded` was already
+  incremented and does not decrement, but it re-enters `Disconnected`, raising `UnavailableCount`
+  and blocking the *next* batch from starting — without ever being marked failed itself. This is
+  the specific case the union accounting exists to catch instead of a bake timer.
 - `PerHostTimeout` transitions a silently-stuck host to failed and halts the rollout — selecting
   no further hosts even though others haven't been touched yet. `Phase = Failed` is terminal: a
   later tick must not resume picking even if `Disconnected` later drops back below
   `MaxUnavailable`.
 - `Blocked` (soft) vs. `Failed` (hard) are distinct and don't get confused: a rollout blocked
   purely by pre-existing/unrelated disconnection self-resolves and resumes picking once the budget
-  frees up; a rollout halted by `AgentUpgradeFailed` never resumes on its own.
+  frees up; a rollout halted by an `AgentUpgradeSucceeded=False` failure never resumes on its own.
 - `Phase` transitions (`Pending → Progressing → Completed`, and the `→ Failed` branch) exercised
   directly via `ByoHost.Status` manipulation, no real agents needed.
 - `TargetVersion` admission: `latest` and other non-strict-semver values are rejected by the CRD's
@@ -501,15 +503,16 @@ original draft — a trivially small `.deb` (and, if the fleet mix is real rathe
   `MaxUnavailable: 1`.
 - **Poll continuously during the rollout**: `UnavailableCount` never exceeds `MaxUnavailable` at
   any sampled instant, and the workload-cluster Node stays `Ready=True` throughout (the empirical
-  check on §2.2 step 5's kubelet-independence claim).
+  check on kubelet's independence from the agent's own process lifecycle, §1.2).
 - After completion: all 4 `ByoHost.Status.AgentVersion` at the new version;
   `Phase == Completed`, `Upgraded == 4`, `FailedHosts` empty; each host's docker container ID is
-  unchanged from before the rollout — proof the upgrade was an in-place `syscall.Exec`, not a
-  container/service restart.
+  unchanged from before the rollout — proof the upgrade was an in-container service restart, not a
+  container recreation. (The agent process itself *does* restart — `os.Exit(0)` plus systemd
+  `Restart=always`, §2.2 step 5 — this assertion is about the container boundary, not the process.)
 
 **Spec: "Should halt on explicit failure without affecting unaffected hosts."**
 - A fixture package whose postinst deliberately exits non-zero.
-- Assert exactly one host shows `AgentUpgradeFailed=True, Reason=PackageInstallFailed`, its
+- Assert exactly one host shows `AgentUpgradeSucceeded=False, Reason=PackageInstallFailed`, its
   `AgentVersion` never changes, `Phase == Failed`, and the other 3 hosts' `DesiredAgentVersion`
   stays unset — matching hard-halt behavior.
 
@@ -532,7 +535,7 @@ original draft — a trivially small `.deb` (and, if the fleet mix is real rathe
   `DesiredAgentPackageChecksum`, the two host labels) plus `make generate` and `make manifests`.
   Purely additive, safe to land alone. Mirroring the labels at registration time
   (`agent/registration/host_registrar.go`) is a small, separate, low-risk change.
-- **Phase 2.** §2.2 agent-side fetch/install/re-exec, with unit coverage (§5.1). Testable in
+- **Phase 2.** §2.2 agent-side fetch/install/exit, with unit coverage (§5.1). Testable in
   isolation with fakes, before the controller exists.
 - **Phase 3.** §2.3 `ByoHostAgentUpgrade` CRD and controller, including the `Unavailable` union
   accounting, with envtest coverage (§5.2) — this is the highest-edge-case-density piece.
