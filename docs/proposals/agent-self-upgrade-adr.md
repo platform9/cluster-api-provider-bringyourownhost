@@ -78,26 +78,36 @@ condition (`apis/infrastructure/v1beta1/condition_consts.go:84-96`) accordingly.
 `Status.AgentVersion`, a rollout controller has everything it needs — no new liveness plumbing.
 
 **The agent already runs under a process supervisor that restarts on crash, with a hard limit, not
-backoff.** This repo's current reference implementation uses a systemd unit with `Restart=always`,
-a fixed (not exponential) restart delay, and a tight `StartLimitBurst`/`StartLimitIntervalSec`
-pairing — a binary that crashes immediately after an upgrade gets a small, fixed number of quick
-retries, then the supervisor stops trying (`start-limit-hit`) until an operator intervenes. Treat
-the exact numbers as a deployment tunable, not an architectural constant this ADR depends on — the
-property that matters is qualitative: **no indefinite retry, and no exponential backoff**, so
-recovery from a truly broken binary is manual (SSH/Ansible) by design, matching this ADR's decision
-not to build automatic rollback (§2.4). One detail that matters for §2.2 step 5, true of systemd's
-`Restart=` accounting generally, not specific to any one unit's tuning: `StartLimitBurst` counts
-every supervisor-triggered relaunch, regardless of exit code — a clean, successful, intentional
-exit consumes the same budget as a crash.
+backoff — but that limit only works if the interval is wider than the restart delay, which this
+repo's config didn't originally get right.** systemd's `Restart=always` restarts unconditionally;
+`StartLimitBurst`/`StartLimitIntervalSec` is meant to give up (`start-limit-hit`) after too many
+restarts too fast. But `StartLimitBurst` only counts restarts that land inside a single
+`StartLimitIntervalSec`-wide window, and `Restart=` never fires faster than `RestartSec` apart —
+so if `RestartSec >= StartLimitIntervalSec`, consecutive restarts can never land in the same
+window and the limit **cannot trip, at any `StartLimitBurst` value.** This repo's original
+`RestartSec=5s` / `StartLimitIntervalSec=5s` pairing had exactly that bug (empirically confirmed
+in a privileged systemd container against a fake always-failing binary: 6 restarts over 30s, never
+hit `start-limit-hit`, would have retried forever) — meaning a genuinely broken binary never
+actually stopped retrying, contrary to what an earlier draft of this ADR assumed. Current values,
+also empirically validated the same way (limit correctly hit at t+27s after 5 restarts):
+`RestartSec=5s`, `StartLimitIntervalSec=60s`, `StartLimitBurst=5`
+(`service/pf9-byohostagent.service`). Treat the exact numbers as a deployment tunable this ADR
+doesn't depend on, but **do not shrink `StartLimitIntervalSec` back toward `RestartSec`** — that
+reintroduces the bug regardless of what `StartLimitBurst` is set to. The qualitative property that
+matters: **no indefinite retry, and no exponential backoff**, so recovery from a truly broken
+binary is manual (SSH/Ansible) by design, matching this ADR's decision not to build automatic
+rollback (§2.4). One detail that matters for §2.2 step 5, true of systemd's `Restart=` accounting
+generally: `StartLimitBurst` counts every supervisor-triggered relaunch, regardless of exit code —
+a clean, successful, intentional exit consumes the same budget as a crash.
 
 **Revision (post-implementation review):** §2.2 step 5 originally used `syscall.Exec` specifically
 to avoid spending one of that budget's slots on the deliberate switch to a new binary. Reviewed
 after Phase 3 landed and the complexity was visible end to end, that trade wasn't worth it — see
-§2.2 step 5 and §4 for the full reasoning. The budget concern is real but is bought more cheaply by
-simply giving the unit one more slot than it would otherwise need: **this repo's reference
-implementation now sets `StartLimitBurst=3`** (`service/pf9-byohostagent.service`) — one for the
-deliberate `os.Exit(0)` an upgrade always does, two remaining for genuine crash-loop protection,
-matching the original two-retry intent.
+§2.2 step 5 and §4 for the full reasoning. The budget concern (a deliberate `os.Exit(0)` consuming
+the same slot a real crash would) is still real and still addressed by giving the unit headroom —
+it's just folded into the `StartLimitBurst=5` figure above rather than being a separate, smaller
+bump, since fixing the interval bug had to happen first for the burst count to mean anything at
+all.
 
 **Kubelet is already fully independent of the agent's process lifecycle, unconditionally** —
 relevant because it means the choice between exiting and re-exec'ing never actually turned on
@@ -142,49 +152,58 @@ On top of `ByoHostStatus.AgentVersion`
 ([agent-version-reporting-adr.md](agent-version-reporting-adr.md)), `ByoHostSpec` gains:
 
 ```go
-// DesiredAgentVersion, when set, is the agent version this host should be
-// running. The agent compares this against its own version.Get().GitVersion
-// on every reconcile tick (cheap — no fetch) and only acts on a mismatch.
-// Unset means "no managed upgrade in progress" — a host with it unset
-// behaves exactly as it does today.
+// DesiredAgent, when set, drives a managed agent upgrade on this host. The
+// three fields below are always set together — see DesiredAgentSpec — so
+// nil unambiguously means "no managed upgrade in progress," rather than
+// relying on convention across three independently-optional strings.
 // +optional
-DesiredAgentVersion string `json:"desiredAgentVersion,omitempty"`
+DesiredAgent *DesiredAgentSpec `json:"desiredAgent,omitempty"`
 
-// DesiredAgentPackageURL is an OCI image reference — pulled via `imgpkg
-// pull`, the same mechanism already used for k8s-component bundles and the
-// byohctl onboarding .deb pull — for a bundle containing the .deb/.rpm that
-// installs DesiredAgentVersion. Not templated and does not point at a
-// Secret — an image reference is not sensitive, unlike the opaque-script
-// content an earlier draft of this ADR used. The agent extracts the bundle,
-// picks the single *.deb or *.rpm inside it matching its own already-known
-// package manager, and runs `dpkg -i`/`rpm -Uvh`; nothing else is executed.
-// Pinning this reference by digest (`@sha256:...`) rather than a mutable
-// tag is the primary integrity mechanism — see DesiredAgentPackageChecksum
-// for a secondary, narrower check.
-// +optional
-DesiredAgentPackageURL string `json:"desiredAgentPackageURL,omitempty"`
+// DesiredAgentSpec is the agent version/package a host should converge on.
+type DesiredAgentSpec struct {
+	// Version is the agent version this host should be running. The agent
+	// compares this against its own version.Get().GitVersion on every
+	// reconcile tick (cheap — no fetch) and only acts on a mismatch.
+	Version string `json:"version"`
 
-// DesiredAgentPackageChecksum, if set, is the expected checksum
-// ("sha256:<hex>") of the specific .deb/.rpm file extracted from the
-// DesiredAgentPackageURL bundle — not of the OCI image itself, which
-// digest-pinning the reference above already covers. The agent refuses to
-// install on mismatch and marks AgentUpgradeSucceeded=False with reason
-// PackageChecksumMismatch.
-// +optional
-DesiredAgentPackageChecksum string `json:"desiredAgentPackageChecksum,omitempty"`
+	// PackageURL is an OCI image reference — pulled via `imgpkg pull`, the
+	// same mechanism already used for k8s-component bundles and the byohctl
+	// onboarding .deb pull — for a bundle containing the .deb/.rpm that
+	// installs Version. Not templated and does not point at a Secret — an
+	// image reference is not sensitive, unlike the opaque-script content an
+	// earlier draft of this ADR used. The agent extracts the bundle, picks
+	// the single *.deb or *.rpm inside it matching its own already-known
+	// package manager, and runs `dpkg -i`/`rpm -Uvh`; nothing else is
+	// executed. Pinning this reference by digest (`@sha256:...`) rather
+	// than a mutable tag is the primary integrity mechanism — see
+	// PackageChecksum for a secondary, narrower check.
+	// +optional
+	PackageURL string `json:"packageURL,omitempty"`
+
+	// PackageChecksum, if set, is the expected checksum ("sha256:<hex>") of
+	// the specific .deb/.rpm file extracted from the PackageURL bundle —
+	// not of the OCI image itself, which digest-pinning the reference above
+	// already covers. The agent refuses to install on mismatch and marks
+	// AgentUpgradeSucceeded=False with reason PackageChecksumMismatch.
+	// +optional
+	PackageChecksum string `json:"packageChecksum,omitempty"`
+}
 ```
 
-Both fields are copied down from `ByoHostAgentUpgradeSpec` onto each targeted `ByoHost` by the
-rollout controller, rather than having the agent read the `ByoHostAgentUpgrade` CR directly — this
-isn't incidental duplication, it's the same shape `InstallationSecret`/`BootstrapSecret` already
-use. The agent only ever reads/updates its own `ByoHost` object; it has no way to know which
-`ByoHostAgentUpgrade` (if any) targets it without List/Watch access to a CRD it currently has no
-business touching, and re-evaluating `Selector` matches on the host side would duplicate logic the
-controller already owns and risks two different answers if it ever disagreed with itself.
-Selector evaluation stays the controller's job alone, for every host, all the time.
-`DesiredAgentPackageChecksum` follows for the identical reason, not a separate one: since the
-agent can't reach the CR at all, anything it needs to act on has to be pushed down alongside the
-URL — there's no cheaper alternative once the URL is already there.
+`DesiredAgentSpec` is copied down as a unit from `ByoHostAgentUpgradeSpec` onto each targeted
+`ByoHost` by the rollout controller, rather than having the agent read the `ByoHostAgentUpgrade` CR
+directly — this isn't incidental duplication, it's the same shape `InstallationSecret`/
+`BootstrapSecret` already use. The agent only ever reads/updates its own `ByoHost` object; it has
+no way to know which `ByoHostAgentUpgrade` (if any) targets it without List/Watch access to a CRD
+it currently has no business touching, and re-evaluating `Selector` matches on the host side would
+duplicate logic the controller already owns and risks two different answers if it ever disagreed
+with itself. Selector evaluation stays the controller's job alone, for every host, all the time.
+`PackageChecksum` follows for the identical reason, not a separate one: since the agent can't reach
+the CR at all, anything it needs to act on has to be pushed down alongside the URL — there's no
+cheaper alternative once the URL is already there. Grouping the three fields under one struct
+(rather than three top-level, independently-optional strings) was a deliberate refinement over the
+original sketch: the controller only ever sets or reads them as a unit, so the type now enforces
+that invariant instead of relying on convention.
 
 Two new labels, mirroring the existing `AttachedByoMachineLabel` domain and pattern
 (`byoh.infrastructure.cluster.x-k8s.io/...`, `apis/infrastructure/v1beta1/byohost_types.go:21`,
@@ -233,16 +252,16 @@ rejecting `latest` as a side effect, since it doesn't match).
 New function on the existing `HostReconciler`, `executeAgentUpgrade`, invoked from the same
 reconcile tick that already writes the heartbeat:
 
-1. Compare `ByoHost.Spec.DesiredAgentVersion` to `version.Get().GitVersion`. Equal or empty →
-   no-op. Pure function, no fakes needed to test.
-2. On mismatch, require `Spec.DesiredAgentPackageURL` — if unset, wait (same pattern as
+1. Compare `ByoHost.Spec.DesiredAgent.Version` to `version.Get().GitVersion`. Equal, or
+   `DesiredAgent` nil → no-op. Pure function, no fakes needed to test.
+2. On mismatch, require `DesiredAgent.PackageURL` — if unset, wait (same pattern as
    `executeInstallerController` waiting on `InstallationSecret`,
    `agent/reconciler/host_reconciler.go:142-146`).
-3. `imgpkg pull -i <DesiredAgentPackageURL> -o <tempDir>`, then find the single `*.deb` (package
+3. `imgpkg pull -i <DesiredAgent.PackageURL> -o <tempDir>`, then find the single `*.deb` (package
    family `debian`) or `*.rpm` (package family `rhel`) in `tempDir` — the agent already knows
    which via `registration.GetOSFamily`, the same probe used to set `HostOSFamilyLabel` at
    registration (§2.1). Zero or more than one match is a hard error (`AgentUpgradeSucceeded=False`,
-   reason `PackageBundleInvalid`) — not something to guess at. If `DesiredAgentPackageChecksum` is
+   reason `PackageBundleInvalid`) — not something to guess at. If `DesiredAgent.PackageChecksum` is
    set, verify it against that extracted file before doing anything else — mismatch marks
    `AgentUpgradeSucceeded=False`, reason `PackageChecksumMismatch`, and stops here without
    installing.
@@ -272,9 +291,9 @@ reconcile tick that already writes the heartbeat:
    See §4 for the alternative this replaces.
 6. On `dpkg`/`rpm` failure: don't exit. Mark `AgentUpgradeSucceeded=False`, reason
    `PackageInstallFailed`, emit an event — the identical pattern `executeInstallerController`
-   already uses for `InstallScriptExecutionFailed`. Leave `Spec.DesiredAgentVersion` /
-   `DesiredAgentPackageURL` untouched; retrying with a fixed URL is the rollout controller's job
-   (§2.3), not the agent's. In practice this is the failure signal that fires *fastest* and most
+   already uses for `InstallScriptExecutionFailed`. Leave `Spec.DesiredAgent` untouched; retrying
+   with a fixed URL is the rollout controller's job (§2.3), not the agent's. In practice this is
+   the failure signal that fires *fastest* and most
    often — `dpkg`/`rpm` exit non-zero on most real breakage (bad package, unmet dependencies,
    failed postinst), unlike an arbitrary script which could silently exit 0 having done nothing.
 7. The new process, once systemd relaunches it, starts normally and its next heartbeat tick
@@ -285,11 +304,11 @@ reconcile tick that already writes the heartbeat:
    it identically to any other stuck host.
 8. If the new binary crashes immediately after relaunch, there is nothing left for *this* agent
    process to report — it already exited cleanly in step 5, on its own terms, before the crash
-   happened in the *next* process. Recovery is whatever the systemd unit does (§1.2: three retries
-   within the interval, one already spent on the deliberate switch, then it stops trying) — this is
-   caught by the rollout controller's availability accounting (§2.3) via `AgentConnected`, not by
-   an agent-side signal, and is expected to require manual (SSH/Ansible)
-   recovery, consistent with §2.4.
+   happened in the *next* process. Recovery is whatever the systemd unit does (§1.2: up to 5
+   restarts within a 60s window, one already spent on the deliberate switch, then it stops trying —
+   roughly 20-30s of real wall-clock time for a fast, tight crash loop) — this is caught by the
+   rollout controller's availability accounting (§2.3) via `AgentConnected`, not by an agent-side
+   signal, and is expected to require manual (SSH/Ansible) recovery, consistent with §2.4.
 
 ### 2.3 Management-side: a rollout controller
 
@@ -328,7 +347,7 @@ handles any further sub-scoping within that namespace (e.g. one `ByoCluster`'s h
 CR's namespace):
 
 ```
-InFlight     = { h : h.Spec.DesiredAgentVersion == TargetVersion
+InFlight     = { h : h.Spec.DesiredAgent != nil AND h.Spec.DesiredAgent.Version == TargetVersion
                      AND h.Status.AgentVersion != TargetVersion
                      AND AgentUpgradeSucceeded(h) != False }
 
@@ -337,7 +356,7 @@ Disconnected = { h : AgentConnected(h) != True }
 Unavailable  = InFlight ∪ Disconnected     // union — a host in both sets counts once
 ```
 
-`InFlight` is scoped to hosts *this rollout has already assigned* `DesiredAgentVersion` to — not
+`InFlight` is scoped to hosts *this rollout has already assigned* `DesiredAgent.Version` to — not
 every not-yet-touched host in the selected fleet (which would trivially include the whole cohort
 at the start of any rollout and permanently block step 3 below). `Disconnected`, in contrast, is
 computed over the **entire** selected cohort, touched or not — this is what gives continuous
@@ -349,9 +368,9 @@ Reconcile loop, once per tick:
 1. List `ByoHost`s matching `Selector` in this CR's namespace. Compute `Unavailable` as above;
    write `Status.UnavailableCount = |Unavailable|`.
 2. If `|Unavailable| < MaxUnavailable`, pick `MaxUnavailable - |Unavailable|` more not-yet-upgraded
-   hosts, set their `Spec.DesiredAgentVersion = TargetVersion`,
-   `Spec.DesiredAgentPackageURL = PackageURL`, `Spec.DesiredAgentPackageChecksum = PackageChecksum`
-   directly — no Secret is created, unlike the original opaque-script draft (§4).
+   hosts, set `Spec.DesiredAgent = &DesiredAgentSpec{Version: TargetVersion, PackageURL:
+   PackageURL, PackageChecksum: PackageChecksum}` directly — no Secret is created, unlike the
+   original opaque-script draft (§4).
 3. For each `InFlight` host, check convergence: `Status.AgentVersion == TargetVersion` AND
    `AgentConnected == True`, evaluated as current state, not a required transition (an earlier
    draft required `AgentConnected` to have gone `False→True`, which doesn't hold for a healthy
@@ -444,18 +463,20 @@ external tooling (Ansible or otherwise) provides, with no in-cluster visibility 
 ### 5.1 Unit / envtest coverage (agent side)
 
 Extends `agent/reconciler/reconciler_test.go`'s existing suite for `executeInstallerController`,
-using `cloudinitfakes`, plus a fake for `IExiter` and a fake package fetcher/installer:
+using `cloudinitfakes` for `ICmdRunner`, plus plain `PackagePull func(...) error` and `Exit func()`
+fields on `HostReconciler` (see §2.2 revision note — no interface/fake needed for a single-method
+wrapper with one production implementation).
 
-- Version comparison is a pure function: equal, empty, mismatched — no fakes needed.
-- Mismatch with `DesiredAgentPackageURL` unset → waits, does not error.
+- Version comparison is a pure function: equal, `DesiredAgent` nil, mismatched — no fakes needed.
+- Mismatch with `DesiredAgent.PackageURL` unset → waits, does not error.
 - Checksum set and mismatched → `AgentUpgradeSucceeded=False`, reason `PackageChecksumMismatch`;
-  install never attempted; `IExiter` never invoked.
+  install never attempted; `Exit` never invoked.
 - `dpkg`/`rpm` selection is a pure function of the agent's own detected package manager — test
   both branches directly, no host-provided input involved.
-- Fetch+install succeeds → `IExiter` invoked exactly once.
-- `dpkg`/`rpm` returns non-zero → `IExiter` **not** invoked, `AgentUpgradeSucceeded=False` set with
-  reason `PackageInstallFailed`, event fires, `Spec.DesiredAgentVersion`/`DesiredAgentPackageURL`
-  left untouched (so a retry with a corrected URL doesn't need anything else to change).
+- Fetch+install succeeds → `Exit` invoked exactly once.
+- `dpkg`/`rpm` returns non-zero → `Exit` **not** invoked, `AgentUpgradeSucceeded=False` set with
+  reason `PackageInstallFailed`, event fires, `Spec.DesiredAgent` left untouched (so a retry with a
+  corrected URL doesn't need anything else to change).
 
 ### 5.2 Controller (envtest) coverage — `byohostagentupgrade_controller_test.go`
 
@@ -513,14 +534,14 @@ original draft — a trivially small `.deb` (and, if the fleet mix is real rathe
 **Spec: "Should halt on explicit failure without affecting unaffected hosts."**
 - A fixture package whose postinst deliberately exits non-zero.
 - Assert exactly one host shows `AgentUpgradeSucceeded=False, Reason=PackageInstallFailed`, its
-  `AgentVersion` never changes, `Phase == Failed`, and the other 3 hosts' `DesiredAgentVersion`
-  stays unset — matching hard-halt behavior.
+  `AgentVersion` never changes, `Phase == Failed`, and the other 3 hosts' `DesiredAgent`
+  stays nil — matching hard-halt behavior.
 
 **Spec: "Should pause, not fail, on pre-existing unrelated unavailability, and resume once it clears."**
 - Stand up the same 4-host pool; before creating the CR, kill (not upgrade-related) one host's
   agent process so it goes `AgentConnected=False`.
 - Create a `ByoHostAgentUpgrade` with `MaxUnavailable: 1` targeting all 4.
-- Assert zero hosts get `DesiredAgentVersion` set while the pre-existing host stays disconnected,
+- Assert zero hosts get `DesiredAgent` set while the pre-existing host stays disconnected,
   `Phase` stays `Pending` with the `InsufficientAvailabilityBudget` condition — not `Failed`.
 - Restart the killed host's agent; assert the rollout resumes picking hosts on its own within the
   next few reconcile ticks, with no operator action beyond fixing the unrelated host.
@@ -531,8 +552,8 @@ original draft — a trivially small `.deb` (and, if the fleet mix is real rathe
 
 - **Phase 0 (prerequisite, separate ADR, already done).**
   [agent-version-reporting-adr.md](agent-version-reporting-adr.md) — `Status.AgentVersion` exists.
-- **Phase 1.** §2.1 API additions (`DesiredAgentVersion`, `DesiredAgentPackageURL`,
-  `DesiredAgentPackageChecksum`, the two host labels) plus `make generate` and `make manifests`.
+- **Phase 1.** §2.1 API additions (`DesiredAgentSpec` with `Version`, `PackageURL`,
+  `PackageChecksum`, the two host labels) plus `make generate` and `make manifests`.
   Purely additive, safe to land alone. Mirroring the labels at registration time
   (`agent/registration/host_registrar.go`) is a small, separate, low-risk change.
 - **Phase 2.** §2.2 agent-side fetch/install/exit, with unit coverage (§5.1). Testable in
@@ -573,7 +594,7 @@ original draft — a trivially small `.deb` (and, if the fleet mix is real rathe
    automation, per this ADR's decision that `TargetVersion` is always explicit — §2.1). In
    practice something — a release process, a UI backed by a build pipeline — needs to produce the
    right URL for a given version and OS/arch cohort. Not decided here.
-2. **Package provenance/integrity beyond a plain checksum.** `DesiredAgentPackageChecksum` catches
+2. **Package provenance/integrity beyond a plain checksum.** `DesiredAgent.PackageChecksum` catches
    accidental corruption or a wrong URL, not a deliberately malicious artifact — there's no
    signing story. Worth deciding whether this needs to go further, given a compromised agent
    upgrade artifact has a larger blast radius (continuous root execution) than a compromised
@@ -582,7 +603,7 @@ original draft — a trivially small `.deb` (and, if the fleet mix is real rathe
    investigated.
 4. **Where should `MaxUnavailable`'s default and `PerHostTimeout`'s default actually land?**
    §2.3/§5.2 specify the mechanism; the numbers need sizing against a real package once one
-   exists, informed by real install duration plus the systemd restart-exhaustion window (~10-15s
+   exists, informed by real install duration plus the systemd restart-exhaustion window (~20-30s
    per §1.2).
 5. **Selector/cohort mismatches aren't caught proactively.** Since cohort-splitting (deb vs. rpm,
    amd64 vs. arm64) is manual (§2.1), nothing stops an operator from pointing a `PackageURL` at
