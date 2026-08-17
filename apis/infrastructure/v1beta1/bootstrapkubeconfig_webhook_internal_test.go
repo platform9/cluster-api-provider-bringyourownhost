@@ -106,3 +106,21 @@ func TestValidateCreateUpdateDelete(t *testing.T) {
 	_, err = invalid.ValidateDelete(ctx, invalid)
 	require.NoError(t, err)
 }
+
+func TestValidateCreateUpdateDeleteRejectWrongType(t *testing.T) {
+	r := &BootstrapKubeconfig{}
+	wrongType := &BootstrapKubeconfigList{}
+	ctx := context.Background()
+
+	_, err := r.ValidateCreate(ctx, wrongType)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expected a BootstrapKubeconfig but got a")
+
+	_, err = r.ValidateUpdate(ctx, r, wrongType)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expected a BootstrapKubeconfig but got a")
+
+	_, err = r.ValidateDelete(ctx, wrongType)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expected a BootstrapKubeconfig but got a")
+}
