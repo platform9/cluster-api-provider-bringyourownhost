@@ -27,6 +27,10 @@ const (
 	// ByohConfigDir is the directory for BYOH configuration
 	ByohConfigDir = ".byoh"
 
+	// CanonicalBinaryPath is where the pf9-byohost-agent package installs byohctl. It's the only
+	// path the OS package manager keeps up to date on future agent package upgrades.
+	CanonicalBinaryPath = "/usr/bin/byohctl"
+
 	// ImgPkgVersion is the version of imgpkg to install
 	ImgPkgVersion = "v0.45.0"
 	// ImgPkgURL is the URL to download imgpkg
