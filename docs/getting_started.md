@@ -2,6 +2,9 @@
 
 This is a guide on how to get started with Cluster API Provider BringYourOwnHost(BYOH). To learn more about Cluster API in more depth, check out the [Cluster API book][cluster-api-book].
 
+Note: [byohctl.md](byohctl.md) documents `byohctl`, a CLI that automates the host-registration
+steps below into a single command.
+
 ## Install Requirements
 - clusterctl, which can be downloaded from the latest [release][releases] of Cluster API (CAPI) on GitHub.
 - [Kind][kind] can be used  to provide an initial management cluster for testing.

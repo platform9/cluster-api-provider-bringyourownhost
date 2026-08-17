@@ -5,7 +5,7 @@
 **Deciders:** TBD
 **Related:** [pf9-byohost-spec-cleanup-adr.md](pf9-byohost-spec-cleanup-adr.md) (the rpm side of
 this change lands on top of that rewrite, not before it — see §6); onboarding flow docs
-([onboarding-pcdctl.md](onboarding-pcdctl.md), [onboarding-adr.md](onboarding-adr.md)) describe a
+(`onboarding-pcdctl.md`, `onboarding-adr.md` — not yet committed to this repo) describe a
 curl-then-onboard flow this ADR assumes but does not itself redesign — kept independent
 deliberately, see §4.
 
@@ -136,8 +136,8 @@ dead-file-removal bug (§1.2) also persists regardless.
 | Alternative | Why rejected (or: why it might actually be the right call) |
 |---|---|
 | **`byohctl` self-checks its version and tells the operator to re-curl** | Cheaper to build (a version comparison against a known-good release, no packaging change) and doesn't touch `scripts/pf9-byohost.spec` at all. Rejected as the primary mechanism because it's advisory only — nothing forces the re-curl to happen, so it doesn't actually close the divergent-fleet-versions gap, only surfaces it. Could still be worth adding on top of this ADR as a cheap early-warning check, independent of whether packaging lands. |
-| **A separate `byohctl upgrade` self-update command** (downloads and swaps its own binary, à la many CLI tools) | Considered and rejected for the same reason [agent-self-upgrade-adr.md](agent-self-upgrade-adr.md) §4 rejects agent in-process self-upgrade: it bakes a specific download/verify/swap mechanism into the binary that has to upgrade itself, so a bug in that code path can't be fixed by shipping a new version — the broken code is what would have to run the fix. Packaging avoids this: the file-replacement logic lives in `dpkg`/`rpm`, software this repo doesn't maintain and doesn't need to get right itself. |
-| **Leave `byohctl` unpackaged, treat re-curling as the accepted operator workflow** | The status quo. Not clearly wrong for a small fleet with disciplined operators, same caveat [agent-self-upgrade-adr.md](agent-self-upgrade-adr.md) §4 raises for the analogous agent-upgrade question — but it means every host's `byohctl` version is whatever was current the day someone last ran the bootstrap step there, with nothing to notice or correct drift. |
+| **A separate `byohctl upgrade` self-update command** (downloads and swaps its own binary, à la many CLI tools) | Considered and rejected for the same reason `agent-self-upgrade-adr.md` §4 (not yet merged to this branch — see the separate agent-upgrade PR) rejects agent in-process self-upgrade: it bakes a specific download/verify/swap mechanism into the binary that has to upgrade itself, so a bug in that code path can't be fixed by shipping a new version — the broken code is what would have to run the fix. Packaging avoids this: the file-replacement logic lives in `dpkg`/`rpm`, software this repo doesn't maintain and doesn't need to get right itself. |
+| **Leave `byohctl` unpackaged, treat re-curling as the accepted operator workflow** | The status quo. Not clearly wrong for a small fleet with disciplined operators, same caveat `agent-self-upgrade-adr.md` §4 (not yet merged to this branch — see the separate agent-upgrade PR) raises for the analogous agent-upgrade question — but it means every host's `byohctl` version is whatever was current the day someone last ran the bootstrap step there, with nothing to notice or correct drift. |
 | **Package `byohctl` as its own separate deb/rpm rather than folding it into `pf9-byohost-agent`** | Would decouple `byohctl`'s release cadence from the agent's, which may be desirable if they diverge in practice. Not chosen here because `before-remove.sh` (§1.2) already assumes single-package lifecycle-coupling with the agent, and splitting them now would mean *also* deciding a new package's naming, signing, and CI wiring — a larger change than this ADR's scope. Worth revisiting if the agent and `byohctl` release cadences turn out to need independence. |
 
 ---
@@ -189,7 +189,7 @@ scope) and can land on its own.
 | Rpm `%files` is a hand-maintained list; nothing byohctl-related in it today | `scripts/pf9-byohost.spec:38-43` |
 | Rpm staging root, shared with deb via `$(COMMON_SRC_ROOT)` | `Makefile:399-401,426-427` |
 | Dead `/namespace` `%files` entry and other rpm-spec issues this ADR builds on top of | [pf9-byohost-spec-cleanup-adr.md](pf9-byohost-spec-cleanup-adr.md) §1 |
-| In-process self-upgrade rejected for the agent on the same "can't fix a bug in the code that has to run the fix" ground this ADR reuses for `byohctl` | [agent-self-upgrade-adr.md](agent-self-upgrade-adr.md) §4 |
+| In-process self-upgrade rejected for the agent on the same "can't fix a bug in the code that has to run the fix" ground this ADR reuses for `byohctl` | `agent-self-upgrade-adr.md` §4 (not yet merged to this branch — see the separate agent-upgrade PR) |
 
 ---
 
