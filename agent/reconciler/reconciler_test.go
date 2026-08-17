@@ -500,6 +500,50 @@ runCmd:
 							eventBootstrapK8sNodeSucceeded,
 						}))
 					})
+
+					It("keeps refreshing the heartbeat while the install script is still running (KAAP-2330)", func() {
+						// See the second-precision comment on
+						// TestHostReconciler_Heartbeat's refresh case — here
+						// we additionally need to cross more than one
+						// whole-second boundary, since we're asserting on
+						// 2+ distinct timestamps.
+						hostReconciler.HeartbeatInterval = 1300 * time.Millisecond
+						hostReconciler.MaxBlockingDuration = 30 * time.Second
+						installCallCount := 0
+						fakeCommandRunner.RunCmdStub = func(_ context.Context, _ string) error {
+							installCallCount++
+							if installCallCount == 1 {
+								// Only the install call needs to be slow —
+								// the join call doesn't add anything this
+								// test needs, so let it return immediately.
+								time.Sleep(3 * time.Second)
+							}
+							return nil
+						}
+
+						done := make(chan error, 1)
+						go func() {
+							_, err := hostReconciler.Reconcile(ctx, controllerruntime.Request{
+								NamespacedName: byoHostLookupKey,
+							})
+							done <- err
+						}()
+
+						seen := map[time.Time]struct{}{}
+						for i := 0; i < 7; i++ {
+							time.Sleep(400 * time.Millisecond)
+							h := &infrastructurev1beta1.ByoHost{}
+							Expect(k8sClient.Get(ctx, byoHostLookupKey, h)).To(Succeed())
+							if h.Status.LastHeartbeatTime != nil {
+								seen[h.Status.LastHeartbeatTime.Time] = struct{}{}
+							}
+						}
+						Expect(len(seen)).To(BeNumerically(">=", 2),
+							"expected at least two distinct heartbeat timestamps while the install script was still running")
+
+						Eventually(done, 10*time.Second).Should(Receive(BeNil()))
+					})
+
 					AfterEach(func() {
 						Expect(k8sClient.Delete(ctx, installationSecret)).NotTo(HaveOccurred())
 					})

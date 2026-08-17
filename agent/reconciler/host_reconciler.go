@@ -13,10 +13,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/cloudinit"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/registration"
-	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/version"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/common"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
@@ -43,6 +41,11 @@ type HostReconciler struct {
 	// and the interval this reconciler self-requeues on. Wired from the
 	// --heartbeat-interval flag in agent/main.go.
 	HeartbeatInterval time.Duration
+	// MaxBlockingDuration bounds a heartbeat pulse (heartbeat.go) during one
+	// kubeadm install/join call; past it, a wedged call reads the same as
+	// a dead agent. Wired from --max-blocking-duration in agent/main.go.
+	// <= 0 disables pulsing.
+	MaxBlockingDuration time.Duration
 }
 
 const (
@@ -105,15 +108,14 @@ func (r *HostReconciler) reconcileNormal(ctx context.Context, byoHost *infrastru
 	// controller no longer compares this directly against its own clock for
 	// liveness -- unsafe under host/management clock skew, see ADR 0001
 	// (docs/proposals/0001-clock-skew-resistant-heartbeat-liveness.md).
-	now := metav1.Now()
-	if byoHost.Status.LastHeartbeatTime == nil || now.Sub(byoHost.Status.LastHeartbeatTime.Time) >= r.HeartbeatInterval {
-		byoHost.Status.LastHeartbeatTime = &now
-		byoHost.Status.AgentVersion = version.Get().GitVersion
-		if machineID, err := registration.GetMachineID(os.ReadFile); err != nil {
-			logger.Error(err, "failed to read /etc/machine-id")
-		} else {
-			byoHost.Status.MachineID = machineID
-		}
+	//
+	// This patches the API server directly (heartbeat.go) rather than
+	// stamping byoHost in memory for the deferred Patch above to pick up:
+	// that would tie the write to however long the rest of this reconcile
+	// takes, which is exactly what startHeartbeatPulse below exists to
+	// avoid during a long kubeadm install/join.
+	if err := r.patchHeartbeat(ctx, byoHost.Name, byoHost.Namespace); err != nil {
+		logger.Error(err, "failed to patch heartbeat")
 	}
 
 	if byoHost.Status.MachineRef == nil {
@@ -203,6 +205,8 @@ func (r *HostReconciler) executeInstallerController(ctx context.Context, byoHost
 		return err
 	}
 	logger.Info("executing install script")
+	stopPulse := r.startHeartbeatPulse(ctx, byoHost)
+	defer stopPulse()
 	err = r.CmdRunner.RunCmd(ctx, installScript)
 	if err != nil {
 		logger.Error(err, "error executing installation script")
@@ -362,6 +366,8 @@ func (r *HostReconciler) resetNode(ctx context.Context, byoHost *infrastructurev
 func (r *HostReconciler) bootstrapK8sNode(ctx context.Context, bootstrapScript string, byoHost *infrastructurev1beta1.ByoHost) error {
 	logger := ctrl.LoggerFrom(ctx)
 	logger.Info("Bootstraping k8s Node")
+	stopPulse := r.startHeartbeatPulse(ctx, byoHost)
+	defer stopPulse()
 	return cloudinit.ScriptExecutor{
 		WriteFilesExecutor:    r.FileWriter,
 		RunCmdExecutor:        r.CmdRunner,
