@@ -93,16 +93,44 @@ func AddOnboardFlags(cmd *cobra.Command,
 	_ = cmd.Flags().MarkHidden("namespace")
 }
 
+// goos and osReadFile are variables so tests can replace them with mocks,
+// same pattern as execCommand in cmd/byohctl/service/agent.go.
+var (
+	goos       = runtime.GOOS
+	osReadFile = os.ReadFile
+)
+
 // Check if running on Ubuntu
 func isUbuntuSystem() bool {
-	if runtime.GOOS != "linux" {
+	if goos != "linux" {
 		return false
 	}
-	data, err := os.ReadFile("/etc/os-release")
+	data, err := osReadFile("/etc/os-release")
 	if err != nil {
 		return false
 	}
 	return strings.Contains(string(data), "Ubuntu")
+}
+
+// runCommandWithStdout is a variable so tests can replace it with a mock,
+// same pattern as execCommand in cmd/byohctl/service/agent.go.
+var runCommandWithStdout = service.RunWithStdout
+
+// isNTPSynchronized is best-effort -- the caller only warns, never blocks.
+func isNTPSynchronized() bool {
+	out, err := runCommandWithStdout("timedatectl", "show", "-p", "NTPSynchronized", "--value")
+	if err != nil {
+		return false
+	}
+	return parseNTPSynchronized(out)
+}
+
+// parseNTPSynchronized interprets the output of
+// `timedatectl show -p NTPSynchronized --value`, which prints exactly "yes"
+// or "no". Split out from isNTPSynchronized so this logic is unit-testable
+// without mocking exec.Command across the cmd/service package boundary.
+func parseNTPSynchronized(output string) bool {
+	return strings.TrimSpace(output) == "yes"
 }
 
 type OnboardConfig struct {
@@ -217,6 +245,14 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	if !isUbuntuSystem() {
 		fmt.Println("Error: This command requires an Ubuntu system")
 		os.Exit(1)
+	}
+
+	// Advisory only -- not required for correctness, see isNTPSynchronized.
+	if !isNTPSynchronized() {
+		fmt.Println("Warning: this host's clock does not appear to be NTP-synchronized.")
+		fmt.Println("         This won't block onboarding, but an out-of-sync clock can cause")
+		fmt.Println("         confusing log timestamps and TLS certificate validity errors.")
+		fmt.Println("         Consider enabling time sync, e.g.: sudo timedatectl set-ntp true")
 	}
 
 	// Continue with interactive password if needed

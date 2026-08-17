@@ -525,3 +525,86 @@ func TestInteractivePassword(t *testing.T) {
 
 // Mock function type
 var readPassword func(fd int) ([]byte, error) = term.ReadPassword
+
+func TestIsUbuntuSystem(t *testing.T) {
+	origGoos := goos
+	origReadFile := osReadFile
+	t.Cleanup(func() {
+		goos = origGoos
+		osReadFile = origReadFile
+	})
+
+	tests := []struct {
+		name     string
+		goos     string
+		fileData string
+		fileErr  error
+		want     bool
+	}{
+		{name: "ubuntu", goos: "linux", fileData: "NAME=\"Ubuntu\"\nVERSION=\"20.04\"\n", want: true},
+		{name: "non-ubuntu linux distro", goos: "linux", fileData: "NAME=\"Rocky Linux\"\n", want: false},
+		{name: "non-linux OS", goos: "darwin", fileData: "NAME=\"Ubuntu\"\n", want: false},
+		{name: "os-release unreadable", goos: "linux", fileErr: fmt.Errorf("open /etc/os-release: no such file or directory"), want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			goos = tt.goos
+			osReadFile = func(name string) ([]byte, error) {
+				require.Equal(t, "/etc/os-release", name)
+				if tt.fileErr != nil {
+					return nil, tt.fileErr
+				}
+				return []byte(tt.fileData), nil
+			}
+			require.Equal(t, tt.want, isUbuntuSystem())
+		})
+	}
+}
+
+func TestIsNTPSynchronized(t *testing.T) {
+	origRun := runCommandWithStdout
+	t.Cleanup(func() { runCommandWithStdout = origRun })
+
+	tests := []struct {
+		name   string
+		output string
+		err    error
+		want   bool
+	}{
+		{name: "synchronized", output: "yes\n", want: true},
+		{name: "not synchronized", output: "no\n", want: false},
+		{name: "timedatectl unavailable", output: "", err: fmt.Errorf("exec: \"timedatectl\": executable file not found in $PATH"), want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runCommandWithStdout = func(name string, args ...string) (string, error) {
+				require.Equal(t, "timedatectl", name)
+				require.Equal(t, []string{"show", "-p", "NTPSynchronized", "--value"}, args)
+				return tt.output, tt.err
+			}
+			require.Equal(t, tt.want, isNTPSynchronized())
+		})
+	}
+}
+
+func TestParseNTPSynchronized(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		want   bool
+	}{
+		{name: "synchronized", output: "yes\n", want: true},
+		{name: "not synchronized", output: "no\n", want: false},
+		{name: "no trailing newline", output: "yes", want: true},
+		{name: "empty output", output: "", want: false},
+		{name: "unexpected output", output: "unknown\n", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, parseNTPSynchronized(tt.output))
+		})
+	}
+}

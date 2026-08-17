@@ -212,3 +212,70 @@ func TestByohostController_Heartbeat(t *testing.T) {
 		assert.Contains(t, events, "Warning AgentDisconnected agent heartbeat not received within timeout period")
 	})
 }
+
+// Guards the managedFields assumption ADR 0001
+// (docs/proposals/0001-clock-skew-resistant-heartbeat-liveness.md) depends
+// on. Polls with require.Eventually rather than a single Get -- an immediate
+// read after a write can race the cache and produce a false negative.
+func TestByohostController_HeartbeatManagedFieldsTimeTracksServerWriteTime(t *testing.T) {
+	byoHost := newByoHostForTest(t, "heartbeat-managedfields")
+	key := types.NamespacedName{Name: byoHost.Name, Namespace: byoHost.Namespace}
+
+	findStatusEntry := func(obj *infrastructurev1beta1.ByoHost) *metav1.ManagedFieldsEntry {
+		for i := range obj.ManagedFields {
+			if obj.ManagedFields[i].Manager == "infrastructure.test" && obj.ManagedFields[i].Subresource == "status" {
+				return &obj.ManagedFields[i]
+			}
+		}
+		return nil
+	}
+
+	// First write. Deliberately skewed 24h into the past, to prove the
+	// managedFields time is not derived from the value written into the field.
+	fresh := &infrastructurev1beta1.ByoHost{}
+	require.NoError(t, k8sManager.GetClient().Get(context.Background(), key, fresh))
+	helper, err := patch.NewHelper(fresh, k8sManager.GetClient())
+	require.NoError(t, err)
+	firstHeartbeat := metav1.NewTime(time.Now().Add(-24 * time.Hour))
+	fresh.Status.LastHeartbeatTime = &firstHeartbeat
+	require.NoError(t, helper.Patch(context.Background(), fresh))
+
+	current := &infrastructurev1beta1.ByoHost{}
+	var firstObservedTime time.Time
+	require.Eventually(t, func() bool {
+		if getErr := k8sManager.GetClient().Get(context.Background(), key, current); getErr != nil {
+			return false
+		}
+		entry := findStatusEntry(current)
+		if entry == nil || entry.Time == nil {
+			return false
+		}
+		firstObservedTime = entry.Time.Time
+		return true
+	}, 5*time.Second, 50*time.Millisecond, "expected a status managedFields entry to appear after the first heartbeat write")
+	assert.WithinDuration(t, time.Now(), firstObservedTime, 10*time.Second,
+		"managedFields time should reflect the apiserver's own clock, not the 24h-skewed value written into the field")
+
+	// Second write a moment later, also skewed. metav1.Time round-trips
+	// through JSON at second granularity, so sleep past a full second.
+	time.Sleep(1100 * time.Millisecond)
+	helper2, err := patch.NewHelper(current, k8sManager.GetClient())
+	require.NoError(t, err)
+	secondHeartbeat := metav1.NewTime(time.Now().Add(-24 * time.Hour))
+	current.Status.LastHeartbeatTime = &secondHeartbeat
+	require.NoError(t, helper2.Patch(context.Background(), current))
+
+	after := &infrastructurev1beta1.ByoHost{}
+	require.Eventually(t, func() bool {
+		if err := k8sManager.GetClient().Get(context.Background(), key, after); err != nil {
+			return false
+		}
+		return after.Status.LastHeartbeatTime != nil && after.Status.LastHeartbeatTime.After(firstHeartbeat.Time)
+	}, 5*time.Second, 50*time.Millisecond, "expected the second heartbeat write to become visible")
+
+	entry := findStatusEntry(after)
+	require.NotNil(t, entry)
+	require.NotNil(t, entry.Time)
+	assert.True(t, entry.Time.After(firstObservedTime),
+		"managedFields time must advance on each subsequent write for a liveness check built on it to work")
+}
