@@ -92,7 +92,13 @@ var _ = Describe("pf9-byohost deb", func() {
 		Expect(strings.Fields(filesOutput)).To(ContainElements(
 			"/binary/pf9-byoh-hostagent",
 			"/etc/systemd/system/pf9-byohost-agent.service",
+			"/usr/bin/byohctl",
 		))
+
+		By("asserting byohctl was installed executable and runs")
+		byohctlOutput, exitCode, err := execInContainer(ctx, containerID, []string{"byohctl", "version"}, nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(exitCode).To(Equal(0), "byohctl version failed:\n%s", byohctlOutput)
 
 		By("asserting after-install.sh generated the EnvironmentFile the systemd unit reads BOOTSTRAP_KUBECONFIG from")
 		confOutput, exitCode, err := execInContainer(ctx, containerID,
@@ -115,11 +121,12 @@ var _ = Describe("pf9-byohost deb", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(exitCode).To(Equal(0), "dpkg -r failed:\n%s", uninstallOutput)
 
-		By("asserting the binary, unit file, and generated conf directory are gone")
+		By("asserting the binary, unit file, byohctl, and generated conf directory are gone")
 		for _, path := range []string{
 			"/binary/pf9-byoh-hostagent",
 			"/etc/systemd/system/pf9-byohost-agent.service",
 			"/etc/pf9-byohost-agent.service.d",
+			"/usr/bin/byohctl",
 		} {
 			_, pathExitCode, pathErr := execInContainer(ctx, containerID, []string{"test", "-e", path}, nil)
 			Expect(pathErr).NotTo(HaveOccurred())
