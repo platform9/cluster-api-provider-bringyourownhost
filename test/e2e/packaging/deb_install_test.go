@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -48,10 +47,10 @@ var _ = Describe("pf9-byohost deb", func() {
 		Expect(err).NotTo(HaveOccurred())
 		containerID := created.ID
 		defer func() {
-			_ = dockerClient.ContainerRemove(ctx, containerID, types.ContainerRemoveOptions{Force: true})
+			_ = dockerClient.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
 		}()
 
-		Expect(dockerClient.ContainerStart(ctx, containerID, types.ContainerStartOptions{})).To(Succeed())
+		Expect(dockerClient.ContainerStart(ctx, containerID, container.StartOptions{})).To(Succeed())
 
 		By("waiting for systemd to come up")
 		Eventually(func() (string, error) {
