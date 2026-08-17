@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/client"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/service"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils"
@@ -16,8 +18,8 @@ const (
 	OperationDecommission HostOperationType = "decommission"
 )
 
-// PerformHostOperation performs the common steps for host deauthorisation or decommissioning
-func PerformHostOperation(operationType HostOperationType, namespace string) error {
+// PerformHostOperation performs the common steps for host deauthorisation or decommissioning.
+func PerformHostOperation(operationType HostOperationType, namespace string, force bool) error {
 
 	// Deauthorise and decommission host steps -
 	// 1. Authenticate with Platform9 with the kubeconfig present in the agent directory ( kubeconfig )
@@ -53,10 +55,15 @@ func PerformHostOperation(operationType HostOperationType, namespace string) err
 		// There might be a chance that the byohost object is not present in the management cluster
 		// If decommission, ask user to proceed with host cleanup or not, run dpkg purge if yes
 		if operationType == OperationDecommission {
-			// Ask user to proceed with host cleanup or not
-			continueDecommission, err := utils.AskBool("Do you want to proceed with host cleanup? (y/n)")
-			if err != nil {
-				return fmt.Errorf("failed to get user input: %v", err)
+			continueDecommission := force
+			if !continueDecommission {
+				// Ask user to proceed with host cleanup or not
+				continueDecommission, err = utils.AskBool("Do you want to proceed with host cleanup? (y/n)")
+				if err != nil {
+					return fmt.Errorf("failed to get user input: %v", err)
+				}
+			} else {
+				utils.LogInfo("--force set: proceeding with host cleanup despite unreachable management plane")
 			}
 			if !continueDecommission {
 				return nil
@@ -71,6 +78,10 @@ func PerformHostOperation(operationType HostOperationType, namespace string) err
 
 		// If its here, the operationType is deauthorise
 		// For deathorise byoHost object must be present in the management cluster
+		if force {
+			utils.LogInfo("--force set: management plane unreachable or ByoHost missing; treating deauthorise as a no-op")
+			return nil
+		}
 		return fmt.Errorf("Cannot proceed ahead with the deauthorisation. Either restart the pf9-byohost-agent service or decommission and re-onboard.")
 	}
 
@@ -95,6 +106,17 @@ func PerformHostOperation(operationType HostOperationType, namespace string) err
 	// Get the machine object ( unstructured )
 	unstructuredMachineObj, err := client.GetUnstructuredMachineObject(namespace, machineName)
 	if err != nil {
+		if apierrors.IsNotFound(err) && force {
+			utils.LogInfo("--force set and referenced Machine %q is gone; clearing stale MachineRef on ByoHost", machineName)
+			if err := client.ClearMachineRefOnByoHost(namespace); err != nil {
+				return fmt.Errorf("failed to clear stale MachineRef on byohost: %v", err)
+			}
+			utils.LogSuccess("Cleared stale MachineRef on ByoHost")
+			if operationType == OperationDecommission {
+				return performHostDecommissionWithNoMachineRef(client, namespace)
+			}
+			return nil
+		}
 		return fmt.Errorf("failed to get machine object: %v", err)
 	}
 

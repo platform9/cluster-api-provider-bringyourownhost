@@ -11,6 +11,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var decommissionForce bool
+
 var decommissionCmd = &cobra.Command{
 	Use:   "decommission",
 	Short: "Decommission a host from the pf9 kaapi management cluster",
@@ -26,6 +28,7 @@ This command will:
 func init() {
 	rootCmd.AddCommand(decommissionCmd)
 	decommissionCmd.Flags().StringVarP(&verbosity, "verbosity", "v", "minimal", "Log verbosity level (all, important, minimal, critical, none)")
+	decommissionCmd.Flags().BoolVarP(&decommissionForce, "force", "f", false, "Force decommission of the host.")
 }
 
 func runDecommission(cmd *cobra.Command, args []string) {
@@ -38,7 +41,7 @@ func runDecommission(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	err = pkg.PerformHostOperation(pkg.OperationDecommission, namespace)
+	err = pkg.PerformHostOperation(pkg.OperationDecommission, namespace, decommissionForce)
 	if err != nil {
 		fmt.Println("Failed to decommission host. " + err.Error())
 		os.Exit(1)

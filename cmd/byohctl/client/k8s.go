@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -268,6 +269,28 @@ func (client *Client) GetByoHostObject(namespace string) (*infrastructurev1beta1
 	return byoHost, nil
 }
 
+// ClearMachineRefOnByoHost patches the ByoHost's status subresource to unset Status.MachineRef.
+func (client *Client) ClearMachineRefOnByoHost(namespace string) error {
+	byohostGVR := schema.GroupVersionResource{
+		Group:    "infrastructure.cluster.x-k8s.io",
+		Version:  "v1beta1",
+		Resource: "byohosts",
+	}
+
+	hostName, err := os.Hostname()
+	if err != nil {
+		return fmt.Errorf("error getting hostname: %v", err)
+	}
+
+	patch := []byte(`{"status":{"machineRef":null}}`)
+	_, err = client.DynamicClient.Resource(byohostGVR).Namespace(namespace).
+		Patch(context.Background(), hostName, k8stypes.MergePatchType, patch, metav1.PatchOptions{}, "status")
+	if err != nil {
+		return fmt.Errorf("error clearing machineRef on byohost: %v", err)
+	}
+	return nil
+}
+
 // DeleteByoHostObject deletes the ByoHost object in the given namespace.
 func (client *Client) DeleteByoHostObject(namespace string) error {
 	byohostGVR := schema.GroupVersionResource{
@@ -369,13 +392,8 @@ func (client *Client) GetUnstructuredMachineObject(namespace, machineName string
 		Resource: "machines",
 	}
 
-	// Get the machine object
-	unstructuredMachineObj, err := client.DynamicClient.Resource(machineGVR).Namespace(namespace).Get(context.TODO(), machineName, metav1.GetOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("error getting machine object: %v", err)
-	}
-
-	return unstructuredMachineObj, nil
+	// Return the error unwrapped so callers can use apierrors.IsNotFound.
+	return client.DynamicClient.Resource(machineGVR).Namespace(namespace).Get(context.TODO(), machineName, metav1.GetOptions{})
 }
 
 // GetMachineDeploymentReplicaCount returns the replica count of the machine deployment
