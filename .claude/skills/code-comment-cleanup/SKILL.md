@@ -93,12 +93,18 @@ actually missing something that matters? If no, cut it.
   `godot` at all, so no doc comment here is lint-mandatory — but that's this repo's config
   today, not a property of Go in general; re-check if this skill is ever pointed at a different
   repo or this one's lint config changes.
-- **Repeated-copy case**: if the same fact is already stated elsewhere nearby (e.g. a comment
-  on a variable declaration restating what two separate comments at its actual use sites
-  already say), and the later copy adds zero fact the earlier one(s) don't already cover, that's
-  a full CUT of the later copy — not a TRIM. TRIM is for compressing one long comment down to
-  its essential clause; it isn't for deciding which of several duplicate comments survives. If
-  nothing unique survives in a copy, delete the whole thing.
+- **Repeated-copy case**: if the same fact is already stated elsewhere in this diff, and the
+  later copy adds zero fact the earlier one(s) don't already cover, that's a full CUT of the
+  later copy — not a TRIM. TRIM is for compressing one long comment down to its essential
+  clause; it isn't for deciding which of several duplicate comments survives. If nothing
+  unique survives in a copy, delete the whole thing. "Elsewhere in this diff" is not limited to
+  the same symbol's decl-vs-use-sites — a comment on one declaration can restate a comment on
+  a completely different one. Example: a constant's comment says the OS package manager keeps
+  a given path up to date on upgrades; a separate function's comment, for a function that
+  checks whether the binary is running from that path, restates the identical fact ("binaries
+  elsewhere never get those upgrades") instead of saying anything new about what the function
+  itself does. The second comment isn't safe just because it's attached to a different symbol —
+  whichever one the reader hits first already tells them this.
 
 **TRIM** — keep the point, cut the rest. The comment has a real "why" buried in it, but:
 - it's a multi-clause reasoning chain ("X, so Y, which means Z, therefore...") — compress to
@@ -200,6 +206,16 @@ and its absence would cause a real future mistake:
   different rule from the rest of KEEP — it's the same "would the reader be missing something
   that matters" test, just run against the generated-doc reader instead of the default
   repo-reading one.
+
+**Mandatory closing pass — do not skip this.** Every test above compares one comment against
+its own adjacent code; none of them compare it against *other comments*. That means a comment
+can pass every test in this section individually and still duplicate a fact some other
+surviving comment already states elsewhere in the diff — the per-comment loop has no built-in
+way to catch that, so it has to be a separate, deliberate step. Once every comment has an
+individual verdict, take the ones still standing as KEEP or TRIM and compare each against every
+other surviving comment — not only ones on the same symbol, but comments on any declaration it
+references or is referenced by. Any fact stated by more than one survivor is the repeated-copy
+CUT case above: keep whichever instance is clearest or most locally relevant, cut the rest.
 
 ## Step 3 — report
 
