@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -93,23 +94,104 @@ func AddOnboardFlags(cmd *cobra.Command,
 	_ = cmd.Flags().MarkHidden("namespace")
 }
 
-// goos and osReadFile are variables so tests can replace them with mocks,
+// goos, goarch and osReadFile are variables so tests can replace them with mocks,
 // same pattern as execCommand in cmd/byohctl/service/agent.go.
 var (
 	goos       = runtime.GOOS
+	goarch     = runtime.GOARCH
 	osReadFile = os.ReadFile
 )
 
-// Check if running on Ubuntu
-func isUbuntuSystem() bool {
+// supportedUbuntuVersions lists the Ubuntu VERSION_ID values a host may run, and supportedArch
+// the architecture it must have. Both are dictated by which byoh-bundles actually get published:
+// keep them in sync with the UBUNTU_VERSION case arms in .ci/build-push-bundle.sh, which
+// TestSupportedUbuntuVersionsMatchBundleScript enforces. Onboarding a host outside this set
+// succeeds but leaves it unable to install Kubernetes, so the failure only surfaces much later,
+// during cluster provisioning.
+var supportedUbuntuVersions = []string{"20.04", "22.04", "24.04"}
+
+const supportedArch = "amd64"
+
+// osReleasePaths are searched in order. /usr/lib/os-release is the fallback for stateless
+// systems, matching agent/registration/host_registrar.go's getOperatingSystem.
+var osReleasePaths = []string{"/etc/os-release", "/usr/lib/os-release"}
+
+// checkSupportedPlatform reports why this host cannot run the BYOH agent, or nil if it can.
+func checkSupportedPlatform() error {
 	if goos != "linux" {
-		return false
+		return fmt.Errorf("onboarding requires a Linux host, but this is %s", goos)
 	}
-	data, err := osReadFile("/etc/os-release")
+
+	data, err := readOSRelease()
 	if err != nil {
-		return false
+		return err
 	}
-	return strings.Contains(string(data), "Ubuntu")
+	osRelease := parseOSRelease(data)
+
+	// Report the distro the way the host describes itself; ID alone ("pop") is unhelpful.
+	described := osRelease["PRETTY_NAME"]
+	if described == "" {
+		described = osRelease["ID"]
+	}
+	if described == "" {
+		described = "unknown"
+	}
+
+	// ID, not ID_LIKE: Ubuntu derivatives are not what the bundles are built and tested against.
+	if osRelease["ID"] != "ubuntu" {
+		return fmt.Errorf("onboarding requires Ubuntu %s, but this host is running %s",
+			strings.Join(supportedUbuntuVersions, ", "), described)
+	}
+
+	version := osRelease["VERSION_ID"]
+	if version == "" {
+		return fmt.Errorf("could not determine this host's Ubuntu version: no VERSION_ID in %s",
+			strings.Join(osReleasePaths, " or "))
+	}
+	// Ubuntu point releases keep the series in VERSION_ID (22.04.5 LTS reports "22.04"), so an
+	// exact match is right here.
+	if !slices.Contains(supportedUbuntuVersions, version) {
+		return fmt.Errorf("%s is not supported for onboarding; supported versions are Ubuntu %s",
+			described, strings.Join(supportedUbuntuVersions, ", "))
+	}
+
+	if goarch != supportedArch {
+		return fmt.Errorf("onboarding requires the %s architecture, but this host is %s "+
+			"(no Kubernetes bundles are published for %s)", supportedArch, goarch, goarch)
+	}
+
+	return nil
+}
+
+// readOSRelease returns the contents of the first readable path in osReleasePaths.
+func readOSRelease() ([]byte, error) {
+	for _, path := range osReleasePaths {
+		data, err := osReadFile(path)
+		if err == nil {
+			return data, nil
+		}
+	}
+	return nil, fmt.Errorf("could not identify this host's OS: no readable %s",
+		strings.Join(osReleasePaths, " or "))
+}
+
+// parseOSRelease turns os-release contents into its KEY=VALUE pairs, unquoting values.
+// Split out from checkSupportedPlatform so the parsing is unit-testable on its own, same as
+// parseNTPSynchronized below.
+func parseOSRelease(data []byte) map[string]string {
+	values := make(map[string]string)
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+		values[strings.TrimSpace(key)] = strings.Trim(strings.TrimSpace(value), `"'`)
+	}
+	return values
 }
 
 // runCommandWithStdout is a variable so tests can replace it with a mock,
@@ -241,9 +323,10 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	utils.LogDebug("Final onboarding values: url=%s, username=%s, domain=%s, tenant=%s, region=%s, verbosity=%s",
 		fqdn, username, domain, tenant, regionName, verbosity)
 
-	// Check if running on Ubuntu system
-	if !isUbuntuSystem() {
-		fmt.Println("Error: This command requires an Ubuntu system")
+	// Gate on OS and architecture before touching the host or contacting Platform9, so an
+	// unsupported host exits having changed nothing.
+	if err := checkSupportedPlatform(); err != nil {
+		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
 
