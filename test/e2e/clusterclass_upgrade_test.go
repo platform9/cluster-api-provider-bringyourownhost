@@ -54,8 +54,7 @@ var _ = Describe("Clusterclass upgrade test [K8s-Upgrade-ClusterClass]", func() 
 		hosts, err := spinUpByoHosts(ctx, dockerClient, namespace.Name, byoHostCapacityPool)
 		Expect(err).NotTo(HaveOccurred())
 		for _, host := range hosts {
-			defer host.Output.Close()
-			defer closeLogFile(host.LogFile, host.LogFilePath)
+			defer host.StopLog()
 			allbyohostContainerIDs = append(allbyohostContainerIDs, host.ContainerID)
 			allAgentLogFiles = append(allAgentLogFiles, host.LogFilePath)
 		}

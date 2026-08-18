@@ -1,15 +1,17 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package e2e
 
 import (
-	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
+	"time"
 
 	"github.com/docker/docker/api/types"
 )
@@ -28,48 +30,46 @@ var (
 	ReadAllPodsShellFile = fmt.Sprintf("/tmp/read-all-pods-%d.sh", os.Getpid())
 )
 
-// WriteDockerLog redirects the docker logs to the given file
-func WriteDockerLog(output types.HijackedResponse, outputFile string) *os.File {
-	s := make(chan string)
-	e := make(chan error)
-	buf := bufio.NewReader(output.Reader)
+// drainTimeout bounds how long stop() waits for the copier goroutine to finish
+// after the docker stream is closed, so a wedged stream can't hang a spec.
+const drainTimeout = 5 * time.Second
+
+// StreamDockerLog copies the docker stream into outputFile until the stream is closed. Returns a
+// func stop, which closes the stream and then waits until the copy has drained and the log file is
+// closed. The caller must not close either the stream or the file itself, instead it must invoke
+// stop(), optionally as a defer.
+func StreamDockerLog(stream types.HijackedResponse, outputFile string) (stop func()) {
 	f, err := os.OpenFile(outputFile, os.O_CREATE|os.O_WRONLY, DefaultFileMode) // #nosec G304 -- e2e debug helper; callers always pass a fixed /tmp path owned by the test suite
 	if err != nil {
 		Showf("OpenFile %s failed, Get err %v", outputFile, err)
-		return nil
+		return func() {
+			stream.Close()
+		}
 	}
 
+	done := make(chan struct{})
 	go func() {
-		for {
-			line, _, err := buf.ReadLine()
-			if err != nil {
-				// will be quit by this err: read unix @->/run/docker.sock: use of closed network connection
-				e <- err
-				break
-			} else {
-				s <- string(line)
-			}
-		}
+		// defer calls are LIFO: the log file is closed first, and done is closed after, so
+		// stop() only returns once the file is fully written and closed.
+		defer close(done)
+		defer closeLogFile(f, outputFile)
+
+		// Both results are dropped on purpose: the byte count is uninteresting,
+		// and the error is either nil (stream ended on its own) or the
+		// closed-connection error that stop() causes by design.
+		_, _ = io.Copy(f, stream.Reader)
 	}()
 
-	go func() {
-		for {
-			select {
-			case line := <-s:
-				_, err2 := f.WriteString(line + "\n")
-				if err2 != nil {
-					Showf("Write String to file failed, err2=%v", err2)
-				}
-				_ = f.Sync()
-			case err := <-e:
-				// Please ignore this error if you see it in output
-				Showf("Get err %v", err)
-				return
-			}
+	return func() {
+		// First close the stream so that it is safe to close the log file.
+		stream.Close()
+		select {
+		// Wait for the copier to drain and close the log file.
+		case <-done:
+		case <-time.After(drainTimeout):
+			Showf("timed out draining docker log into %s", outputFile)
 		}
-	}()
-
-	return f
+	}
 }
 
 // closeLogFile closes f, logging any error against filename

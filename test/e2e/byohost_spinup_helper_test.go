@@ -7,21 +7,17 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"os"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
 	"sigs.k8s.io/cluster-api/util"
 )
 
-// byoHostHandle's Output and LogFile are returned open: the caller owns closing them
-// (typically deferred right after spinUpByoHosts returns) so agent logs keep streaming
-// for the rest of the spec.
+// byoHostHandle's agent log keeps streaming until StopLog is called (typically deferred
+// right after spinUpByoHosts returns), which closes the docker stream and the log file.
 type byoHostHandle struct {
 	Name        string
 	ContainerID string
-	Output      types.HijackedResponse
-	LogFile     *os.File
+	StopLog     func()
 	LogFilePath string
 }
 
@@ -63,8 +59,7 @@ func spinUpByoHosts(ctx context.Context, dockerClient *client.Client, namespace 
 		hosts = append(hosts, byoHostHandle{
 			Name:        byoHostName,
 			ContainerID: containerID,
-			Output:      output,
-			LogFile:     WriteDockerLog(output, logFilePath),
+			StopLog:     StreamDockerLog(output, logFilePath),
 			LogFilePath: logFilePath,
 		})
 	}

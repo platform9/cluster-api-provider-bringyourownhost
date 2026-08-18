@@ -88,14 +88,7 @@ var _ = Describe("Agent", func() {
 			output, _, err := runner.ExecByoDockerHost(byoHostContainer)
 			Expect(err).NotTo(HaveOccurred())
 
-			defer output.Close()
-			f := e2e.WriteDockerLog(output, agentLogFile)
-			defer func() {
-				deferredErr := f.Close()
-				if deferredErr != nil {
-					e2e.Showf("error closing file %s: %v", agentLogFile, deferredErr)
-				}
-			}()
+			defer e2e.StreamDockerLog(output, agentLogFile)()
 			Consistently(func() (done bool) {
 				_, err := os.Stat(agentLogFile)
 				if err == nil {
@@ -182,14 +175,7 @@ var _ = Describe("Agent", func() {
 		})
 
 		It("should skip bootstrap kubeconfig flow in default mode", func() {
-			defer output.Close()
-			f := e2e.WriteDockerLog(output, agentLogFile)
-			defer func() {
-				deferredErr := f.Close()
-				if deferredErr != nil {
-					e2e.Showf("error closing file %s: %v", agentLogFile, deferredErr)
-				}
-			}()
+			defer e2e.StreamDockerLog(output, agentLogFile)()
 
 			Consistently(func() (done bool) {
 				_, err := os.Stat(agentLogFile)
@@ -249,15 +235,7 @@ var _ = Describe("Agent", func() {
 			byoHost := builder.ByoHost(ns.Name, "random-second-host").Build()
 			Expect(k8sClient.Create(context.TODO(), byoHost)).NotTo(HaveOccurred(), "failed to create byohost")
 
-			defer output.Close()
-
-			f := e2e.WriteDockerLog(output, agentLogFile)
-			defer func() {
-				deferredErr := f.Close()
-				if deferredErr != nil {
-					e2e.Showf("error closing file %s: %v", agentLogFile, deferredErr)
-				}
-			}()
+			defer e2e.StreamDockerLog(output, agentLogFile)()
 			Consistently(func() (done bool) {
 				_, err := os.Stat(agentLogFile)
 				if err == nil {
@@ -322,14 +300,7 @@ var _ = Describe("Agent", func() {
 			})
 
 			It("should run the script to install k8s components", func() {
-				defer output.Close()
-				f := e2e.WriteDockerLog(output, agentLogFile)
-				defer func() {
-					deferredErr := f.Close()
-					if deferredErr != nil {
-						e2e.Showf("error closing file %s: %v", agentLogFile, deferredErr)
-					}
-				}()
+				defer e2e.StreamDockerLog(output, agentLogFile)()
 				updatedByoHost := &infrastructurev1beta1.ByoHost{}
 				Eventually(func() (condition corev1.ConditionStatus) {
 					err := k8sClient.Get(ctx, namespace, updatedByoHost)
@@ -489,14 +460,7 @@ var _ = Describe("Agent", func() {
 			output, _, err := runner.ExecByoDockerHost(byoHostContainer)
 			Expect(err).NotTo(HaveOccurred())
 
-			defer output.Close()
-			f := e2e.WriteDockerLog(output, agentLogFile)
-			defer func() {
-				deferredErr := f.Close()
-				if deferredErr != nil {
-					e2e.Showf("error closing file %s: %v", agentLogFile, deferredErr)
-				}
-			}()
+			defer e2e.StreamDockerLog(output, agentLogFile)()
 			Eventually(func() (done bool) {
 				_, err := os.Stat(agentLogFile)
 				if err == nil {
@@ -559,14 +523,7 @@ var _ = Describe("Agent", func() {
 			var err error
 			output, _, err = runner.ExecByoDockerHost(byoHostContainer)
 			Expect(err).NotTo(HaveOccurred())
-			defer output.Close()
-			f := e2e.WriteDockerLog(output, agentLogFile)
-			defer func() {
-				deferredErr := f.Close()
-				if deferredErr != nil {
-					e2e.Showf("error closing file %s: %v", agentLogFile, deferredErr)
-				}
-			}()
+			defer e2e.StreamDockerLog(output, agentLogFile)()
 			Eventually(func() (done bool) {
 				_, err := os.Stat(agentLogFile)
 				if err == nil {
@@ -606,14 +563,7 @@ var _ = Describe("Agent", func() {
 			output, _, err = runner.ExecByoDockerHost(byoHostContainer)
 			Expect(err).NotTo(HaveOccurred())
 
-			defer output.Close()
-			f := e2e.WriteDockerLog(output, agentLogFile)
-			defer func() {
-				deferredErr := f.Close()
-				if deferredErr != nil {
-					e2e.Showf("error closing file %s: %v", agentLogFile, deferredErr)
-				}
-			}()
+			defer e2e.StreamDockerLog(output, agentLogFile)()
 			Consistently(func() (done bool) {
 				_, err := os.Stat(agentLogFile)
 				if err == nil {
@@ -643,14 +593,7 @@ var _ = Describe("Agent", func() {
 			// start agent
 			output, _, err := runner.ExecByoDockerHost(byoHostContainer)
 			Expect(err).NotTo(HaveOccurred())
-			defer output.Close()
-			f := e2e.WriteDockerLog(output, agentLogFile)
-			defer func() {
-				deferredErr := f.Close()
-				if deferredErr != nil {
-					e2e.Showf("error closing file %s: %v", agentLogFile, deferredErr)
-				}
-			}()
+			defer e2e.StreamDockerLog(output, agentLogFile)()
 			byohCSRLookupKey := types.NamespacedName{Name: fmt.Sprintf(registration.ByohCSRNameFormat, hostName)}
 			byohCSR := &certv1.CertificateSigningRequest{}
 
@@ -666,14 +609,7 @@ var _ = Describe("Agent", func() {
 			// start agent
 			output, _, err := runner.ExecByoDockerHost(byoHostContainer)
 			Expect(err).NotTo(HaveOccurred())
-			defer output.Close()
-			fAgent := e2e.WriteDockerLog(output, agentLogFile)
-			defer func() {
-				deferredErr := fAgent.Close()
-				if deferredErr != nil {
-					e2e.Showf("error closing file %s: %v", agentLogFile, deferredErr)
-				}
-			}()
+			defer e2e.StreamDockerLog(output, agentLogFile)()
 			// exec in container to check the file
 			cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 			Expect(err).ShouldNot(HaveOccurred())
@@ -687,14 +623,7 @@ var _ = Describe("Agent", func() {
 			Expect(err).ShouldNot(HaveOccurred())
 			result, err := cli.ContainerExecAttach(ctx, response.ID, container.ExecAttachOptions{})
 			Expect(err).ShouldNot(HaveOccurred())
-			defer result.Close()
-			fExec := e2e.WriteDockerLog(result, execLogFile)
-			defer func() {
-				deferredErr := fExec.Close()
-				if deferredErr != nil {
-					e2e.Showf("error closing file %s: %v", execLogFile, deferredErr)
-				}
-			}()
+			defer e2e.StreamDockerLog(result, execLogFile)()
 			Eventually(func() (done bool) {
 				_, err := os.Stat(execLogFile)
 				if err == nil {
@@ -711,14 +640,7 @@ var _ = Describe("Agent", func() {
 			// start agent
 			output, _, err := runner.ExecByoDockerHost(byoHostContainer)
 			Expect(err).NotTo(HaveOccurred())
-			defer output.Close()
-			f := e2e.WriteDockerLog(output, agentLogFile)
-			defer func() {
-				deferredErr := f.Close()
-				if deferredErr != nil {
-					e2e.Showf("error closing file %s: %v", agentLogFile, deferredErr)
-				}
-			}()
+			defer e2e.StreamDockerLog(output, agentLogFile)()
 			Eventually(func() (done bool) {
 				_, err := os.Stat(agentLogFile)
 				if err == nil {
@@ -734,14 +656,7 @@ var _ = Describe("Agent", func() {
 			// start agent
 			output, _, err := runner.ExecByoDockerHost(byoHostContainer)
 			Expect(err).NotTo(HaveOccurred())
-			defer output.Close()
-			fAgent := e2e.WriteDockerLog(output, agentLogFile)
-			defer func() {
-				deferredErr := fAgent.Close()
-				if deferredErr != nil {
-					e2e.Showf("error closing file %s: %v", agentLogFile, deferredErr)
-				}
-			}()
+			defer e2e.StreamDockerLog(output, agentLogFile)()
 
 			// Approve CSR
 			Eventually(func() (done bool) {
@@ -791,14 +706,7 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 			Expect(err).ShouldNot(HaveOccurred())
 			result, err := cli.ContainerExecAttach(ctx, response.ID, container.ExecAttachOptions{})
 			Expect(err).ShouldNot(HaveOccurred())
-			defer result.Close()
-			fExec := e2e.WriteDockerLog(result, execLogFile)
-			defer func() {
-				deferredErr := fExec.Close()
-				if deferredErr != nil {
-					e2e.Showf("error closing file %s: %v", execLogFile, deferredErr)
-				}
-			}()
+			defer e2e.StreamDockerLog(result, execLogFile)()
 			Eventually(func() (done bool) {
 				_, err := os.Stat(execLogFile)
 				if err == nil {

@@ -56,8 +56,7 @@ var _ = Describe("When BYO Host rejoins the capacity pool [Reuse]", func() {
 		hosts, err := spinUpByoHosts(ctx, dockerClient, namespace.Name, 2)
 		Expect(err).NotTo(HaveOccurred())
 		for _, host := range hosts {
-			defer host.Output.Close()
-			defer closeLogFile(host.LogFile, host.LogFilePath)
+			defer host.StopLog()
 			byohostContainerIDs = append(byohostContainerIDs, host.ContainerID)
 		}
 		byoHostName2 := hosts[1].Name
