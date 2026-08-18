@@ -582,24 +582,24 @@ var _ = Describe("Agent", func() {
 			cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 			Expect(err).ShouldNot(HaveOccurred())
 			// create the directory to place the kubeconfig
-			execCommand, err := cli.ContainerExecCreate(ctx, byoHostContainer.ID, dockertypes.ExecConfig{
+			execCommand, err := cli.ContainerExecCreate(ctx, byoHostContainer.ID, container.ExecOptions{
 				AttachStdin:  false,
 				AttachStdout: true,
 				AttachStderr: true,
 				Cmd:          []string{"sh", "-c", "mkdir ${HOME}/.byoh"},
 			})
 			Expect(err).ShouldNot(HaveOccurred())
-			err = cli.ContainerExecStart(ctx, execCommand.ID, dockertypes.ExecStartCheck{})
+			err = cli.ContainerExecStart(ctx, execCommand.ID, container.ExecStartOptions{})
 			Expect(err).ShouldNot(HaveOccurred())
 			// copy the kubeconfig
-			execCommand, err = cli.ContainerExecCreate(ctx, byoHostContainer.ID, dockertypes.ExecConfig{
+			execCommand, err = cli.ContainerExecCreate(ctx, byoHostContainer.ID, container.ExecOptions{
 				AttachStdin:  false,
 				AttachStdout: true,
 				AttachStderr: true,
 				Cmd:          []string{"sh", "-c", "cp /root/config ${HOME}/.byoh/"},
 			})
 			Expect(err).ShouldNot(HaveOccurred())
-			err = cli.ContainerExecStart(ctx, execCommand.ID, dockertypes.ExecStartCheck{})
+			err = cli.ContainerExecStart(ctx, execCommand.ID, container.ExecStartOptions{})
 			Expect(err).ShouldNot(HaveOccurred())
 
 			// start agent
@@ -678,14 +678,14 @@ var _ = Describe("Agent", func() {
 			cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 			Expect(err).ShouldNot(HaveOccurred())
 			time.Sleep(4 * time.Second)
-			response, err := cli.ContainerExecCreate(ctx, byoHostContainer.ID, dockertypes.ExecConfig{
+			response, err := cli.ContainerExecCreate(ctx, byoHostContainer.ID, container.ExecOptions{
 				AttachStdin:  false,
 				AttachStdout: true,
 				AttachStderr: true,
 				Cmd:          []string{"cat", registration.TmpPrivateKey},
 			})
 			Expect(err).ShouldNot(HaveOccurred())
-			result, err := cli.ContainerExecAttach(ctx, response.ID, dockertypes.ExecStartCheck{})
+			result, err := cli.ContainerExecAttach(ctx, response.ID, container.ExecAttachOptions{})
 			Expect(err).ShouldNot(HaveOccurred())
 			defer result.Close()
 			fExec := e2e.WriteDockerLog(result, execLogFile)
@@ -782,14 +782,14 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 			cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 			Expect(err).ShouldNot(HaveOccurred())
 			time.Sleep(2 * time.Second)
-			response, err := cli.ContainerExecCreate(ctx, byoHostContainer.ID, dockertypes.ExecConfig{
+			response, err := cli.ContainerExecCreate(ctx, byoHostContainer.ID, container.ExecOptions{
 				AttachStdin:  false,
 				AttachStdout: true,
 				AttachStderr: true,
 				Cmd:          []string{"cat", "/root/.byoh/config"},
 			})
 			Expect(err).ShouldNot(HaveOccurred())
-			result, err := cli.ContainerExecAttach(ctx, response.ID, dockertypes.ExecStartCheck{})
+			result, err := cli.ContainerExecAttach(ctx, response.ID, container.ExecAttachOptions{})
 			Expect(err).ShouldNot(HaveOccurred())
 			defer result.Close()
 			fExec := e2e.WriteDockerLog(result, execLogFile)
@@ -833,7 +833,7 @@ var _ = Describe("Agent Unit Tests", func() {
 
 			_, err = bootstrapKubeConf.Write(testbootstrapKubeconfigInvalid)
 			Expect(err).NotTo(HaveOccurred())
-			err = handleBootstrapFlow(klogr.New(), "test-host")
+			err = handleBootstrapFlow(klogr.New(), "test-host") //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).Should(HaveOccurred())
 			Expect(err.Error()).Should(ContainSubstring("client config load failed"))
 		})
@@ -860,7 +860,7 @@ users:
 `)
 			_, err = bootstrapKubeConf.Write(testbootstrapKubeconfigValid)
 			Expect(err).NotTo(HaveOccurred())
-			err = handleBootstrapFlow(klogr.New(), "")
+			err = handleBootstrapFlow(klogr.New(), "") //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).Should(HaveOccurred())
 			Expect(err.Error()).Should(ContainSubstring("kubeconfig generation failed: hostname is not valid"))
 		})
@@ -906,7 +906,7 @@ users:
 			var config *restclient.Config
 			config, err = registration.LoadRESTClientConfig(bootstrapKubeConfig)
 			Expect(err).NotTo(HaveOccurred())
-			err = certRotation(klogr.New(), "test-host", config)
+			err = certRotation(klogr.New(), "test-host", config) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
 		})
 		It("should return if certificate needs rotation", func() {
@@ -937,7 +937,7 @@ users:
 			var config *restclient.Config
 			config, err = registration.LoadRESTClientConfig(bootstrapKubeConfig)
 			Expect(err).NotTo(HaveOccurred())
-			err = certRotation(klogr.New(), "test-host", config)
+			err = certRotation(klogr.New(), "test-host", config) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
 		})
 	})

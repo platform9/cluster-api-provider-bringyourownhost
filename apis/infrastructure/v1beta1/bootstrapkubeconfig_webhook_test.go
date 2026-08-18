@@ -41,7 +41,7 @@ var _ = Describe("BootstrapKubeconfig Webhook", func() {
 				Build()
 			err = k8sClient.Create(ctx, bootstrapKubeconfig)
 			Expect(err).To(HaveOccurred())
-			Expect(err).To(MatchError(fmt.Sprintf("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.apiserver: Invalid value: %q: APIServer URL is not valid", testServerInvalidURL)))
+			Expect(err).To(MatchError(ContainSubstring(fmt.Sprintf("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.apiserver: Invalid value: %q: APIServer URL is not valid", testServerInvalidURL))))
 		})
 
 		It("should reject the request if APIServer field is empty", func() {
@@ -50,7 +50,7 @@ var _ = Describe("BootstrapKubeconfig Webhook", func() {
 				Build()
 			err = k8sClient.Create(ctx, bootstrapKubeconfig)
 			Expect(err).To(HaveOccurred())
-			Expect(err).To(MatchError("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.apiserver: Invalid value: \"\": APIServer field cannot be empty"))
+			Expect(err).To(MatchError(ContainSubstring("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.apiserver: Invalid value: \"\": APIServer field cannot be empty")))
 
 		})
 
@@ -60,7 +60,7 @@ var _ = Describe("BootstrapKubeconfig Webhook", func() {
 				Build()
 			err = k8sClient.Create(ctx, bootstrapKubeconfig)
 			Expect(err).To(HaveOccurred())
-			Expect(err).To(MatchError(fmt.Sprintf("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.apiserver: Invalid value: %q: APIServer is not of the format https://hostname:port", testServerWithoutScheme)))
+			Expect(err).To(MatchError(ContainSubstring(fmt.Sprintf("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.apiserver: Invalid value: %q: APIServer is not of the format https://hostname:port", testServerWithoutScheme))))
 		})
 
 		It("should reject the request if APIServer address hostname is not specified", func() {
@@ -69,7 +69,7 @@ var _ = Describe("BootstrapKubeconfig Webhook", func() {
 				Build()
 			err = k8sClient.Create(ctx, bootstrapKubeconfig)
 			Expect(err).To(HaveOccurred())
-			Expect(err).To(MatchError(fmt.Sprintf("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.apiserver: Invalid value: %q: APIServer is not of the format https://hostname:port", testServerWithoutHostname)))
+			Expect(err).To(MatchError(ContainSubstring(fmt.Sprintf("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.apiserver: Invalid value: %q: APIServer is not of the format https://hostname:port", testServerWithoutHostname))))
 		})
 
 		It("should reject the request if APIServer address does not have the port info", func() {
@@ -78,7 +78,7 @@ var _ = Describe("BootstrapKubeconfig Webhook", func() {
 				Build()
 			err = k8sClient.Create(ctx, bootstrapKubeconfig)
 			Expect(err).To(HaveOccurred())
-			Expect(err).To(MatchError(fmt.Sprintf("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.apiserver: Invalid value: %q: APIServer is not of the format https://hostname:port", testServerWithoutPort)))
+			Expect(err).To(MatchError(ContainSubstring(fmt.Sprintf("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.apiserver: Invalid value: %q: APIServer is not of the format https://hostname:port", testServerWithoutPort))))
 		})
 
 		It("should reject the request if CertificateAuthorityData field is empty", func() {
@@ -88,7 +88,7 @@ var _ = Describe("BootstrapKubeconfig Webhook", func() {
 				Build()
 			err = k8sClient.Create(ctx, bootstrapKubeconfig)
 			Expect(err).To(HaveOccurred())
-			Expect(err).To(MatchError("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.caData: Invalid value: \"\": CertificateAuthorityData field cannot be empty"))
+			Expect(err).To(MatchError(ContainSubstring("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.caData: Invalid value: \"\": CertificateAuthorityData field cannot be empty")))
 
 		})
 
@@ -99,7 +99,7 @@ var _ = Describe("BootstrapKubeconfig Webhook", func() {
 				Build()
 			err = k8sClient.Create(ctx, bootstrapKubeconfig)
 			Expect(err).To(HaveOccurred())
-			Expect(err).To(MatchError(fmt.Sprintf("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.caData: Invalid value: %q: cannot base64 decode CertificateAuthorityData", testCADataInvalid)))
+			Expect(err).To(MatchError(ContainSubstring(fmt.Sprintf("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.caData: Invalid value: %q: cannot base64 decode CertificateAuthorityData", testCADataInvalid))))
 
 		})
 
@@ -110,7 +110,7 @@ var _ = Describe("BootstrapKubeconfig Webhook", func() {
 				Build()
 			err = k8sClient.Create(ctx, bootstrapKubeconfig)
 			Expect(err).To(HaveOccurred())
-			Expect(err).To(MatchError(fmt.Sprintf("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.caData: Invalid value: %q: CertificateAuthorityData is not PEM encoded", testPEMDataInvalid)))
+			Expect(err).To(MatchError(ContainSubstring(fmt.Sprintf("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.caData: Invalid value: %q: CertificateAuthorityData is not PEM encoded", testPEMDataInvalid))))
 
 		})
 
@@ -167,7 +167,7 @@ var _ = Describe("BootstrapKubeconfig Webhook", func() {
 			createdBootstrapKubeconfig.Spec.APIServer = testServerEmpty
 			err = ph.Patch(ctx, createdBootstrapKubeconfig)
 			Expect(err).To(HaveOccurred())
-			Expect(err).To(MatchError("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.apiserver: Invalid value: \"\": APIServer field cannot be empty"))
+			Expect(err).To(MatchError(ContainSubstring("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.apiserver: Invalid value: \"\": APIServer field cannot be empty")))
 
 		})
 
@@ -175,14 +175,14 @@ var _ = Describe("BootstrapKubeconfig Webhook", func() {
 			createdBootstrapKubeconfig.Spec.APIServer = testServerWithoutHostname
 			err = ph.Patch(ctx, createdBootstrapKubeconfig)
 			Expect(err).To(HaveOccurred())
-			Expect(err).To(MatchError(fmt.Sprintf("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.apiserver: Invalid value: %q: APIServer is not of the format https://hostname:port", testServerWithoutHostname)))
+			Expect(err).To(MatchError(ContainSubstring(fmt.Sprintf("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.apiserver: Invalid value: %q: APIServer is not of the format https://hostname:port", testServerWithoutHostname))))
 		})
 
 		It("should reject the request if CertificateAuthorityData field is empty", func() {
 			createdBootstrapKubeconfig.Spec.CertificateAuthorityData = testCADataEmpty
 			err = ph.Patch(ctx, createdBootstrapKubeconfig)
 			Expect(err).To(HaveOccurred())
-			Expect(err).To(MatchError("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.caData: Invalid value: \"\": CertificateAuthorityData field cannot be empty"))
+			Expect(err).To(MatchError(ContainSubstring("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.caData: Invalid value: \"\": CertificateAuthorityData field cannot be empty")))
 
 		})
 
@@ -190,7 +190,7 @@ var _ = Describe("BootstrapKubeconfig Webhook", func() {
 			createdBootstrapKubeconfig.Spec.CertificateAuthorityData = testCADataInvalid
 			err = ph.Patch(ctx, createdBootstrapKubeconfig)
 			Expect(err).To(HaveOccurred())
-			Expect(err).To(MatchError(fmt.Sprintf("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.caData: Invalid value: %q: cannot base64 decode CertificateAuthorityData", testCADataInvalid)))
+			Expect(err).To(MatchError(ContainSubstring(fmt.Sprintf("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.caData: Invalid value: %q: cannot base64 decode CertificateAuthorityData", testCADataInvalid))))
 
 		})
 
@@ -198,7 +198,7 @@ var _ = Describe("BootstrapKubeconfig Webhook", func() {
 			createdBootstrapKubeconfig.Spec.CertificateAuthorityData = testPEMDataInvalid
 			err = ph.Patch(ctx, createdBootstrapKubeconfig)
 			Expect(err).To(HaveOccurred())
-			Expect(err).To(MatchError(fmt.Sprintf("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.caData: Invalid value: %q: CertificateAuthorityData is not PEM encoded", testPEMDataInvalid)))
+			Expect(err).To(MatchError(ContainSubstring(fmt.Sprintf("admission webhook \"vbootstrapkubeconfig.kb.io\" denied the request: spec.caData: Invalid value: %q: CertificateAuthorityData is not PEM encoded", testPEMDataInvalid))))
 
 		})
 

@@ -11,13 +11,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/cluster-api/test/framework"
 	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
 	"sigs.k8s.io/cluster-api/util"
@@ -47,12 +46,6 @@ var _ = Describe("Clusterclass upgrade test [K8s-Upgrade-ClusterClass]", func() 
 	})
 
 	It("Should successfully upgrade cluster", func() {
-		// Skip fast: no Kubernetes version in this project's OCI bundle registry
-		// (quay.io/platform9, v1.31.0+ only) can complete a kubeadm upgrade against the vendored
-		// CAPI v1.4.4 — its kubeadm-config decoder predates the kubeadm.k8s.io/v1beta4 API that
-		// v1.31+ writes. Needs CAPI bumped past v1.4.4 before this can run.
-		Skip("blocked on CAPI v1.4.4 -> kubeadm v1beta4 incompatibility")
-
 		clusterName := fmt.Sprintf("%s-%s", specName, util.RandomString(6))
 		var err error
 		dockerClient, err = client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
@@ -112,8 +105,8 @@ var _ = Describe("Clusterclass upgrade test [K8s-Upgrade-ClusterClass]", func() 
 				Namespace:                namespace.Name,
 				ClusterName:              clusterName,
 				KubernetesVersion:        kubernetesVersionUpgradeFrom,
-				ControlPlaneMachineCount: pointer.Int64(1),
-				WorkerMachineCount:       pointer.Int64(1),
+				ControlPlaneMachineCount: ptr.To(int64(1)),
+				WorkerMachineCount:       ptr.To(int64(1)),
 			},
 			WaitForClusterIntervals:      e2eConfig.GetIntervals(specName, "wait-cluster"),
 			WaitForControlPlaneIntervals: e2eConfig.GetIntervals(specName, "wait-control-plane"),
@@ -160,7 +153,7 @@ var _ = Describe("Clusterclass upgrade test [K8s-Upgrade-ClusterClass]", func() 
 				err := dockerClient.ContainerStop(ctx, byohostContainerID, container.StopOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				err = dockerClient.ContainerRemove(ctx, byohostContainerID, types.ContainerRemoveOptions{})
+				err = dockerClient.ContainerRemove(ctx, byohostContainerID, container.RemoveOptions{})
 				Expect(err).NotTo(HaveOccurred())
 			}
 

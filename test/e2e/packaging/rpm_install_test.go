@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -45,11 +44,11 @@ func copyFileToContainer(ctx context.Context, containerID, localPath, containerP
 		return err
 	}
 
-	return dockerClient.CopyToContainer(ctx, containerID, "/", &buf, types.CopyToContainerOptions{})
+	return dockerClient.CopyToContainer(ctx, containerID, "/", &buf, container.CopyToContainerOptions{})
 }
 
 func execInContainer(ctx context.Context, containerID string, cmd, env []string) (output string, exitCode int, err error) {
-	created, err := dockerClient.ContainerExecCreate(ctx, containerID, types.ExecConfig{
+	created, err := dockerClient.ContainerExecCreate(ctx, containerID, container.ExecOptions{
 		Cmd:          cmd,
 		Env:          env,
 		AttachStdout: true,
@@ -63,7 +62,7 @@ func execInContainer(ctx context.Context, containerID string, cmd, env []string)
 	// Tty must match the exec's own creation config: mismatched Tty here can
 	// leave the daemon multiplexing stdout/stderr with an 8-byte frame header
 	// per chunk instead of returning the raw stream, corrupting the output.
-	attached, err := dockerClient.ContainerExecAttach(ctx, created.ID, types.ExecStartCheck{Tty: true})
+	attached, err := dockerClient.ContainerExecAttach(ctx, created.ID, container.ExecAttachOptions{Tty: true})
 	if err != nil {
 		return "", 0, err
 	}
@@ -112,10 +111,10 @@ var _ = Describe("pf9-byohost RPM", func() {
 		Expect(err).NotTo(HaveOccurred())
 		containerID := created.ID
 		defer func() {
-			_ = dockerClient.ContainerRemove(ctx, containerID, types.ContainerRemoveOptions{Force: true})
+			_ = dockerClient.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
 		}()
 
-		Expect(dockerClient.ContainerStart(ctx, containerID, types.ContainerStartOptions{})).To(Succeed())
+		Expect(dockerClient.ContainerStart(ctx, containerID, container.StartOptions{})).To(Succeed())
 
 		By("waiting for systemd to come up")
 		Eventually(func() (string, error) {
