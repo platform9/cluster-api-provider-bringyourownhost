@@ -45,6 +45,21 @@ jobs:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: bash .ci/wait-for-job.sh build-controller-manager.yml build-controller-manager "${{ github.event.pull_request.head.sha || github.sha }}"
 
+    # byohctl's real onboarding flow downloads a published agent .deb bundle from quay.io, tagged
+    # to byohctl's own git-describe version -- a tag that only exists there for commits already on
+    # main/ci-* (see .github/workflows/build-byohctl.yml). This branch's own bundle, already built by
+    # build-agent-bundle.yml for the same commit, lets the byohctl e2e spec
+    # (test/e2e/e2e_byohctl_test.go) find it at build/pf9-byohost/debsrc/
+    # and serve it from a throwaway local registry itself (ensureLocalAgentBundleRegistry in
+    # test/e2e/e2e_agent_bundle_registry.go), rather than skip or depend on a tag that doesn't
+    # exist yet for this PR's own code.
+    - name: Wait for agent bundle build
+      if: ${{ github.event_name != 'workflow_dispatch' }}
+      id: wait-bundle
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: bash .ci/wait-for-job.sh build-agent-bundle.yml build-agent-bundle "${{ github.event.pull_request.head.sha || github.sha }}"
+
     - name: Download controller manager image artifact
       if: ${{ github.event_name != 'workflow_dispatch' }}
       uses: actions/download-artifact@v4
@@ -53,6 +68,15 @@ jobs:
         path: .
         github-token: ${{ secrets.GITHUB_TOKEN }}
         run-id: ${{ steps.wait.outputs.run_id }}
+
+    - name: Download agent bundle artifact
+      if: ${{ github.event_name != 'workflow_dispatch' }}
+      uses: actions/download-artifact@v4
+      with:
+        name: agent-bundle-deb
+        path: build/pf9-byohost/debsrc
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        run-id: ${{ steps.wait-bundle.outputs.run_id }}
 
     - name: Load controller manager image
       if: ${{ github.event_name != 'workflow_dispatch' }}
@@ -74,20 +98,26 @@ jobs:
     - name: Set netfilter conntrack max
       run: sudo sysctl -w net.netfilter.nf_conntrack_max=131072
 
-    # byohctl's real onboarding flow downloads a published agent .deb bundle from quay.io, tagged
-    # to byohctl's own git-describe version -- a tag that only exists there for commits already on
-    # main/ci-* (see .github/workflows/build-byohctl.yml). Building this branch's own bundle here
-    # lets the byohctl e2e spec (test/e2e/e2e_byohctl_test.go) find it at build/pf9-byohost/debsrc/
-    # and serve it from a throwaway local registry itself (ensureLocalAgentBundleRegistry in
-    # test/e2e/e2e_agent_bundle_registry.go), rather than skip or depend on a tag that doesn't
-    # exist yet for this PR's own code.
+    # byohctl's real onboarding flow downloads a published agent .deb bundle from quay.io, tagged to
+    # byohctl's own git-describe version -- a tag that only exists there for commits already on
+    # main/ci-* (see .github/workflows/build-byohctl.yml). The byohctl e2e spec
+    # (test/e2e/e2e_byohctl_test.go) works around that by serving this branch's own bundle from a
+    # throwaway local registry (ensureLocalAgentBundleRegistry in test/e2e/e2e_agent_bundle_registry.go),
+    # picking it up from build/pf9-byohost/debsrc/.
+    #
+    # Normally that directory comes from the agent bundle artifact downloaded above. But
+    # build-agent-bundle.yml has no workflow_dispatch trigger, so a manually dispatched e2e run has
+    # no artifact for its commit and must build the bundle itself -- the spec fails (not skips) when
+    # CI is set, so a missing bundle can't silently drop coverage.
     - name: Install fpm build dependencies
+      if: ${{ github.event_name == 'workflow_dispatch' }}
       run: |
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends ruby ruby-dev rubygems build-essential
         sudo gem install --no-document fpm
 
     - name: Build agent .deb bundle from this branch
+      if: ${{ github.event_name == 'workflow_dispatch' }}
       run: make build-host-agent-deb
 
     - name: Run e2e tests
