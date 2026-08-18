@@ -3,7 +3,11 @@
 # Exit immediately if a command fails
 set -e
 
-LOG_FILE="/var/log/pf9/byoh-agent-uninstall.log"
+LOG_FILE="/var/log/pf9/byoh/byoh-agent-uninstall.log"
+
+# Don't assume after-install.sh already created this - e.g. a partially-failed install.
+# Explicit mode, not the ambient umask: a shared log dir shouldn't shift with the caller's umask.
+mkdir -p -m 0755 /var/log/pf9/byoh
 
 echo "Starting uninstallation of pf9-byoh-hostagent..." | tee -a "$LOG_FILE"
 
@@ -55,11 +59,11 @@ else
     echo "Log files already removed or not found" | tee -a "$LOG_FILE"
 fi
 
-if [ -f /etc/pf9-byohost* ]; then
+if [ -e /etc/pf9-byohost-agent.service.d ]; then
 	echo "Removing Pf9 conf files" | tee -a "$LOG_FILE"
-	rm -f /etc/pf9-byohost*
+	rm -rf /etc/pf9-byohost-agent.service.d
 	echo "conf files Removed Successfully" | tee -a "$LOG_FILE"
-else 
+else
 	echo "Conf files already removed or not found " | tee -a "$LOG_FILE"
 fi
 

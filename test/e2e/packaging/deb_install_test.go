@@ -105,14 +105,22 @@ var _ = Describe("pf9-byohost deb", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(exitCode).To(Equal(0), "dpkg -r failed:\n%s", uninstallOutput)
 
-		By("asserting the binary and unit file are gone")
+		By("asserting the binary, unit file, and generated conf directory are gone")
 		for _, path := range []string{
 			"/binary/pf9-byoh-hostagent-linux-amd64",
 			"/etc/systemd/system/pf9-byohost-agent.service",
+			"/etc/pf9-byohost-agent.service.d",
 		} {
-			_, exitCode, err := execInContainer(ctx, containerID, []string{"test", "-e", path}, nil)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(exitCode).NotTo(Equal(0), "%s should have been removed by dpkg -r", path)
+			_, pathExitCode, pathErr := execInContainer(ctx, containerID, []string{"test", "-e", path}, nil)
+			Expect(pathErr).NotTo(HaveOccurred())
+			Expect(pathExitCode).NotTo(Equal(0), "%s should have been removed by dpkg -r", path)
 		}
+
+		By("asserting before-remove.sh logged to the same directory every other pf9 log lives in")
+		uninstallLogOutput, exitCode, err := execInContainer(ctx, containerID,
+			[]string{"cat", "/var/log/pf9/byoh/byoh-agent-uninstall.log"}, nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(exitCode).To(Equal(0))
+		Expect(uninstallLogOutput).To(ContainSubstring("Uninstallation of pf9-byoh-hostagent completed successfully"))
 	})
 })
