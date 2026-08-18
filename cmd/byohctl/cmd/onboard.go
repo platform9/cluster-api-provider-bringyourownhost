@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -93,23 +93,113 @@ func AddOnboardFlags(cmd *cobra.Command,
 	_ = cmd.Flags().MarkHidden("namespace")
 }
 
-// goos and osReadFile are variables so tests can replace them with mocks,
-// same pattern as execCommand in cmd/byohctl/service/agent.go.
-var (
-	goos       = runtime.GOOS
-	osReadFile = os.ReadFile
-)
+// osReadFile is a variable so tests can replace it with a mock, same pattern as execCommand in
+// cmd/byohctl/service/agent.go.
+var osReadFile = os.ReadFile
 
-// Check if running on Ubuntu
-func isUbuntuSystem() bool {
-	if goos != "linux" {
-		return false
-	}
-	data, err := osReadFile("/etc/os-release")
+// supportedUbuntuVersions lists the Ubuntu VERSION_ID values a host may run. It is dictated by
+// which byoh-bundles actually get published: keep it in sync with the UBUNTU_VERSION case arms in
+// .ci/build-push-bundle.sh, which TestSupportedUbuntuVersionsMatchBundleScript enforces.
+// Onboarding a host outside this set succeeds but leaves it unable to install Kubernetes, so the
+// failure only surfaces much later, during cluster provisioning.
+var supportedUbuntuVersions = []string{"20.04", "22.04", "24.04"}
+
+// osReleasePaths are searched in order. /usr/lib/os-release is the fallback for stateless
+// systems, matching agent/registration/host_registrar.go's getOperatingSystem.
+var osReleasePaths = []string{"/etc/os-release", "/usr/lib/os-release"}
+
+// UnsupportedOSError reports that the host's OS was identified but is not one the agent supports.
+// Typed so callers and tests can match it with errors.As instead of matching on message text.
+type UnsupportedOSError struct {
+	// Detected is how the host describes itself, e.g. "Ubuntu 18.04.6 LTS".
+	Detected string
+}
+
+func (e *UnsupportedOSError) Error() string {
+	return fmt.Sprintf("%s is not supported for onboarding; supported versions are Ubuntu %s",
+		e.Detected, strings.Join(supportedUbuntuVersions, ", "))
+}
+
+// OSDetectionError reports that the host's OS could not be identified at all: os-release is
+// missing, unreadable, or lacks the fields the check needs. Distinct from UnsupportedOSError
+// because the host may well be supportable -- we just can't tell.
+type OSDetectionError struct {
+	// Reason names the part of the identification that failed.
+	Reason string
+}
+
+func (e *OSDetectionError) Error() string {
+	return fmt.Sprintf("could not identify this host's OS: %s", e.Reason)
+}
+
+// checkSupportedPlatform reports why this host cannot run the BYOH agent, or nil if it can.
+// Errors are *UnsupportedOSError or *OSDetectionError.
+//
+// There is deliberately no architecture check: byohctl is built for both amd64 and arm64, and
+// gating on arch would block running the tooling on an arm64 machine for no gain here.
+func checkSupportedPlatform() error {
+	data, err := readOSRelease()
 	if err != nil {
-		return false
+		return err
 	}
-	return strings.Contains(string(data), "Ubuntu")
+	osRelease := parseOSRelease(data)
+
+	// Report the distro the way the host describes itself; ID alone ("pop") is unhelpful.
+	described := osRelease["PRETTY_NAME"]
+	if described == "" {
+		described = osRelease["ID"]
+	}
+	if described == "" {
+		described = "unknown"
+	}
+
+	// ID, not ID_LIKE: Ubuntu derivatives are not what the bundles are built and tested against.
+	if osRelease["ID"] != "ubuntu" {
+		return &UnsupportedOSError{Detected: described}
+	}
+
+	version := osRelease["VERSION_ID"]
+	if version == "" {
+		return &OSDetectionError{Reason: "no VERSION_ID in " + strings.Join(osReleasePaths, " or ")}
+	}
+	// Ubuntu point releases keep the series in VERSION_ID (22.04.5 LTS reports "22.04"), so an
+	// exact match is right here.
+	if !slices.Contains(supportedUbuntuVersions, version) {
+		return &UnsupportedOSError{Detected: described}
+	}
+
+	return nil
+}
+
+// readOSRelease returns the contents of the first readable path in osReleasePaths. On a non-Linux
+// host (byohctl also builds for macOS) no such file exists, so this is what rejects it.
+func readOSRelease() ([]byte, error) {
+	for _, path := range osReleasePaths {
+		data, err := osReadFile(path)
+		if err == nil {
+			return data, nil
+		}
+	}
+	return nil, &OSDetectionError{Reason: "no readable " + strings.Join(osReleasePaths, " or ")}
+}
+
+// parseOSRelease turns os-release contents into its KEY=VALUE pairs, unquoting values.
+// Split out from checkSupportedPlatform so the parsing is unit-testable on its own, same as
+// parseNTPSynchronized below.
+func parseOSRelease(data []byte) map[string]string {
+	values := make(map[string]string)
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+		values[strings.TrimSpace(key)] = strings.Trim(strings.TrimSpace(value), `"'`)
+	}
+	return values
 }
 
 // runCommandWithStdout is a variable so tests can replace it with a mock,
@@ -241,9 +331,10 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	utils.LogDebug("Final onboarding values: url=%s, username=%s, domain=%s, tenant=%s, region=%s, verbosity=%s",
 		fqdn, username, domain, tenant, regionName, verbosity)
 
-	// Check if running on Ubuntu system
-	if !isUbuntuSystem() {
-		fmt.Println("Error: This command requires an Ubuntu system")
+	// Gate on OS and architecture before touching the host or contacting Platform9, so an
+	// unsupported host exits having changed nothing.
+	if err := checkSupportedPlatform(); err != nil {
+		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
 
