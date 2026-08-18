@@ -8,9 +8,7 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"os"
 
-	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -24,15 +22,15 @@ import (
 var _ = Describe("When testing MachineDeployment scale out/in [MD-Scale]", func() {
 
 	var (
-		ctx                    context.Context
-		specName               = "md-scale"
-		namespace              *corev1.Namespace
-		cancelWatches          context.CancelFunc
-		clusterResources       *clusterctl.ApplyClusterTemplateAndWaitResult
-		dockerClient           *client.Client
-		byoHostCapacityPool    = 6
-		allbyohostContainerIDs []string
-		allAgentLogFiles       []string
+		ctx                 context.Context
+		specName            = "md-scale"
+		namespace           *corev1.Namespace
+		cancelWatches       context.CancelFunc
+		clusterResources    *clusterctl.ApplyClusterTemplateAndWaitResult
+		dockerClient        *client.Client
+		byoHostCapacityPool = 6
+		hosts               []byoHostHandle
+		allAgentLogFiles    []string
 	)
 
 	BeforeEach(func() {
@@ -47,11 +45,10 @@ var _ = Describe("When testing MachineDeployment scale out/in [MD-Scale]", func(
 		Expect(err).NotTo(HaveOccurred())
 
 		By("Creating byohost capacity pool containing 5 hosts")
-		hosts, err := spinUpByoHosts(ctx, dockerClient, namespace.Name, byoHostCapacityPool)
+		hosts, err = spinUpByoHosts(ctx, dockerClient, namespace.Name, byoHostCapacityPool)
 		Expect(err).NotTo(HaveOccurred())
 		for _, host := range hosts {
 			defer host.StopLog()
-			allbyohostContainerIDs = append(allbyohostContainerIDs, host.ContainerID)
 			allAgentLogFiles = append(allAgentLogFiles, host.LogFilePath)
 		}
 		// TODO: Write agent logs to files for better debugging
@@ -97,30 +94,6 @@ var _ = Describe("When testing MachineDeployment scale out/in [MD-Scale]", func(
 		// Dumps all the resources in the spec namespace, then cleanups the cluster object and the spec namespace itself.
 		dumpSpecResourcesAndCleanup(ctx, specName, bootstrapClusterProxy, artifactFolder, namespace, cancelWatches, clusterResources.Cluster, e2eConfig.GetIntervals, skipCleanup)
 
-		if dockerClient != nil {
-			for _, byohostContainerID := range allbyohostContainerIDs {
-				err := dockerClient.ContainerStop(ctx, byohostContainerID, container.StopOptions{})
-				Expect(err).NotTo(HaveOccurred())
-
-				err = dockerClient.ContainerRemove(ctx, byohostContainerID, container.RemoveOptions{})
-				Expect(err).NotTo(HaveOccurred())
-			}
-
-		}
-
-		for _, agentLogFile := range allAgentLogFiles {
-			err := os.Remove(agentLogFile)
-			if err != nil {
-				Showf("error removing file %s: %v", agentLogFile, err)
-			}
-		}
-		err := os.Remove(ReadByohControllerManagerLogShellFile)
-		if err != nil {
-			Showf("error removing file %s: %v", ReadByohControllerManagerLogShellFile, err)
-		}
-		err = os.Remove(ReadAllPodsShellFile)
-		if err != nil {
-			Showf("error removing file %s: %v", ReadAllPodsShellFile, err)
-		}
+		teardownByoHosts(ctx, dockerClient, hosts)
 	})
 })

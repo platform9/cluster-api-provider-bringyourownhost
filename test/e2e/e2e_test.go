@@ -8,9 +8,7 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"os"
 
-	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -25,19 +23,19 @@ import (
 var _ = Describe("When BYOH joins existing cluster [PR-Blocking]", func() {
 
 	var (
-		ctx                 context.Context
-		specName            = "quick-start"
-		namespace           *corev1.Namespace
-		clusterName         string
-		cancelWatches       context.CancelFunc
-		clusterResources    *clusterctl.ApplyClusterTemplateAndWaitResult
-		dockerClient        *client.Client
-		err                 error
-		byohostContainerIDs []string
-		agentLogFile1       string
-		agentLogFile2       string
-		byoHostName1        string
-		byoHostName2        string
+		ctx              context.Context
+		specName         = "quick-start"
+		namespace        *corev1.Namespace
+		clusterName      string
+		cancelWatches    context.CancelFunc
+		clusterResources *clusterctl.ApplyClusterTemplateAndWaitResult
+		dockerClient     *client.Client
+		err              error
+		hosts            []byoHostHandle
+		agentLogFile1    string
+		agentLogFile2    string
+		byoHostName1     string
+		byoHostName2     string
 	)
 
 	BeforeEach(func() {
@@ -50,11 +48,10 @@ var _ = Describe("When BYOH joins existing cluster [PR-Blocking]", func() {
 		dockerClient, err = client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 		Expect(err).NotTo(HaveOccurred())
 
-		hosts, err := spinUpByoHosts(ctx, dockerClient, namespace.Name, 2)
+		hosts, err = spinUpByoHosts(ctx, dockerClient, namespace.Name, 2)
 		Expect(err).NotTo(HaveOccurred())
 		for _, host := range hosts {
 			defer host.StopLog()
-			byohostContainerIDs = append(byohostContainerIDs, host.ContainerID)
 		}
 		byoHostName1, agentLogFile1 = hosts[0].Name, hosts[0].LogFilePath
 		byoHostName2, agentLogFile2 = hosts[1].Name, hosts[1].LogFilePath
@@ -82,34 +79,6 @@ var _ = Describe("When BYOH joins existing cluster [PR-Blocking]", func() {
 		// Dumps all the resources in the spec namespace, then cleanups the cluster object and the spec namespace itself.
 		dumpSpecResourcesAndCleanup(ctx, specName, bootstrapClusterProxy, artifactFolder, namespace, cancelWatches, clusterResources.Cluster, e2eConfig.GetIntervals, skipCleanup)
 
-		if dockerClient != nil && len(byohostContainerIDs) != 0 {
-			for _, byohostContainerID := range byohostContainerIDs {
-				err := dockerClient.ContainerStop(ctx, byohostContainerID, container.StopOptions{})
-				Expect(err).NotTo(HaveOccurred())
-
-				err = dockerClient.ContainerRemove(ctx, byohostContainerID, container.RemoveOptions{})
-				Expect(err).NotTo(HaveOccurred())
-			}
-		}
-
-		err := os.Remove(agentLogFile1)
-		if err != nil {
-			Showf("error removing file %s: %v", agentLogFile1, err)
-		}
-
-		err = os.Remove(agentLogFile2)
-		if err != nil {
-			Showf("error removing file %s: %v", agentLogFile2, err)
-		}
-
-		err = os.Remove(ReadByohControllerManagerLogShellFile)
-		if err != nil {
-			Showf("error removing file %s: %v", ReadByohControllerManagerLogShellFile, err)
-		}
-
-		err = os.Remove(ReadAllPodsShellFile)
-		if err != nil {
-			Showf("error removing file %s: %v", ReadAllPodsShellFile, err)
-		}
+		teardownByoHosts(ctx, dockerClient, hosts)
 	})
 })

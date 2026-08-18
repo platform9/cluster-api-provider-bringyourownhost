@@ -8,9 +8,7 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"os"
 
-	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -30,7 +28,7 @@ var _ = Describe("Cluster upgrade test [K8s-Upgrade-Cluster]", func() {
 		clusterResources             *clusterctl.ApplyClusterTemplateAndWaitResult
 		byoHostCapacityPool          = 4
 		dockerClient                 *client.Client
-		allbyohostContainerIDs       []string
+		hosts                        []byoHostHandle
 		allAgentLogFiles             []string
 		kubernetesVersionUpgradeFrom = "v1.31.0"
 		kubernetesVersionUpgradeTo   = "v1.31.2"
@@ -49,11 +47,10 @@ var _ = Describe("Cluster upgrade test [K8s-Upgrade-Cluster]", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		By("Creating byohost capacity pool containing 4 docker hosts")
-		hosts, err := spinUpByoHosts(ctx, dockerClient, namespace.Name, byoHostCapacityPool)
+		hosts, err = spinUpByoHosts(ctx, dockerClient, namespace.Name, byoHostCapacityPool)
 		Expect(err).NotTo(HaveOccurred())
 		for _, host := range hosts {
 			defer host.StopLog()
-			allbyohostContainerIDs = append(allbyohostContainerIDs, host.ContainerID)
 			allAgentLogFiles = append(allAgentLogFiles, host.LogFilePath)
 		}
 
@@ -105,30 +102,6 @@ var _ = Describe("Cluster upgrade test [K8s-Upgrade-Cluster]", func() {
 		// Dumps all the resources in the spec namespace, then cleanups the cluster object and the spec namespace itself.
 		dumpSpecResourcesAndCleanup(ctx, specName, bootstrapClusterProxy, artifactFolder, namespace, cancelWatches, clusterResources.Cluster, e2eConfig.GetIntervals, skipCleanup)
 
-		if dockerClient != nil {
-			for _, byohostContainerID := range allbyohostContainerIDs {
-				err := dockerClient.ContainerStop(ctx, byohostContainerID, container.StopOptions{})
-				Expect(err).NotTo(HaveOccurred())
-
-				err = dockerClient.ContainerRemove(ctx, byohostContainerID, container.RemoveOptions{})
-				Expect(err).NotTo(HaveOccurred())
-			}
-
-		}
-
-		for _, agentLogFile := range allAgentLogFiles {
-			err := os.Remove(agentLogFile)
-			if err != nil {
-				Showf("error removing file %s: %v", agentLogFile, err)
-			}
-		}
-		err := os.Remove(ReadByohControllerManagerLogShellFile)
-		if err != nil {
-			Showf("error removing file %s: %v", ReadByohControllerManagerLogShellFile, err)
-		}
-		err = os.Remove(ReadAllPodsShellFile)
-		if err != nil {
-			Showf("error removing file %s: %v", ReadAllPodsShellFile, err)
-		}
+		teardownByoHosts(ctx, dockerClient, hosts)
 	})
 })
