@@ -359,6 +359,26 @@ func setupSpecNamespace(ctx context.Context, specName string, clusterProxy frame
 	return namespace, cancelWatches
 }
 
+// commonSpecSetup runs the BeforeEach argument validation and namespace setup shared by every
+// spec in this package -- pulled out so each spec's BeforeEach is a one-line call.
+func commonSpecSetup(specName string) (ctx context.Context, namespace *corev1.Namespace, cancelWatches context.CancelFunc, clusterResources *clusterctl.ApplyClusterTemplateAndWaitResult) {
+	ctx = context.TODO()
+	Expect(ctx).NotTo(BeNil(), "ctx is required for %s spec", specName)
+
+	Expect(e2eConfig).NotTo(BeNil(), "Invalid argument. e2eConfig can't be nil when calling %s spec", specName)
+	Expect(clusterctlConfigPath).To(BeAnExistingFile(), "Invalid argument. clusterctlConfigPath must be an existing file when calling %s spec", specName)
+	Expect(bootstrapClusterProxy).NotTo(BeNil(), "Invalid argument. bootstrapClusterProxy can't be nil when calling %s spec", specName)
+	Expect(os.MkdirAll(artifactFolder, 0755)).To(Succeed(), "Invalid argument. artifactFolder can't be created for %s spec", specName)
+
+	Expect(e2eConfig.Variables).To(HaveKey(KubernetesVersion))
+
+	// set up a Namespace where to host objects for this spec and create a watcher for the namespace events.
+	namespace, cancelWatches = setupSpecNamespace(ctx, specName, bootstrapClusterProxy, artifactFolder)
+	clusterResources = new(clusterctl.ApplyClusterTemplateAndWaitResult)
+
+	return ctx, namespace, cancelWatches, clusterResources
+}
+
 func dumpSpecResourcesAndCleanup(ctx context.Context, specName string, clusterProxy framework.ClusterProxy, artifactFolder string, namespace *corev1.Namespace, cancelWatches context.CancelFunc, cluster *clusterv1.Cluster, intervalsGetter func(spec, key string) []interface{}, skipCleanup bool) {
 	// cluster is nil when the spec failed before ApplyClusterTemplateAndWait ever ran (e.g. an
 	// early Fail() call) -- skip the cluster-specific log collection below rather than crash on

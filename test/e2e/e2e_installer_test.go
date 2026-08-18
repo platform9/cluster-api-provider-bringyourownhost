@@ -44,20 +44,7 @@ var _ = Describe("When BYOH joins existing cluster [Installer]", func() {
 	)
 
 	BeforeEach(func() {
-
-		ctx = context.TODO()
-		Expect(ctx).NotTo(BeNil(), "ctx is required for %s spec", specName)
-
-		Expect(e2eConfig).NotTo(BeNil(), "Invalid argument. e2eConfig can't be nil when calling %s spec", specName)
-		Expect(clusterctlConfigPath).To(BeAnExistingFile(), "Invalid argument. clusterctlConfigPath must be an existing file when calling %s spec", specName)
-		Expect(bootstrapClusterProxy).NotTo(BeNil(), "Invalid argument. bootstrapClusterProxy can't be nil when calling %s spec", specName)
-		Expect(os.MkdirAll(artifactFolder, 0755)).To(Succeed(), "Invalid argument. artifactFolder can't be created for %s spec", specName)
-
-		Expect(e2eConfig.Variables).To(HaveKey(KubernetesVersion))
-
-		// set up a Namespace where to host objects for this spec and create a watcher for the namespace events.
-		namespace, cancelWatches = setupSpecNamespace(ctx, specName, bootstrapClusterProxy, artifactFolder)
-		clusterResources = new(clusterctl.ApplyClusterTemplateAndWaitResult)
+		ctx, namespace, cancelWatches, clusterResources = commonSpecSetup(specName)
 	})
 
 	It("Should create a workload cluster with single BYOH host", func() {
