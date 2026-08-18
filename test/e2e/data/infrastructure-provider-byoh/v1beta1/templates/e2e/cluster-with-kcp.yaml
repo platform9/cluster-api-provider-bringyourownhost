@@ -203,5 +203,5 @@ metadata:
 spec:
   template:
     spec:
-      bundleRepo: quay.io/platform9
+      bundleRepo: ${BUNDLE_REPO}
       bundleType: k8s

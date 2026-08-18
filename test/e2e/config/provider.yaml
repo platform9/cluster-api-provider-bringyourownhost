@@ -104,6 +104,10 @@ variables:
   # NOTE: INIT_WITH_BINARY is used only by the clusterctl upgrade test to initialize the management cluster to be upgraded
   INIT_WITH_BINARY: "https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.10.10/clusterctl-{OS}-{ARCH}"
   BUNDLE_LOOKUP_TAG: "v1.31.0"
+  # Default k8s-installer-bundle registry for the e2e cluster templates' ${BUNDLE_REPO}. Overridden
+  # per-spec via ConfigClusterInput.ClusterctlVariables when ensureLocalK8sBundleRegistry (see
+  # e2e_k8s_bundle_registry.go) builds and serves a bundle locally instead.
+  BUNDLE_REPO: "quay.io/platform9"
   CONTROL_PLANE_ENDPOINT_IP: ""
   MANUAL_CSR_APPROVAL: "disable"
   BYOH_SKIP_KERNEL_MODULE_CLEANUP: "enable"

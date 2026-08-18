@@ -233,7 +233,7 @@ metadata:
 spec:
   template:
     spec:
-      bundleRepo: quay.io/platform9
+      bundleRepo: ${BUNDLE_REPO}
       bundleType: k8s
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
@@ -295,7 +295,7 @@ metadata:
 spec:
   template:
     spec:
-      bundleRepo: quay.io/platform9
+      bundleRepo: ${BUNDLE_REPO}
       bundleType: k8s
 ---
 apiVersion: v1
