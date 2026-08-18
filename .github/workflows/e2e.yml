@@ -76,18 +76,39 @@ jobs:
 
     # byohctl's real onboarding flow downloads a published agent .deb bundle from quay.io, tagged
     # to byohctl's own git-describe version -- a tag that only exists there for commits already on
-    # main/ci-* (see .github/workflows/build-byohctl.yml). Building this branch's own bundle here
-    # lets the byohctl e2e spec (test/e2e/e2e_byohctl_test.go) find it at build/pf9-byohost/debsrc/
+    # main/ci-* (see .github/workflows/build-byohctl.yml). This branch's own bundle, already built by
+    # build-agent-bundle.yml for the same commit, lets the byohctl e2e spec
+    # (test/e2e/e2e_byohctl_test.go) find it at build/pf9-byohost/debsrc/
     # and serve it from a throwaway local registry itself (ensureLocalAgentBundleRegistry in
     # test/e2e/e2e_agent_bundle_registry.go), rather than skip or depend on a tag that doesn't
     # exist yet for this PR's own code.
+    - name: Wait for agent bundle build
+      if: ${{ github.event_name != 'workflow_dispatch' }}
+      id: wait-bundle
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: bash .ci/wait-for-job.sh build-agent-bundle.yml build-agent-bundle "${{ github.event.pull_request.head.sha || github.sha }}"
+
+    - name: Download agent bundle artifact
+      if: ${{ github.event_name != 'workflow_dispatch' }}
+      uses: actions/download-artifact@v4
+      with:
+        name: agent-bundle-deb
+        path: build/pf9-byohost/debsrc
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        run-id: ${{ steps.wait-bundle.outputs.run_id }}
+
+    # build-agent-bundle.yml has no workflow_dispatch trigger, so a manually dispatched e2e run has
+    # no artifact to download and has to build the bundle itself.
     - name: Install fpm build dependencies
+      if: ${{ github.event_name == 'workflow_dispatch' }}
       run: |
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends ruby ruby-dev rubygems build-essential
         sudo gem install --no-document fpm
 
     - name: Build agent .deb bundle from this branch
+      if: ${{ github.event_name == 'workflow_dispatch' }}
       run: make build-host-agent-deb
 
     - name: Run e2e tests
