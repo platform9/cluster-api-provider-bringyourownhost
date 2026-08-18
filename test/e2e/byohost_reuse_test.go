@@ -78,10 +78,9 @@ var _ = Describe("When BYO Host rejoins the capacity pool [Reuse]", func() {
 		Expect(err).NotTo(HaveOccurred())
 		output, byohostContainerID, err := runner.ExecByoDockerHost(byohost)
 		Expect(err).NotTo(HaveOccurred())
-		defer output.Close()
 		byohostContainerIDs = append(byohostContainerIDs, byohostContainerID)
-		f := WriteDockerLog(output, agentLogFile1)
-		defer closeLogFile(f, agentLogFile1)
+		stopLog1 := StreamDockerLog(output, agentLogFile1)
+		defer stopLog1()
 
 		runner.ByoHostName = byoHostName2
 		runner.BootstrapKubeconfigData = generateBootstrapKubeconfig(runner.Context, bootstrapClusterProxy, clusterConName)
@@ -89,12 +88,11 @@ var _ = Describe("When BYO Host rejoins the capacity pool [Reuse]", func() {
 		Expect(err).NotTo(HaveOccurred())
 		output, byohostContainerID, err = runner.ExecByoDockerHost(byohost)
 		Expect(err).NotTo(HaveOccurred())
-		defer output.Close()
 		byohostContainerIDs = append(byohostContainerIDs, byohostContainerID)
 
 		// read the log of host agent container in backend, and write it
-		f = WriteDockerLog(output, agentLogFile2)
-		defer closeLogFile(f, agentLogFile2)
+		stopLog2 := StreamDockerLog(output, agentLogFile2)
+		defer stopLog2()
 
 		By("Creating a cluster")
 

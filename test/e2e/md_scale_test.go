@@ -78,13 +78,8 @@ var _ = Describe("When testing MachineDeployment scale out/in [MD-Scale]", func(
 			// read the log of host agent container in backend, and write it
 			agentLogFile := fmt.Sprintf("/tmp/host-agent-%s.log", byoHostName)
 
-			f := WriteDockerLog(output, agentLogFile)
-			defer func() {
-				deferredErr := f.Close()
-				if deferredErr != nil {
-					Showf("error closing file %s:, %v", agentLogFile, deferredErr)
-				}
-			}()
+			stopLog := StreamDockerLog(output, agentLogFile)
+			defer stopLog()
 			allAgentLogFiles = append(allAgentLogFiles, agentLogFile)
 		}
 		// TODO: Write agent logs to files for better debugging
