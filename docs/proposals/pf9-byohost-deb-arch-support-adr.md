@@ -94,38 +94,3 @@ unblock.
 | **Keep `--architecture` a literal (`amd64`) instead of deriving it from the build host** | This was the original plan — rejected once `make test-packaging-linux-vm` on an arm64 Mac showed the literal doesn't hold for the one host class this tooling exists to support. A derived value costs nothing on amd64 (still defaults to `amd64` there) and fixes the arm64 case for free. |
 | **Use QEMU/binfmt emulation in the test container instead of building packages for the host's real architecture** | Would let the amd64-only pipeline stay as-is and paper over the mismatch at test time instead of fixing it. Rejected because the underlying bug (package metadata not matching package contents) is real independent of how it's tested, and because emulation for the *entire* test container is a heavier, slower dependency than making the Makefile build for the arch it's already running on. |
 | **Keep the `-linux-$(GOARCH)` suffix on the installed binary path, and thread `$(PACKAGE_GOARCH)` through the hook scripts and RPM spec to reference it dynamically** | Would work, but means every one of `after-install.sh`, `before-remove.sh`, the RPM spec, and the systemd unit needs its own way to learn the current package's architecture at install/uninstall time (env var, generated file, `uname`-sniffing) just to reconstruct a filename the package's own `Architecture` field already makes redundant. Dropping the suffix removes the need for that machinery entirely — one arch-neutral literal path, everywhere. |
-
----
-
-## 5. Testing plan
-
-**Status: done.** Extended the existing `test/e2e/packaging/deb_install_test.go` and
-`rpm_install_test.go` (from the RPM ADR's §5) rather than add a new suite — new assertions on an
-existing flow, not a new flow:
-
-- **Architecture** (deb): after building, `dpkg-deb -f <deb> Architecture` must equal
-  `runtime.GOARCH` of the test process itself — the build and the test both run natively on
-  whatever host/container invoked `go test`, so this holds on both amd64 and arm64 without the
-  test needing to know which one it's on.
-- **Binary path rename**: both suites' existing file-ownership assertions
-  (`/binary/pf9-byoh-hostagent-linux-amd64`) updated to the new arch-neutral
-  `/binary/pf9-byoh-hostagent` — this alone would have caught the old hardcoded amd64 build as a
-  regression against the new path if it hadn't been an intentional rename.
-
-Validated end to end with `make test-packaging-linux-vm` on an Apple Silicon Mac: both the RPM and
-deb specs pass, each producing and installing an aarch64/arm64 package with a working
-`EnvironmentFile` and enabled service — the actual goal this cleanup exists to unblock.
-
----
-
-## 6. Evidence index
-
-| Claim | Location |
-|---|---|
-| `fpm` invocation originally tagged the package `Architecture: all` | `Makefile` (`build-host-agent-deb`'s `fpm` invocation, pre-fix) |
-| `make test-packaging-linux-vm`'s deb spec failed with `package architecture (amd64) does not match system (arm64)` after fixing `Architecture: all` alone, on an Apple Silicon Mac | first `make test-packaging-linux-vm` run this ADR's implementation was tested against |
-| `byoh/node:e2e` test container is built natively for whatever host/Podman-machine arch is running the test | `docker inspect byoh/node:e2e` → `arm64` on the Apple Silicon Mac this was tested on |
-| RPM suite "passed" on the same run only because `rpmbuild` infers `Architecture` from the build host while the staged binary was still hardcoded amd64 — a hidden version of the same bug | pre-fix `$(COMMON_SRC_ROOT)`, shared by both `build-host-agent-rpm` and `build-host-agent-deb` |
-| `PACKAGE_GOARCH` derivation and `$(COMMON_SRC_ROOT)`'s independent binary build | `Makefile` |
-| Binary staged at arch-neutral `/binary/pf9-byoh-hostagent`, referenced identically by both hook scripts, the RPM spec, and the systemd unit | `scripts/pf9-byohost-agent-after-install.sh`, `scripts/pf9-byohost-agent-before-remove.sh`, `scripts/pf9-byohost.spec`, `service/pf9-byohostagent.service` |
-| `make test-packaging-linux-vm` passes both specs after this fix, on an Apple Silicon Mac | test run: `Ran 2 of 2 Specs ... SUCCESS! -- 2 Passed \| 0 Failed` |
