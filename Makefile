@@ -428,11 +428,8 @@ AGENT_SRC_DIR := $(REPO_ROOT)
 RPM_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/rpmsrc
 DEB_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/debsrc
 
-# Each package build is single-arch. Match whatever machine is actually
-# invoking the build (same principle rpmbuild already applies implicitly via
-# its own build-host arch detection) instead of hardcoding amd64 - override
-# with e.g. `PACKAGE_GOARCH=amd64 make build-host-agent-deb` to cross-build.
-# Reuses HELM_ARCH's existing uname -m -> amd64/arm64 mapping above.
+# See docs/proposals/pf9-byohost-deb-arch-support-adr.md (§2) for why this defaults to
+# HELM_ARCH rather than a hardcoded amd64.
 PACKAGE_GOARCH ?= $(HELM_ARCH)
 COMMON_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/common
 PF9_BYOHOST_DEB_FILE := $(PF9_BYOHOST_SRCDIR)/debsrc/pf9-byohost-agent.deb
