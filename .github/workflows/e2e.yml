@@ -98,17 +98,10 @@ jobs:
     - name: Set netfilter conntrack max
       run: sudo sysctl -w net.netfilter.nf_conntrack_max=131072
 
-    # byohctl's real onboarding flow downloads a published agent .deb bundle from quay.io, tagged to
-    # byohctl's own git-describe version -- a tag that only exists there for commits already on
-    # main/ci-* (see .github/workflows/build-byohctl.yml). The byohctl e2e spec
-    # (test/e2e/e2e_byohctl_test.go) works around that by serving this branch's own bundle from a
-    # throwaway local registry (ensureLocalAgentBundleRegistry in test/e2e/e2e_agent_bundle_registry.go),
-    # picking it up from build/pf9-byohost/debsrc/.
-    #
-    # Normally that directory comes from the agent bundle artifact downloaded above. But
-    # build-agent-bundle.yml has no workflow_dispatch trigger, so a manually dispatched e2e run has
-    # no artifact for its commit and must build the bundle itself -- the spec fails (not skips) when
-    # CI is set, so a missing bundle can't silently drop coverage.
+    # The byohctl e2e spec serves this branch's own agent bundle from build/pf9-byohost/debsrc/,
+    # normally the artifact downloaded above. build-agent-bundle.yml has no workflow_dispatch
+    # trigger, so a manually dispatched run has no artifact for its commit and builds the bundle
+    # here instead. The spec fails rather than skips in CI, so a missing bundle would fail the run.
     - name: Install fpm build dependencies
       if: ${{ github.event_name == 'workflow_dispatch' }}
       run: |
