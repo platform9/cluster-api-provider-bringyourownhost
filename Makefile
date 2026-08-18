@@ -427,10 +427,14 @@ $(PF9_BYOHOST_SRCDIR):
 AGENT_SRC_DIR := $(REPO_ROOT)
 RPM_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/rpmsrc
 DEB_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/debsrc
+
+# See docs/proposals/pf9-byohost-deb-arch-support-adr.md (§2) for why this defaults to
+# HELM_ARCH rather than a hardcoded amd64.
+PACKAGE_GOARCH ?= $(HELM_ARCH)
 COMMON_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/common
 PF9_BYOHOST_DEB_FILE := $(PF9_BYOHOST_SRCDIR)/debsrc/pf9-byohost-agent.deb
 RPMBUILD_DIR := $(PF9_BYOHOST_SRCDIR)/rpmbuild
-PF9_BYOHOST_RPM_FILE := $(RPMBUILD_DIR)/RPMS/$(shell uname -m)/pf9-byohost-1.0-$(BUILDNUM).git$(GITHASH).$(shell uname -m).rpm
+PF9_BYOHOST_RPM_FILE := $(RPMBUILD_DIR)/RPMS/$(HELM_ARCH_RAW)/pf9-byohost-1.0-$(BUILDNUM).git$(GITHASH).$(HELM_ARCH_RAW).rpm
 
 $(RPM_SRC_ROOT): | $(COMMON_SRC_ROOT)
 	echo "make RPM_SRC_ROOT: $(RPM_SRC_ROOT)"
@@ -451,12 +455,15 @@ build-host-agent-rpm:  $(PF9_BYOHOST_RPM_FILE)
 	echo "make agent-rpm pf9_byohost_rpm_file = $(PF9_BYOHOST_RPM_FILE)"
 
 #########################################################################
-$(COMMON_SRC_ROOT): build-host-agent-binary
+# Independent of build-host-agent-binary/RELEASE_DIR, which stay pinned to amd64 for the release artifact.
+$(COMMON_SRC_ROOT):
 	echo "Building COMMON_SRC_ROOT"
 	mkdir -p $(COMMON_SRC_ROOT)
-	echo "BUILDING COMMON_SRC_ROOT/binary COPING binary pf9-byoh-hostagent-linux-amd64"
+	echo "BUILDING COMMON_SRC_ROOT/binary for GOARCH=$(PACKAGE_GOARCH)"
+	RELEASE_BINARY=./byoh-hostagent GOOS=linux GOARCH=$(PACKAGE_GOARCH) GOLDFLAGS="$(LDFLAGS) $(STATIC)" \
+	HOST_AGENT_DIR=./$(HOST_AGENT_DIR) $(MAKE) host-agent-binary
 	mkdir -p $(COMMON_SRC_ROOT)/binary
-	cp $(RELEASE_DIR)/byoh-hostagent-linux-amd64 $(COMMON_SRC_ROOT)/binary/pf9-byoh-hostagent-linux-amd64
+	cp bin/byoh-hostagent-linux-$(PACKAGE_GOARCH) $(COMMON_SRC_ROOT)/binary/pf9-byoh-hostagent
 	echo "BUILDING dir for pf9-byohost-service , COPING service pf9-byoh-agent.service "
 	mkdir -p $(COMMON_SRC_ROOT)/etc/systemd/system/
 	cp $(AGENT_SRC_DIR)/service/pf9-byohostagent.service $(COMMON_SRC_ROOT)/etc/systemd/system/pf9-byohost-agent.service
@@ -467,7 +474,7 @@ $(DEB_SRC_ROOT): | $(COMMON_SRC_ROOT)
 $(PF9_BYOHOST_DEB_FILE): $(DEB_SRC_ROOT)
 	fpm -t deb -s dir -n pf9-byohost-agent \
 	 --description "Platform9 Bring Your Own Host deb package" \
-	 --license "Commercial" --architecture all --url "http://www.platform9.net" --vendor Platform9 \
+	 --license "Commercial" --architecture $(PACKAGE_GOARCH) --url "http://www.platform9.net" --vendor Platform9 \
 	 -d socat -d ethtool -d ebtables -d conntrack \
 	 --after-install $(AGENT_SRC_DIR)/scripts/pf9-byohost-agent-after-install.sh \
 	 --before-remove $(AGENT_SRC_DIR)/scripts/pf9-byohost-agent-before-remove.sh \
