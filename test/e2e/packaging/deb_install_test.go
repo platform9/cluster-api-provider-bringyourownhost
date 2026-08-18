@@ -6,6 +6,7 @@ package packaging_test
 import (
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -35,6 +36,16 @@ var _ = Describe("pf9-byohost deb", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(matches).To(HaveLen(1), "expected exactly one built deb, found: %v", matches)
 		debPath := matches[0]
+
+		By("asserting the deb is tagged for the architecture of the binary it actually contains")
+		// The build (make build-host-agent-deb, run via exec.Command above) and this
+		// test process both run natively on whatever host/container invoked `go
+		// test` - no cross-compilation involved - so runtime.GOARCH here is the same
+		// architecture PACKAGE_GOARCH resolved to in the Makefile. Debian's arch
+		// names happen to equal Go's GOARCH values for amd64/arm64.
+		archOutput, err := exec.Command("dpkg-deb", "-f", debPath, "Architecture").Output()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(strings.TrimSpace(string(archOutput))).To(Equal(runtime.GOARCH))
 
 		By("starting a byoh/node:e2e container")
 		created, err := dockerClient.ContainerCreate(ctx,
@@ -79,7 +90,7 @@ var _ = Describe("pf9-byohost deb", func() {
 		// (/binary, /etc/systemd/system, /usr/share/doc/..., etc.), so this
 		// asserts the two files are present rather than an exact list.
 		Expect(strings.Fields(filesOutput)).To(ContainElements(
-			"/binary/pf9-byoh-hostagent-linux-amd64",
+			"/binary/pf9-byoh-hostagent",
 			"/etc/systemd/system/pf9-byohost-agent.service",
 		))
 
@@ -106,7 +117,7 @@ var _ = Describe("pf9-byohost deb", func() {
 
 		By("asserting the binary, unit file, and generated conf directory are gone")
 		for _, path := range []string{
-			"/binary/pf9-byoh-hostagent-linux-amd64",
+			"/binary/pf9-byoh-hostagent",
 			"/etc/systemd/system/pf9-byohost-agent.service",
 			"/etc/pf9-byohost-agent.service.d",
 		} {

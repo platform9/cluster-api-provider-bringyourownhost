@@ -30,14 +30,14 @@ rm -fr $RPM_BUILD_ROOT
 mkdir -p $RPM_BUILD_ROOT
 cp -r $SRC_DIR/* $RPM_BUILD_ROOT
 mkdir -p $RPM_BUILD_ROOT/var/log/pf9/byoh
-chmod +x $RPM_BUILD_ROOT/binary/pf9-byoh-hostagent-linux-amd64
+chmod +x $RPM_BUILD_ROOT/binary/pf9-byoh-hostagent
 %clean
 rm -rf $RPM_BUILD_ROOT
 
 %files
 %defattr(-,root,root,-)
-%attr(0644, root, root) /binary/pf9-byoh-hostagent-linux-amd64
-/binary/pf9-byoh-hostagent-linux-amd64
+%attr(0644, root, root) /binary/pf9-byoh-hostagent
+/binary/pf9-byoh-hostagent
 /etc/systemd/system/pf9-byohost-agent.service
 
 %pre
