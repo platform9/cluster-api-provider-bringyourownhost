@@ -108,8 +108,7 @@ var _ = Describe("When a host onboards via byohctl using a bootstrap kubeconfig,
 		Expect(err).NotTo(HaveOccurred())
 		output, err := dockerClient.ContainerExecAttach(ctx, execResp.ID, container.ExecAttachOptions{})
 		Expect(err).NotTo(HaveOccurred())
-		stopLog := StreamDockerLog(output, agentLogFile)
-		defer stopLog()
+		defer StreamDockerLog(output, agentLogFile)()
 
 		By("Checking the ByoHost comes up connected")
 		AssertByoHostConditionsTrue(ctx, bootstrapClusterProxy, namespace.Name, byoHostName, specName,
