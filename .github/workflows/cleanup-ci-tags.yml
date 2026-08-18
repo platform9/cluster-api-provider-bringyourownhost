@@ -1,0 +1,35 @@
+name: Delete Old CI Tags
+
+on:
+  schedule:
+    # Run at 00:00 UTC every day
+    - cron: "0 0 * * *"
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  clean-tags:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # Fetch all history for all tags and branches
+
+      - name: Delete old e2e tags
+        run: |
+          # Get current date in seconds since epoch
+          CURRENT_DATE=$(date +%s)
+          # 7 days in seconds
+          SEVEN_DAYS=$((7 * 24 * 60 * 60))
+
+          # Get all ci tags with their creation dates
+          git for-each-ref --format='%(refname:short) %(creatordate:unix)' 'refs/tags/ci-*' | while read -r TAG DATE; do
+            # Calculate age in seconds
+            AGE=$((CURRENT_DATE - DATE))
+
+            # If tag is older than 7 days, delete it
+            if [ "${AGE}" -gt "${SEVEN_DAYS}" ]; then
+              echo "Deleting old tag: $TAG ($(date -d @$DATE +'%Y-%m-%d'))"
+              git push origin --delete $TAG
+            fi
+          done
