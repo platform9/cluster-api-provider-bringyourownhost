@@ -69,6 +69,10 @@ type ByoHostRunner struct {
 	Port                    string
 	KubeconfigFile          string
 	BootstrapKubeconfigData string
+	// Env is passed as the ByoHost container's own environment -- ContainerExecCreate (see
+	// ExecByoDockerHost) sets no Env of its own, so the host-agent process it execs (and anything
+	// the agent itself execs, like the install script) inherits this container-level Env.
+	Env []string
 }
 
 // uniqueTempFilePath returns a fresh path from os.CreateTemp without leaving the file open,
@@ -205,6 +209,7 @@ func (r *ByoHostRunner) createDockerContainer() (container.CreateResponse, error
 	return r.DockerClient.ContainerCreate(r.Context,
 		&container.Config{Hostname: r.ByoHostName,
 			Image: kindImage,
+			Env:   r.Env,
 		},
 		&container.HostConfig{Privileged: true,
 			SecurityOpt: []string{"seccomp=unconfined"},
