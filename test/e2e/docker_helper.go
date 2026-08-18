@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/docker/cli/cli/command"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
@@ -81,6 +80,19 @@ func resolveLocalPath(localPath string) (absPath string, err error) {
 	return archive.PreserveTrailingDotOrSeparator(absPath, localPath), nil
 }
 
+// validateOutputPathFileMode rejects a docker-cp destination that is neither a
+// directory nor a regular file. Inlined from docker/cli so the e2e suite does
+// not carry that module for one function.
+func validateOutputPathFileMode(fileMode os.FileMode) error {
+	switch {
+	case fileMode&os.ModeDevice != 0:
+		return errors.New("got a device")
+	case fileMode&os.ModeIrregular != 0:
+		return errors.New("got an irregular file")
+	}
+	return nil
+}
+
 func copyToContainer(ctx context.Context, cli *client.Client, copyConfig cpConfig) (err error) {
 	srcPath := copyConfig.sourcePath
 	dstPath := copyConfig.destPath
@@ -108,7 +120,7 @@ func copyToContainer(ctx context.Context, cli *client.Client, copyConfig cpConfi
 	}
 
 	// Validate the destination path
-	if err = command.ValidateOutputPathFileMode(dstStat.Mode); err != nil {
+	if err = validateOutputPathFileMode(dstStat.Mode); err != nil {
 		return errors.Wrapf(err, `destination "%s:%s" must be a directory or a regular file`, copyConfig.container, dstPath)
 	}
 
