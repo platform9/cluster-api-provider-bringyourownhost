@@ -31,7 +31,6 @@ var _ = Describe("Clusterclass upgrade test [K8s-Upgrade-ClusterClass]", func() 
 		cancelWatches                context.CancelFunc
 		clusterResources             *clusterctl.ApplyClusterTemplateAndWaitResult
 		byoHostCapacityPool          = 4
-		byoHostName                  string
 		dockerClient                 *client.Client
 		allbyohostContainerIDs       []string
 		allAgentLogFiles             []string
@@ -52,43 +51,13 @@ var _ = Describe("Clusterclass upgrade test [K8s-Upgrade-ClusterClass]", func() 
 		Expect(err).NotTo(HaveOccurred())
 
 		By("Creating byohost capacity pool containing 4 docker hosts")
-		for i := 0; i < byoHostCapacityPool; i++ {
-
-			byoHostName = fmt.Sprintf("byohost-%s", util.RandomString(6))
-
-			runner := ByoHostRunner{
-				Context:               ctx,
-				clusterConName:        clusterConName,
-				ByoHostName:           byoHostName,
-				Namespace:             namespace.Name,
-				PathToHostAgentBinary: pathToHostAgentBinary,
-				DockerClient:          dockerClient,
-				NetworkInterface:      dockerNetworkInterfaceKind,
-				bootstrapClusterProxy: bootstrapClusterProxy,
-				CommandArgs: map[string]string{
-					agentFlagBootstrapKubeconfig: bootstrapConfPath,
-					agentFlagNamespace:           namespace.Name,
-					agentFlagVerbosity:           "1",
-				},
-			}
-			runner.BootstrapKubeconfigData = generateBootstrapKubeconfig(runner.Context, bootstrapClusterProxy, clusterConName)
-			byohost, err := runner.SetupByoDockerHost()
-			Expect(err).NotTo(HaveOccurred())
-			output, byohostContainerID, err := runner.ExecByoDockerHost(byohost)
-			allbyohostContainerIDs = append(allbyohostContainerIDs, byohostContainerID)
-			Expect(err).NotTo(HaveOccurred())
-			defer output.Close()
-			// read the log of host agent container in backend, and write it
-			agentLogFile := fmt.Sprintf("/tmp/host-agent-%s.log", byoHostName)
-
-			f := WriteDockerLog(output, agentLogFile)
-			defer func() {
-				deferredErr := f.Close()
-				if deferredErr != nil {
-					Showf("error closing file %s:, %v", agentLogFile, deferredErr)
-				}
-			}()
-			allAgentLogFiles = append(allAgentLogFiles, agentLogFile)
+		hosts, err := spinUpByoHosts(ctx, dockerClient, namespace.Name, byoHostCapacityPool)
+		Expect(err).NotTo(HaveOccurred())
+		for _, host := range hosts {
+			defer host.Output.Close()
+			defer closeLogFile(host.LogFile, host.LogFilePath)
+			allbyohostContainerIDs = append(allbyohostContainerIDs, host.ContainerID)
+			allAgentLogFiles = append(allAgentLogFiles, host.LogFilePath)
 		}
 
 		By("creating a workload cluster with one control plane node and one worker node")

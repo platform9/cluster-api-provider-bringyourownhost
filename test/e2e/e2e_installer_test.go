@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	. "github.com/onsi/ginkgo/v2"
@@ -37,10 +36,10 @@ var _ = Describe("When BYOH joins existing cluster [Installer]", func() {
 		dockerClient        *client.Client
 		err                 error
 		byohostContainerIDs []string
-		agentLogFile1       = fmt.Sprintf("/tmp/host-agent1-%s.log", util.RandomString(6))
-		agentLogFile2       = fmt.Sprintf("/tmp/host-agent2-%s.log", util.RandomString(6))
-		byoHostName1        = fmt.Sprintf("byohost1-%s", util.RandomString(6))
-		byoHostName2        = fmt.Sprintf("byohost2-%s", util.RandomString(6))
+		agentLogFile1       string
+		agentLogFile2       string
+		byoHostName1        string
+		byoHostName2        string
 	)
 
 	BeforeEach(func() {
@@ -53,45 +52,15 @@ var _ = Describe("When BYOH joins existing cluster [Installer]", func() {
 		dockerClient, err = client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 		Expect(err).NotTo(HaveOccurred())
 
-		runner := ByoHostRunner{
-			Context:               ctx,
-			clusterConName:        clusterConName,
-			Namespace:             namespace.Name,
-			PathToHostAgentBinary: pathToHostAgentBinary,
-			DockerClient:          dockerClient,
-			NetworkInterface:      dockerNetworkInterfaceKind,
-			bootstrapClusterProxy: bootstrapClusterProxy,
-			CommandArgs: map[string]string{
-				agentFlagBootstrapKubeconfig: bootstrapConfPath,
-				agentFlagNamespace:           namespace.Name,
-				agentFlagVerbosity:           "1",
-			},
+		hosts, err := spinUpByoHosts(ctx, dockerClient, namespace.Name, 2)
+		Expect(err).NotTo(HaveOccurred())
+		for _, host := range hosts {
+			defer host.Output.Close()
+			defer closeLogFile(host.LogFile, host.LogFilePath)
+			byohostContainerIDs = append(byohostContainerIDs, host.ContainerID)
 		}
-
-		var output types.HijackedResponse
-		runner.ByoHostName = byoHostName1
-		runner.BootstrapKubeconfigData = generateBootstrapKubeconfig(runner.Context, bootstrapClusterProxy, clusterConName)
-		byohost, err := runner.SetupByoDockerHost()
-		Expect(err).NotTo(HaveOccurred())
-		output, byohostContainerID, err := runner.ExecByoDockerHost(byohost)
-		Expect(err).NotTo(HaveOccurred())
-		defer output.Close()
-		byohostContainerIDs = append(byohostContainerIDs, byohostContainerID)
-		f := WriteDockerLog(output, agentLogFile1)
-		defer closeLogFile(f, agentLogFile1)
-
-		runner.ByoHostName = byoHostName2
-		runner.BootstrapKubeconfigData = generateBootstrapKubeconfig(runner.Context, bootstrapClusterProxy, clusterConName)
-		byohost, err = runner.SetupByoDockerHost()
-		Expect(err).NotTo(HaveOccurred())
-		output, byohostContainerID, err = runner.ExecByoDockerHost(byohost)
-		Expect(err).NotTo(HaveOccurred())
-		defer output.Close()
-		byohostContainerIDs = append(byohostContainerIDs, byohostContainerID)
-
-		// read the log of host agent container in backend, and write it
-		f = WriteDockerLog(output, agentLogFile2)
-		defer closeLogFile(f, agentLogFile2)
+		byoHostName1, agentLogFile1 = hosts[0].Name, hosts[0].LogFilePath
+		byoHostName2, agentLogFile2 = hosts[1].Name, hosts[1].LogFilePath
 
 		setControlPlaneIP(context.Background(), dockerClient)
 		clusterctl.ApplyClusterTemplateAndWait(ctx, clusterctl.ApplyClusterTemplateAndWaitInput{
