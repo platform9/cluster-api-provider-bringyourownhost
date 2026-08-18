@@ -531,124 +531,100 @@ func ubuntuOSRelease(versionID string) string {
 	return fmt.Sprintf("PRETTY_NAME=\"Ubuntu %s LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"%s\"\nID=ubuntu\nID_LIKE=debian\n", versionID, versionID)
 }
 
+// requireUnsupportedOS and requireOSDetection assert which typed error a case produced, so the
+// tests depend on the error's type rather than its wording.
+func requireUnsupportedOS(t *testing.T, err error) {
+	t.Helper()
+	var target *UnsupportedOSError
+	require.ErrorAs(t, err, &target)
+}
+
+func requireOSDetection(t *testing.T, err error) {
+	t.Helper()
+	var target *OSDetectionError
+	require.ErrorAs(t, err, &target)
+}
+
 func TestCheckSupportedPlatform(t *testing.T) {
-	origGoos := goos
-	origGoarch := goarch
 	origReadFile := osReadFile
-	t.Cleanup(func() {
-		goos = origGoos
-		goarch = origGoarch
-		osReadFile = origReadFile
-	})
+	t.Cleanup(func() { osReadFile = origReadFile })
 
 	tests := []struct {
 		name string
-		goos string
-		// goarch defaults to amd64 when empty, so only the arch cases have to set it.
-		goarch string
 		// files maps a path to its contents; a path absent from the map reads as
 		// "no such file or directory".
-		files      map[string]string
-		wantErr    bool
+		files map[string]string
+		// wantErr asserts the error type; nil means the case must succeed.
+		wantErr    func(*testing.T, error)
 		errPhrases []string
 	}{
 		{
 			name:  "ubuntu 20.04",
-			goos:  "linux",
 			files: map[string]string{"/etc/os-release": ubuntuOSRelease("20.04")},
 		},
 		{
 			name:  "ubuntu 22.04",
-			goos:  "linux",
 			files: map[string]string{"/etc/os-release": ubuntuOSRelease("22.04")},
 		},
 		{
 			name:  "ubuntu 24.04",
-			goos:  "linux",
 			files: map[string]string{"/etc/os-release": ubuntuOSRelease("24.04")},
 		},
 		{
 			name: "point release keeps a supported VERSION_ID",
-			goos: "linux",
 			files: map[string]string{
 				"/etc/os-release": "PRETTY_NAME=\"Ubuntu 22.04.5 LTS\"\nID=ubuntu\nVERSION_ID=\"22.04\"\n",
 			},
 		},
 		{
 			name:  "os-release only under /usr/lib",
-			goos:  "linux",
 			files: map[string]string{"/usr/lib/os-release": ubuntuOSRelease("24.04")},
 		},
 		{
 			name:       "ubuntu too old",
-			goos:       "linux",
 			files:      map[string]string{"/etc/os-release": ubuntuOSRelease("18.04")},
-			wantErr:    true,
+			wantErr:    requireUnsupportedOS,
 			errPhrases: []string{"18.04", "20.04, 22.04, 24.04"},
 		},
 		{
 			name:       "ubuntu too new",
-			goos:       "linux",
 			files:      map[string]string{"/etc/os-release": ubuntuOSRelease("25.04")},
-			wantErr:    true,
+			wantErr:    requireUnsupportedOS,
 			errPhrases: []string{"25.04", "20.04, 22.04, 24.04"},
 		},
 		{
 			name: "non-ubuntu linux distro",
-			goos: "linux",
 			files: map[string]string{
 				"/etc/os-release": "PRETTY_NAME=\"Rocky Linux 9.4 (Blue Onyx)\"\nID=\"rocky\"\nVERSION_ID=\"9.4\"\n",
 			},
-			wantErr:    true,
+			wantErr:    requireUnsupportedOS,
 			errPhrases: []string{"Rocky Linux", "Ubuntu"},
 		},
 		{
 			name: "ubuntu derivative is not ubuntu",
-			goos: "linux",
 			files: map[string]string{
 				"/etc/os-release": "PRETTY_NAME=\"Pop!_OS 22.04 LTS\"\nID=pop\nID_LIKE=\"ubuntu debian\"\nVERSION_ID=\"22.04\"\n",
 			},
-			wantErr:    true,
+			wantErr:    requireUnsupportedOS,
 			errPhrases: []string{"Pop!_OS", "Ubuntu"},
 		},
 		{
+			// Also the non-Linux case: macOS has no os-release, and byohctl builds for darwin.
 			name:       "os-release unreadable",
-			goos:       "linux",
 			files:      map[string]string{},
-			wantErr:    true,
+			wantErr:    requireOSDetection,
 			errPhrases: []string{"/etc/os-release"},
 		},
 		{
 			name:       "os-release missing VERSION_ID",
-			goos:       "linux",
 			files:      map[string]string{"/etc/os-release": "PRETTY_NAME=\"Ubuntu\"\nID=ubuntu\n"},
-			wantErr:    true,
+			wantErr:    requireOSDetection,
 			errPhrases: []string{"VERSION_ID"},
-		},
-		{
-			name:       "non-linux OS",
-			goos:       "darwin",
-			files:      map[string]string{"/etc/os-release": ubuntuOSRelease("22.04")},
-			wantErr:    true,
-			errPhrases: []string{"Linux", "darwin"},
-		},
-		{
-			name:       "unsupported architecture",
-			goos:       "linux",
-			goarch:     "arm64",
-			files:      map[string]string{"/etc/os-release": ubuntuOSRelease("22.04")},
-			wantErr:    true,
-			errPhrases: []string{"arm64", "amd64"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			goos = tt.goos
-			goarch = tt.goarch
-			if goarch == "" {
-				goarch = supportedArch
-			}
 			osReadFile = func(name string) ([]byte, error) {
 				data, ok := tt.files[name]
 				if !ok {
@@ -658,16 +634,29 @@ func TestCheckSupportedPlatform(t *testing.T) {
 			}
 
 			err := checkSupportedPlatform()
-			if !tt.wantErr {
+			if tt.wantErr == nil {
 				require.NoError(t, err)
 				return
 			}
 			require.Error(t, err)
+			tt.wantErr(t, err)
 			for _, phrase := range tt.errPhrases {
 				require.Contains(t, err.Error(), phrase)
 			}
 		})
 	}
+}
+
+// TestUnsupportedOSErrorCarriesDetectedOS covers what the typed error buys a caller over a string:
+// the OS it rejected, without parsing the message.
+func TestUnsupportedOSErrorCarriesDetectedOS(t *testing.T) {
+	origReadFile := osReadFile
+	t.Cleanup(func() { osReadFile = origReadFile })
+	osReadFile = func(string) ([]byte, error) { return []byte(ubuntuOSRelease("18.04")), nil }
+
+	var target *UnsupportedOSError
+	require.ErrorAs(t, checkSupportedPlatform(), &target)
+	require.Equal(t, "Ubuntu 18.04 LTS", target.Detected)
 }
 
 func TestParseOSRelease(t *testing.T) {
@@ -727,16 +716,13 @@ func TestSupportedUbuntuVersionsMatchBundleScript(t *testing.T) {
 	// Matches a case arm plus the bundle it selects, e.g.:
 	//     "22.04")
 	//         BUNDLE_NAME="byoh-bundle-ubuntu_22.04_x86-64_k8s"
-	armRe := regexp.MustCompile(`"(\d+\.\d+)"\)\s*\n\s*BUNDLE_NAME="([^"]+)"`)
+	armRe := regexp.MustCompile(`"(\d+\.\d+)"\)\s*\n\s*BUNDLE_NAME="[^"]+"`)
 	matches := armRe.FindAllStringSubmatch(string(data), -1)
 	require.NotEmpty(t, matches, "found no UBUNTU_VERSION case arms in %s -- the script's shape changed", scriptPath)
 
 	var scriptVersions []string
 	for _, m := range matches {
 		scriptVersions = append(scriptVersions, m[1])
-		// supportedArch is asserted from the same source: every published bundle is x86-64, so
-		// there is nothing for an arm64 host to install.
-		require.Contains(t, m[2], "_x86-64", "bundle %q is not x86-64; supportedArch may no longer be %s", m[2], supportedArch)
 	}
 
 	require.ElementsMatch(t, supportedUbuntuVersions, scriptVersions,
