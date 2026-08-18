@@ -44,15 +44,25 @@ fi
 modprobe overlay && modprobe br_netfilter
 
 ## adding os configuration
-tar -C / -xvf "$BUNDLE_PATH/conf.tar" && sysctl --system 
+tar -C / -xvf "$BUNDLE_PATH/conf.tar" && sysctl --system
 
-## installing deb packages
-for pkg in cri-tools kubernetes-cni kubectl kubelet kubeadm; do
-    dpkg --install "$BUNDLE_PATH/$pkg.deb" && apt-mark hold $pkg
-done
+## installing kubeadm, kubelet, kubectl binaries
+install -m 0755 "$BUNDLE_PATH/kubeadm" /usr/bin/kubeadm
+install -m 0755 "$BUNDLE_PATH/kubelet" /usr/bin/kubelet
+install -m 0755 "$BUNDLE_PATH/kubectl" /usr/bin/kubectl
+
+## installing crictl
+tar -C /usr/local/bin -xvf "$BUNDLE_PATH/crictl.tar.gz"
+
+## installing CNI plugins
+mkdir -p /opt/cni/bin
+tar -C /opt/cni/bin -xvf "$BUNDLE_PATH/cni-plugins.tgz"
+
+## installing runc
+install -m 0755 "$BUNDLE_PATH/runc" /usr/local/sbin/runc
 
 ## intalling containerd
-tar -C / -xvf "$BUNDLE_PATH/containerd.tar"
+tar -C /usr/local -xvf "$BUNDLE_PATH/containerd.tar.gz"
 mkdir -p /etc/containerd
 containerd config default > /etc/containerd/config.toml
 {{.ContainerdConfig}}
