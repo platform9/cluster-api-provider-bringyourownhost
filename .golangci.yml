@@ -37,6 +37,19 @@ linters:
           allow:
             - $gostd
             - k8s.io/client-go/plugin/pkg/client/auth
+        # Fixes for the HIGH CVEs on this module path only ship as
+        # github.com/moby/moby/v2, so .trivyignore suppresses them repo-wide.
+        # Test code needs docker to drive real containers; nothing else may.
+        docker-engine-modules:
+          list-mode: lax
+          files:
+            - "!$test"
+            - "!**/test/e2e/**"
+          deny:
+            - pkg: github.com/docker/docker/
+              desc: unfixable HIGH CVEs on this module path; e2e tests only
+            - pkg: github.com/docker/cli/
+              desc: removed to clear CVE-2025-15558; do not reintroduce
     dupl:
       threshold: 200
     funlen:
