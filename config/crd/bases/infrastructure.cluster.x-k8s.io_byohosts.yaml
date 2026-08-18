@@ -96,35 +96,43 @@ spec:
                       type: string
                   type: object
                   x-kubernetes-map-type: atomic
-                desiredAgentPackageChecksum:
+                desiredAgent:
                   description: |-
-                    DesiredAgentPackageChecksum, if set, is the expected checksum
-                    ("sha256:<hex>") of the specific .deb/.rpm file extracted from the
-                    DesiredAgentPackageURL bundle — not of the OCI image itself, which
-                    digest-pinning the reference above already covers. The agent refuses
-                    to install on mismatch.
-                  type: string
-                desiredAgentPackageURL:
-                  description: |-
-                    DesiredAgentPackageURL is an OCI image reference — pulled via `imgpkg
-                    pull` — for a bundle containing the .deb/.rpm that installs
-                    DesiredAgentVersion. Not templated and does not reference a Secret —
-                    an image reference is not sensitive. The
-                    agent extracts the bundle, picks the single *.deb or *.rpm inside it
-                    matching its own already-known package manager, and installs it;
-                    nothing else is executed. Never used to install a version older than
-                    the one currently running — that always requires manual (SSH/Ansible)
-                    intervention outside this field. Pinning this reference by digest
-                    (@sha256:...) rather than a mutable tag is the primary integrity
-                    mechanism; see DesiredAgentPackageChecksum for a secondary check.
-                  type: string
-                desiredAgentVersion:
-                  description: |-
-                    DesiredAgentVersion, when set, is the agent version this host should
-                    be running. The agent compares this against its own
-                    version.Get().GitVersion on every reconcile tick and only acts on a
-                    mismatch. Unset means no managed upgrade is in progress.
-                  type: string
+                    DesiredAgent, when set, drives a managed agent upgrade on this host.
+                    The three fields below are always set together by the
+                    ByoHostAgentUpgrade rollout controller; nil means no managed upgrade
+                    is in progress.
+                  properties:
+                    packageChecksum:
+                      description: |-
+                        PackageChecksum, if set, is the expected checksum ("sha256:<hex>") of
+                        the specific .deb/.rpm file extracted from the PackageURL bundle —
+                        not of the OCI image itself, which digest-pinning the reference
+                        above already covers. The agent refuses to install on mismatch.
+                      type: string
+                    packageURL:
+                      description: |-
+                        PackageURL is an OCI image reference — pulled via `imgpkg pull` — for
+                        a bundle containing the .deb/.rpm that installs Version. Not
+                        templated and does not reference a Secret — an image reference is
+                        not sensitive. The agent extracts the bundle, picks the single *.deb
+                        or *.rpm inside it matching its own already-known package manager,
+                        and installs it; nothing else is executed. Never used to install a
+                        version older than the one currently running — that always requires
+                        manual (SSH/Ansible) intervention outside this field. Pinning this
+                        reference by digest (@sha256:...) rather than a mutable tag is the
+                        primary integrity mechanism; see PackageChecksum for a secondary
+                        check.
+                      type: string
+                    version:
+                      description: |-
+                        Version is the agent version this host should be running. The agent
+                        compares this against its own version.Get().GitVersion on every
+                        reconcile tick and only acts on a mismatch.
+                      type: string
+                  required:
+                    - version
+                  type: object
                 installationSecret:
                   description: |-
                     InstallationSecret is an optional reference to InstallationSecret
