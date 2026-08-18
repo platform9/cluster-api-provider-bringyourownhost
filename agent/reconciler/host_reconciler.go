@@ -9,7 +9,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -41,6 +40,12 @@ type HostReconciler struct {
 	Recorder            record.EventRecorder
 	SkipK8sInstallation bool
 	DownloadPath        string
+	// LookPath resolves a binary on PATH, used to detect this host's
+	// package manager for agent upgrades (see registration.GetOSFamily).
+	// Defaults to exec.LookPath in agent/main.go; overridden in tests so
+	// package-family detection doesn't depend on what's actually installed
+	// on the machine running the test suite.
+	LookPath func(string) (string, error)
 	// PackagePull fetches an OCI-packaged artifact for an agent upgrade.
 	// Defaults to cloudinit.Pull in agent/main.go; overridden in tests.
 	PackagePull func(ctx context.Context, ref, destDir string) error
@@ -262,46 +267,21 @@ func (r *HostReconciler) executeAgentUpgrade(ctx context.Context, byoHost *infra
 	}
 	defer os.RemoveAll(tempDir) //nolint:errcheck // best-effort cleanup of a temp dir
 
-	logger.Info("pulling agent upgrade package", "ref", byoHost.Spec.DesiredAgentPackageURL)
-	if err := r.PackagePuller.Pull(ctx, byoHost.Spec.DesiredAgentPackageURL, tempDir); err != nil {
-		logger.Error(err, "error pulling agent upgrade package")
-		r.Recorder.Event(byoHost, corev1.EventTypeWarning, "AgentPackagePullFailed", "agent upgrade package pull failed")
-		conditions.MarkFalse(byoHost, infrastructurev1beta1.AgentUpgradeSucceeded, infrastructurev1beta1.AgentPackagePullFailedReason, clusterv1.ConditionSeverityWarning, "")
-		return err
-	}
-
-	family := registration.GetOSFamily(exec.LookPath)
-	artifactPath, err := findPackageArtifact(tempDir, family)
+	artifactPath, family, err := r.fetchAgentUpgradePackage(ctx, byoHost, tempDir)
 	if err != nil {
-		logger.Error(err, "invalid agent upgrade package bundle")
-		r.Recorder.Event(byoHost, corev1.EventTypeWarning, "PackageBundleInvalid", "agent upgrade package bundle invalid")
-		conditions.MarkFalse(byoHost, infrastructurev1beta1.AgentUpgradeSucceeded, infrastructurev1beta1.PackageBundleInvalidReason, clusterv1.ConditionSeverityWarning, "")
 		return err
-	}
-
-	if byoHost.Spec.DesiredAgentPackageChecksum != "" {
-		if err := verifyChecksum(artifactPath, byoHost.Spec.DesiredAgentPackageChecksum); err != nil {
-			logger.Error(err, "agent upgrade package checksum mismatch")
-			r.Recorder.Event(byoHost, corev1.EventTypeWarning, "PackageChecksumMismatch", "agent upgrade package checksum mismatch")
-			conditions.MarkFalse(byoHost, infrastructurev1beta1.AgentUpgradeSucceeded, infrastructurev1beta1.PackageChecksumMismatchReason, clusterv1.ConditionSeverityWarning, "")
-			return err
-		}
 	}
 
 	installCmd, err := agentPackageInstallCommand(family, artifactPath)
 	if err != nil {
-		logger.Error(err, "invalid agent upgrade package bundle")
-		r.Recorder.Event(byoHost, corev1.EventTypeWarning, "PackageBundleInvalid", "agent upgrade package bundle invalid")
-		conditions.MarkFalse(byoHost, infrastructurev1beta1.AgentUpgradeSucceeded, infrastructurev1beta1.PackageBundleInvalidReason, clusterv1.ConditionSeverityWarning, "")
-		return err
+		return r.failAgentUpgrade(ctx, byoHost, err, "invalid agent upgrade package bundle",
+			"PackageBundleInvalid", infrastructurev1beta1.PackageBundleInvalidReason)
 	}
 
 	logger.Info("installing agent upgrade package", "family", family)
-	if err := r.CmdRunner.RunCmd(ctx, installCmd); err != nil {
-		logger.Error(err, "error installing agent upgrade package")
-		r.Recorder.Event(byoHost, corev1.EventTypeWarning, "PackageInstallFailed", "agent upgrade package install failed")
-		conditions.MarkFalse(byoHost, infrastructurev1beta1.AgentUpgradeSucceeded, infrastructurev1beta1.PackageInstallFailedReason, clusterv1.ConditionSeverityWarning, "")
-		return err
+	if err = r.CmdRunner.RunCmd(ctx, installCmd); err != nil {
+		return r.failAgentUpgrade(ctx, byoHost, err, "error installing agent upgrade package",
+			"PackageInstallFailed", infrastructurev1beta1.PackageInstallFailedReason)
 	}
 
 	logger.Info("install succeeded, exiting for the process supervisor to relaunch the upgraded binary")
@@ -310,6 +290,41 @@ func (r *HostReconciler) executeAgentUpgrade(ctx context.Context, byoHost *infra
 	// immediately and never returns. Only reachable with a stub Exit func in
 	// tests.
 	return nil
+}
+
+func (r *HostReconciler) fetchAgentUpgradePackage(ctx context.Context, byoHost *infrastructurev1beta1.ByoHost, destDir string) (artifactPath, family string, err error) {
+	logger := ctrl.LoggerFrom(ctx)
+
+	logger.Info("pulling agent upgrade package", "ref", byoHost.Spec.DesiredAgent.PackageURL)
+	if err = r.PackagePull(ctx, byoHost.Spec.DesiredAgent.PackageURL, destDir); err != nil {
+		return "", "", r.failAgentUpgrade(ctx, byoHost, err, "error pulling agent upgrade package",
+			"AgentPackagePullFailed", infrastructurev1beta1.AgentPackagePullFailedReason)
+	}
+
+	family = registration.GetOSFamily(r.LookPath)
+	artifactPath, err = findPackageArtifact(destDir, family)
+	if err != nil {
+		return "", "", r.failAgentUpgrade(ctx, byoHost, err, "invalid agent upgrade package bundle",
+			"PackageBundleInvalid", infrastructurev1beta1.PackageBundleInvalidReason)
+	}
+
+	if byoHost.Spec.DesiredAgent.PackageChecksum != "" {
+		if err = verifyChecksum(artifactPath, byoHost.Spec.DesiredAgent.PackageChecksum); err != nil {
+			return "", "", r.failAgentUpgrade(ctx, byoHost, err, "agent upgrade package checksum mismatch",
+				"PackageChecksumMismatch", infrastructurev1beta1.PackageChecksumMismatchReason)
+		}
+	}
+	return artifactPath, family, nil
+}
+
+// failAgentUpgrade is the shared failure tail for every executeAgentUpgrade
+// branch. Always returns err unchanged, so callers can `return
+// r.failAgentUpgrade(...)` directly.
+func (r *HostReconciler) failAgentUpgrade(ctx context.Context, byoHost *infrastructurev1beta1.ByoHost, err error, logMsg, eventReason, conditionReason string) error {
+	ctrl.LoggerFrom(ctx).Error(err, logMsg)
+	r.Recorder.Event(byoHost, corev1.EventTypeWarning, eventReason, logMsg)
+	conditions.MarkFalse(byoHost, infrastructurev1beta1.AgentUpgradeSucceeded, conditionReason, clusterv1.ConditionSeverityWarning, "")
+	return err
 }
 
 // findPackageArtifact returns the single *.deb (family ==
