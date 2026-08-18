@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/test/framework"
 	"sigs.k8s.io/cluster-api/test/framework/bootstrap"
@@ -377,6 +378,29 @@ func commonSpecSetup(specName string) (ctx context.Context, namespace *corev1.Na
 	clusterResources = new(clusterctl.ApplyClusterTemplateAndWaitResult)
 
 	return ctx, namespace, cancelWatches, clusterResources
+}
+
+// applyClusterAndWait applies a cluster template and waits for cluster readiness.
+// It takes flavor and machine count parameters to support different cluster configurations.
+func applyClusterAndWait(ctx context.Context, namespace, clusterName, specName, k8sVersion, flavor string, cpCount, workerCount int64, clusterResources *clusterctl.ApplyClusterTemplateAndWaitResult) {
+	clusterctl.ApplyClusterTemplateAndWait(ctx, clusterctl.ApplyClusterTemplateAndWaitInput{
+		ClusterProxy: bootstrapClusterProxy,
+		ConfigCluster: clusterctl.ConfigClusterInput{
+			LogFolder:                filepath.Join(artifactFolder, "clusters", bootstrapClusterProxy.GetName()),
+			ClusterctlConfigPath:     clusterctlConfigPath,
+			KubeconfigPath:           bootstrapClusterProxy.GetKubeconfigPath(),
+			InfrastructureProvider:   clusterctl.DefaultInfrastructureProvider,
+			Flavor:                   flavor,
+			Namespace:                namespace,
+			ClusterName:              clusterName,
+			KubernetesVersion:        k8sVersion,
+			ControlPlaneMachineCount: ptr.To(cpCount),
+			WorkerMachineCount:       ptr.To(workerCount),
+		},
+		WaitForClusterIntervals:      e2eConfig.GetIntervals(specName, "wait-cluster"),
+		WaitForControlPlaneIntervals: e2eConfig.GetIntervals(specName, "wait-control-plane"),
+		WaitForMachineDeployments:    e2eConfig.GetIntervals(specName, "wait-worker-nodes"),
+	}, clusterResources)
 }
 
 func dumpSpecResourcesAndCleanup(ctx context.Context, specName string, clusterProxy framework.ClusterProxy, artifactFolder string, namespace *corev1.Namespace, cancelWatches context.CancelFunc, cluster *clusterv1.Cluster, intervalsGetter func(spec, key string) []interface{}, skipCleanup bool) {
