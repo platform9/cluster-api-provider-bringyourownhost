@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/client"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/service"
@@ -55,18 +54,18 @@ func PerformHostOperation(operationType HostOperationType, namespace string, for
 		// There might be a chance that the byohost object is not present in the management cluster
 		// If decommission, ask user to proceed with host cleanup or not, run dpkg purge if yes
 		if operationType == OperationDecommission {
-			continueDecommission := force
-			if !continueDecommission {
+			if !force {
 				// Ask user to proceed with host cleanup or not
-				continueDecommission, err = utils.AskBool("Do you want to proceed with host cleanup? (y/n)")
+				continueDecommission, err := utils.AskBool("Do you want to proceed with host cleanup? (y/n)")
 				if err != nil {
 					return fmt.Errorf("failed to get user input: %v", err)
 				}
+				if !continueDecommission {
+					utils.LogInfo("Host cleanup declined by user; skipping dpkg purge")
+					return nil
+				}
 			} else {
 				utils.LogInfo("--force set: proceeding with host cleanup despite unreachable management plane")
-			}
-			if !continueDecommission {
-				return nil
 			}
 			err = service.PurgeDebianPackage()
 			if err != nil {
@@ -106,17 +105,6 @@ func PerformHostOperation(operationType HostOperationType, namespace string, for
 	// Get the machine object ( unstructured )
 	unstructuredMachineObj, err := client.GetUnstructuredMachineObject(namespace, machineName)
 	if err != nil {
-		if apierrors.IsNotFound(err) && force {
-			utils.LogInfo("--force set and referenced Machine %q is gone; clearing stale MachineRef on ByoHost", machineName)
-			if err := client.ClearMachineRefOnByoHost(namespace); err != nil {
-				return fmt.Errorf("failed to clear stale MachineRef on byohost: %v", err)
-			}
-			utils.LogSuccess("Cleared stale MachineRef on ByoHost")
-			if operationType == OperationDecommission {
-				return performHostDecommissionWithNoMachineRef(client, namespace)
-			}
-			return nil
-		}
 		return fmt.Errorf("failed to get machine object: %v", err)
 	}
 
