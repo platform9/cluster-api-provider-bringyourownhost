@@ -30,13 +30,22 @@ import (
 )
 
 const (
-	kindImage          = "byoh/node:e2e"
 	TempKubeconfigPath = "/tmp/mgmt.conf"
 	// ipv4OctetCount is the number of dot-separated octets in an IPv4 subnet (e.g. "10.0.0.0/24").
 	ipv4OctetCount = 4
 	// kubeconfigFileMode restricts the temp kubeconfig to owner-only access (it contains cluster credentials).
 	kubeconfigFileMode os.FileMode = 0600
 )
+
+// getEnvOrDefault returns the value of the given environment variable, or def if unset/empty.
+func getEnvOrDefault(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+var kindImage = getEnvOrDefault("E2E_OS_IMAGE", "byoh/node:e2e")
 
 type cpConfig struct {
 	followLink bool
