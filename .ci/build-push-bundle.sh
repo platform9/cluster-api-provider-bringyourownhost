@@ -5,12 +5,15 @@ source ~/.bashrc
 
 export BUILD_ONLY=${BUILD_ONLY:-1}
 export CONTAINERD_VERSION=${CONTAINERD_VERSION:-1.7.26}
-export KUBERNETES_VERSION=${KUBERNETES_VERSION:-1.32.2-1.1}
+export RUNC_VERSION=${RUNC_VERSION:-1.2.5}
+export KUBERNETES_VERSION=${KUBERNETES_VERSION:-1.32.2}
 export KUBERNETES_MAJOR_VERSION=${KUBERNETES_MAJOR_VERSION:-v1.32}
 export BUNDLE_VERSION=${BUNDLE_VERSION:-v1.32.2}
 export ARCH=${ARCH:-amd64}
-export CRITOOL_VERSION=${CRITOOL_VERSION:-1.32.0-1.1}
+export CRITOOL_VERSION=${CRITOOL_VERSION:-1.32.0}
 export UBUNTU_VERSION=${UBUNTU_VERSION:-"22.04"} # Default to 22.04, can be overridden
+export OS=${OS:-linux}
+export CNI_VERSION=${CNI_VERSION:-1.3.0}
 
 #alias shasum="sha512sum"
 echo "installing imgpkg"
@@ -25,7 +28,7 @@ docker build -t byoh-bundle .
 docker rm -f byoh-bundle-container
 
 echo "executing docker image"
-docker run -e CRITOOL_VERSION -e BUILD_ONLY -e CONTAINERD_VERSION -e KUBERNETES_VERSION -e KUBERNETES_MAJOR_VERSION -e ARCH -e UBUNTU_VERSION --name byoh-bundle-container -i byoh-bundle /bin/bash
+docker run -e CRITOOL_VERSION -e BUILD_ONLY -e CONTAINERD_VERSION -e RUNC_VERSION -e KUBERNETES_VERSION -e KUBERNETES_MAJOR_VERSION -e ARCH -e UBUNTU_VERSION -e OS -e CNI_VERSION --name byoh-bundle-container -i byoh-bundle /bin/bash
 
 echo "creating bundle dir to push k8s packages"
 mkdir -p ./bundle
