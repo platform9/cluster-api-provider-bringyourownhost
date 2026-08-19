@@ -332,6 +332,70 @@ runCmd:
 						}))
 					})
 
+					// KAAP-2331: once install has succeeded, a later reconcile reads BootstrapSecret fresh with no slow step in between, so it already recovers once the secret is fixed -- no fix needed for this path.
+					It("should recover on the next reconcile once the bootstrap secret has been fixed, even without any fix (KAAP-2331)", func() {
+						staleSecretData := `write_files:
+- path: fake/path
+  content: blah
+runCmd:
+- echo 'stale-join'`
+						freshSecretData := `write_files:
+- path: fake/path
+  content: blah2
+runCmd:
+- echo 'fresh-join'`
+
+						latest := &corev1.Secret{}
+						Expect(k8sClient.Get(ctx, types.NamespacedName{Name: bootstrapSecret.Name, Namespace: bootstrapSecret.Namespace}, latest)).To(Succeed())
+						latest.Data["value"] = []byte(staleSecretData)
+						Expect(k8sClient.Update(ctx, latest)).To(Succeed())
+
+						fakeCommandRunner.RunCmdStub = func(runCtx context.Context, cmd string) error {
+							if cmd == "echo 'stale-join'" {
+								return errors.New("token expired")
+							}
+							return nil
+						}
+
+						// first reconcile: install succeeds, join fails on the stale/expired token
+						_, firstErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
+							NamespacedName: byoHostLookupKey,
+						})
+						Expect(firstErr).To(HaveOccurred())
+
+						afterFirst := &infrastructurev1beta1.ByoHost{}
+						Expect(k8sClient.Get(ctx, byoHostLookupKey, afterFirst)).To(Succeed())
+						Expect(conditions.IsTrue(afterFirst, infrastructurev1beta1.K8sComponentsInstallationSucceeded)).To(BeTrue(),
+							"install must not be re-run on retry")
+						k8sNodeBootstrapSucceeded := conditions.Get(afterFirst, infrastructurev1beta1.K8sNodeBootstrapSucceeded)
+						Expect(*k8sNodeBootstrapSucceeded).To(conditions.MatchCondition(clusterv1.Condition{
+							Type:     infrastructurev1beta1.K8sNodeBootstrapSucceeded,
+							Status:   corev1.ConditionFalse,
+							Reason:   infrastructurev1beta1.CloudInitExecutionFailedReason,
+							Severity: clusterv1.ConditionSeverityError,
+						}))
+
+						// simulate the secret getting fixed (e.g. CABPK recreating the token) before the next reconcile
+						latest = &corev1.Secret{}
+						Expect(k8sClient.Get(ctx, types.NamespacedName{Name: bootstrapSecret.Name, Namespace: bootstrapSecret.Namespace}, latest)).To(Succeed())
+						latest.Data["value"] = []byte(freshSecretData)
+						Expect(k8sClient.Update(ctx, latest)).To(Succeed())
+
+						// second reconcile: install is skipped, so this attempt reads the secret fresh with no gap
+						_, secondErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
+							NamespacedName: byoHostLookupKey,
+						})
+						Expect(secondErr).ToNot(HaveOccurred())
+
+						afterSecond := &infrastructurev1beta1.ByoHost{}
+						Expect(k8sClient.Get(ctx, byoHostLookupKey, afterSecond)).To(Succeed())
+						k8sNodeBootstrapSucceeded = conditions.Get(afterSecond, infrastructurev1beta1.K8sNodeBootstrapSucceeded)
+						Expect(*k8sNodeBootstrapSucceeded).To(conditions.MatchCondition(clusterv1.Condition{
+							Type:   infrastructurev1beta1.K8sNodeBootstrapSucceeded,
+							Status: corev1.ConditionTrue,
+						}))
+					})
+
 					It("should set K8sNodeBootstrapSucceeded to false with Reason CloudInitExecutionFailedReason if the bootstrap execution fails", func() {
 						conditions.MarkTrue(byoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded)
 						Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
