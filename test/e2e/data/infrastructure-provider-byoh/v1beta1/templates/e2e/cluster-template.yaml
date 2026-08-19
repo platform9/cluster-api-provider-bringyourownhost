@@ -191,8 +191,24 @@ spec:
           eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
           resolv-conf: /etc/kubernetes/resolv.conf
     postKubeadmCommands:
-    - '[[ -s /etc/kubernetes/super-admin.conf ]] || { rm -f /etc/kubernetes/super-admin.conf
-      && kubeadm init phase kubeconfig super-admin; }'
+    - |
+      set -Eeuo pipefail
+      conf=/etc/kubernetes/super-admin.conf
+      # kubeadm init already wrote the kubeconfig.
+      if [[ -f "$conf" && -s "$conf" ]]; then
+        exit 0
+      fi
+      # A directory at this path blocks the write below.
+      if [[ -d "$conf" ]]; then
+        rm -rf "$conf"
+      fi
+      tmp=$(mktemp -d)
+      trap 'rm -rf "$tmp"' EXIT
+      kubeadm init phase kubeconfig super-admin --kubeconfig-dir "$tmp"
+      # The file holds admin credentials. Restrict it before writing.
+      touch "$conf"
+      chmod 600 "$conf"
+      cat "$tmp/super-admin.conf" > "$conf"
     preKubeadmCommands:
     - |
       cat <<'EOF' >> /run/kubeadm/kubeadm.yaml
