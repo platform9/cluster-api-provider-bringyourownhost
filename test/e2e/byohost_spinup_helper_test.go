@@ -37,6 +37,7 @@ func spinUpByoHosts(ctx context.Context, dockerClient *client.Client, namespace 
 			PathToHostAgentBinary: pathToHostAgentBinary,
 			DockerClient:          dockerClient,
 			NetworkInterface:      dockerNetworkInterfaceKind,
+			Env:                   byoHostRunnerEnv(),
 			bootstrapClusterProxy: bootstrapClusterProxy,
 			CommandArgs: map[string]string{
 				agentFlagBootstrapKubeconfig: bootstrapConfPath,
