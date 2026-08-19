@@ -103,6 +103,14 @@ spec:
                     ByoHostAgentUpgrade rollout controller; nil means no managed upgrade
                     is in progress.
                   properties:
+                    assignedAt:
+                      description: |-
+                        AssignedAt is when the ByoHostAgentUpgrade rollout controller set
+                        this field, used to measure elapsed time against
+                        ByoHostAgentUpgradeSpec.PerHostTimeout. Only the controller reads or
+                        writes it; the agent ignores it.
+                      format: date-time
+                      type: string
                     packageChecksum:
                       description: |-
                         PackageChecksum, if set, is the expected checksum ("sha256:<hex>") of
