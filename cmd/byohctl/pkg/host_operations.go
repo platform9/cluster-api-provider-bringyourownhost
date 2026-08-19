@@ -65,9 +65,6 @@ func PerformHostOperation(operationType HostOperationType, namespace string, for
 			} else {
 				utils.LogInfo("--force set: proceeding with host cleanup despite unreachable management plane")
 			}
-			if !continueDecommission {
-				return nil
-			}
 			err = service.PurgeDebianPackage()
 			if err != nil {
 				return fmt.Errorf("failed to run dpkg purge: %v", err)
@@ -106,17 +103,6 @@ func PerformHostOperation(operationType HostOperationType, namespace string, for
 	// Get the machine object ( unstructured )
 	unstructuredMachineObj, err := client.GetUnstructuredMachineObject(namespace, machineName)
 	if err != nil {
-		if apierrors.IsNotFound(err) && force {
-			utils.LogInfo("--force set and referenced Machine %q is gone; clearing stale MachineRef on ByoHost", machineName)
-			if err := client.ClearMachineRefOnByoHost(namespace); err != nil {
-				return fmt.Errorf("failed to clear stale MachineRef on byohost: %v", err)
-			}
-			utils.LogSuccess("Cleared stale MachineRef on ByoHost")
-			if operationType == OperationDecommission {
-				return performHostDecommissionWithNoMachineRef(client, namespace)
-			}
-			return nil
-		}
 		return fmt.Errorf("failed to get machine object: %v", err)
 	}
 

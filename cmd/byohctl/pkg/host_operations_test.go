@@ -16,7 +16,6 @@ import (
 
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/client"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/service"
-	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils"
 	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 )
 
@@ -28,9 +27,6 @@ var byoHostGVR = schema.GroupVersionResource{
 	Resource: "byohosts",
 }
 
-// testHostname returns the hostname the client methods will look up. Seeding
-// fake objects under this name is the simplest way to bridge the unmockable
-// os.Hostname() call inside client methods.
 func testHostname(t *testing.T) string {
 	t.Helper()
 	h, err := os.Hostname()
@@ -57,7 +53,6 @@ func newByoHost(t *testing.T, machineRef *corev1.ObjectReference) *infrastructur
 	}
 }
 
-// testSeams records observable side effects from the swappable dependencies.
 type testSeams struct {
 	purgeCalls int
 	askResp    bool
@@ -79,17 +74,17 @@ func installSeams(t *testing.T, objs ...runtime.Object) (*client.Client, *testSe
 	service.KubeconfigFilePath = kubeconfigPath
 	t.Cleanup(func() { service.KubeconfigFilePath = origPath })
 
-	origGet := client.GetK8sClient
-	client.GetK8sClient = func(_ string) (*client.Client, error) { return fakeClient, nil }
-	t.Cleanup(func() { client.GetK8sClient = origGet })
+	origGet := getK8sClient
+	getK8sClient = func(_ string) (*client.Client, error) { return fakeClient, nil }
+	t.Cleanup(func() { getK8sClient = origGet })
 
 	seams := &testSeams{}
-	origAsk := utils.AskBool
-	utils.AskBool = func(_ string, _ ...interface{}) (bool, error) {
+	origAsk := askBool
+	askBool = func(_ string, _ ...interface{}) (bool, error) {
 		seams.askCalls++
 		return seams.askResp, seams.askErr
 	}
-	t.Cleanup(func() { utils.AskBool = origAsk })
+	t.Cleanup(func() { askBool = origAsk })
 
 	origPurge := service.PurgeDebianPackage
 	service.PurgeDebianPackage = func() error {
@@ -101,61 +96,104 @@ func installSeams(t *testing.T, objs ...runtime.Object) (*client.Client, *testSe
 	return fakeClient, seams
 }
 
-func TestPerformHostOperation_KubeconfigMissing(t *testing.T) {
-	// Point KubeconfigFilePath at a non-existent file. The other seams don't
-	// matter because the check runs before them.
+// pointKubeconfigAtMissingFile sets KubeconfigFilePath at a non-existent path
+// so the kubeconfig existence check fails before any seam is exercised.
+func pointKubeconfigAtMissingFile(t *testing.T) {
+	t.Helper()
 	origPath := service.KubeconfigFilePath
 	service.KubeconfigFilePath = filepath.Join(t.TempDir(), "does-not-exist")
 	t.Cleanup(func() { service.KubeconfigFilePath = origPath })
+}
 
-	for _, op := range []HostOperationType{OperationDeauthorise, OperationDecommission} {
-		t.Run(string(op), func(t *testing.T) {
-			err := PerformHostOperation(op, testNamespace, false)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "kubeconfig file not found")
+func TestPerformHostOperation(t *testing.T) {
+	tests := []struct {
+		name string
+		// setup prepares the environment for the call. It returns the seams
+		// struct when installSeams was used, or nil when the case exercises a
+		// path that runs before the seams are consulted (e.g. missing kubeconfig).
+		setup           func(t *testing.T) *testSeams
+		operation       HostOperationType
+		force           bool
+		askResp         bool
+		wantErr         bool
+		wantErrContains string
+		wantPurgeCalls  int
+		wantAskCalls    int
+	}{
+		{
+			name:            "kubeconfig missing / deauthorise",
+			setup:           func(t *testing.T) *testSeams { pointKubeconfigAtMissingFile(t); return nil },
+			operation:       OperationDeauthorise,
+			wantErr:         true,
+			wantErrContains: "kubeconfig file not found",
+		},
+		{
+			name:            "kubeconfig missing / decommission",
+			setup:           func(t *testing.T) *testSeams { pointKubeconfigAtMissingFile(t); return nil },
+			operation:       OperationDecommission,
+			wantErr:         true,
+			wantErrContains: "kubeconfig file not found",
+		},
+		{
+			name:            "deauthorise / ByoHost missing / no force returns error",
+			setup:           func(t *testing.T) *testSeams { _, s := installSeams(t); return s },
+			operation:       OperationDeauthorise,
+			force:           false,
+			wantErr:         true,
+			wantErrContains: "Cannot proceed",
+		},
+		{
+			name:      "deauthorise / ByoHost missing / force treats as no-op",
+			setup:     func(t *testing.T) *testSeams { _, s := installSeams(t); return s },
+			operation: OperationDeauthorise,
+			force:     true,
+		},
+		{
+			name:           "decommission / ByoHost missing / force purges without prompt",
+			setup:          func(t *testing.T) *testSeams { _, s := installSeams(t); return s },
+			operation:      OperationDecommission,
+			force:          true,
+			wantPurgeCalls: 1,
+		},
+		{
+			name:         "decommission / ByoHost missing / no force + user declines skips purge",
+			setup:        func(t *testing.T) *testSeams { _, s := installSeams(t); return s },
+			operation:    OperationDecommission,
+			force:        false,
+			askResp:      false,
+			wantAskCalls: 1,
+		},
+		{
+			name:           "decommission / ByoHost missing / no force + user confirms runs purge",
+			setup:          func(t *testing.T) *testSeams { _, s := installSeams(t); return s },
+			operation:      OperationDecommission,
+			force:          false,
+			askResp:        true,
+			wantPurgeCalls: 1,
+			wantAskCalls:   1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			seams := tt.setup(t)
+			if seams != nil {
+				seams.askResp = tt.askResp
+			}
+
+			err := PerformHostOperation(tt.operation, testNamespace, tt.force)
+
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErrContains)
+			} else {
+				require.NoError(t, err)
+			}
+
+			if seams != nil {
+				assert.Equal(t, tt.wantPurgeCalls, seams.purgeCalls, "purgeCalls mismatch")
+				assert.Equal(t, tt.wantAskCalls, seams.askCalls, "askCalls mismatch")
+			}
 		})
 	}
 }
-
-func TestPerformHostOperation_ByoHostMissing_Deauthorise(t *testing.T) {
-	t.Run("no force returns error", func(t *testing.T) {
-		_, seams := installSeams(t) // no seeded ByoHost
-		err := PerformHostOperation(OperationDeauthorise, testNamespace, false)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "Cannot proceed")
-		assert.Equal(t, 0, seams.purgeCalls, "deauthorise must not purge")
-	})
-
-	t.Run("force treats as no-op", func(t *testing.T) {
-		_, seams := installSeams(t)
-		require.NoError(t, PerformHostOperation(OperationDeauthorise, testNamespace, true))
-		assert.Equal(t, 0, seams.purgeCalls)
-		assert.Equal(t, 0, seams.askCalls, "force must not prompt")
-	})
-}
-
-func TestPerformHostOperation_ByoHostMissing_Decommission(t *testing.T) {
-	t.Run("force purges without prompt", func(t *testing.T) {
-		_, seams := installSeams(t)
-		require.NoError(t, PerformHostOperation(OperationDecommission, testNamespace, true))
-		assert.Equal(t, 1, seams.purgeCalls)
-		assert.Equal(t, 0, seams.askCalls)
-	})
-
-	t.Run("no force + user declines skips purge", func(t *testing.T) {
-		_, seams := installSeams(t)
-		seams.askResp = false
-		require.NoError(t, PerformHostOperation(OperationDecommission, testNamespace, false))
-		assert.Equal(t, 0, seams.purgeCalls)
-		assert.Equal(t, 1, seams.askCalls)
-	})
-
-	t.Run("no force + user confirms runs purge", func(t *testing.T) {
-		_, seams := installSeams(t)
-		seams.askResp = true
-		require.NoError(t, PerformHostOperation(OperationDecommission, testNamespace, false))
-		assert.Equal(t, 1, seams.purgeCalls)
-		assert.Equal(t, 1, seams.askCalls)
-	})
-}
-
