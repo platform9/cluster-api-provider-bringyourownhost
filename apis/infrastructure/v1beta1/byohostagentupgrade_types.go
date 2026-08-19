@@ -88,14 +88,6 @@ type ByoHostAgentUpgradeSpec struct {
 	PerHostTimeout *metav1.Duration `json:"perHostTimeout,omitempty"`
 }
 
-// ByoHostUpgradeAttempt records when a host was assigned this rollout's
-// TargetVersion, so PerHostTimeout has something to measure elapsed time
-// against. Cleared once the host converges or is recorded in FailedHosts.
-type ByoHostUpgradeAttempt struct {
-	HostName  string      `json:"hostName"`
-	StartedAt metav1.Time `json:"startedAt"`
-}
-
 // ByoHostAgentUpgradeStatus defines the observed state of ByoHostAgentUpgrade.
 type ByoHostAgentUpgradeStatus struct {
 	// +optional
@@ -115,11 +107,6 @@ type ByoHostAgentUpgradeStatus struct {
 	// purely internal.
 	// +optional
 	UnavailableCount int32 `json:"unavailableCount,omitempty"`
-
-	// InFlightHosts tracks when each currently in-flight host was assigned
-	// TargetVersion, so PerHostTimeout has a start time to measure against.
-	// +optional
-	InFlightHosts []ByoHostUpgradeAttempt `json:"inFlightHosts,omitempty"`
 
 	// FailedHosts lists hosts that explicitly failed (AgentUpgradeSucceeded
 	// == False) or timed out. Once populated, Phase is Failed and stays
