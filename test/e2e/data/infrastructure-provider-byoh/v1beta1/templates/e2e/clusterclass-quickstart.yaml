@@ -162,17 +162,28 @@ spec:
             nameserver 8.8.8.8
             nameserver 8.8.4.4
             EOF
-        # kubeadm init creates super-admin.conf; kubeadm join --control-plane does
-        # not. kube-vip's static pod needs this file on every control-plane node,
-        # so it crash-loops on any node added after the first one.
-        #
-        # This line does nothing on the init node (file already has content).
-        # On a join node, it deletes the empty placeholder that kubelet's
-        # FileOrCreate volume leaves behind and generates the real file locally
-        # -- a joining control-plane node already has the CA cert+key needed to
-        # do that itself.
+        # kubeadm join --control-plane does not create super-admin.conf, but
+        # kube-vip needs it on every control-plane node. Fill the placeholder
+        # kubelet created in place: unlinking it breaks kube-vip's bind mount.
         postKubeadmCommands:
-          - "[[ -s /etc/kubernetes/super-admin.conf ]] || { rm -f /etc/kubernetes/super-admin.conf && kubeadm init phase kubeconfig super-admin; }"
+          - |
+            set -Eeuo pipefail
+            conf=/etc/kubernetes/super-admin.conf
+            # kubeadm init already wrote the kubeconfig.
+            if [[ -f "$conf" && -s "$conf" ]]; then
+              exit 0
+            fi
+            # A directory at this path blocks the write below.
+            if [[ -d "$conf" ]]; then
+              rm -rf "$conf"
+            fi
+            tmp=$(mktemp -d)
+            trap 'rm -rf "$tmp"' EXIT
+            kubeadm init phase kubeconfig super-admin --kubeconfig-dir "$tmp"
+            # The file holds admin credentials. Restrict it before writing.
+            touch "$conf"
+            chmod 600 "$conf"
+            cat "$tmp/super-admin.conf" > "$conf"
         clusterConfiguration:
           apiServer:
             certSANs:
