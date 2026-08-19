@@ -80,9 +80,8 @@ func (r *ByoHostAgentUpgradeReconciler) Reconcile(ctx context.Context, req ctrl.
 		return ctrl.Result{}, err
 	}
 	perHostTimeout := resolvePerHostTimeout(upgrade)
-	startedAt := inFlightStartTimes(upgrade)
 
-	summary := summarizeHosts(hosts, upgrade.Spec.TargetVersion, startedAt, perHostTimeout)
+	summary := summarizeHosts(hosts, upgrade.Spec.TargetVersion, perHostTimeout)
 	upgrade.Status.Upgraded = int32(len(summary.converged))
 
 	if len(summary.failed) > 0 {
@@ -91,7 +90,6 @@ func (r *ByoHostAgentUpgradeReconciler) Reconcile(ctx context.Context, req ctrl.
 
 	if len(summary.unavailable) >= maxUnavailable {
 		upgrade.Status.UnavailableCount = int32(len(summary.unavailable))
-		upgrade.Status.InFlightHosts = toUpgradeAttempts(summary.inFlight, startedAt)
 		conditions.MarkFalse(upgrade, infrastructurev1beta1.RolloutAvailable, infrastructurev1beta1.InsufficientAvailabilityBudgetReason, clusterv1.ConditionSeverityWarning, "")
 		return ctrl.Result{RequeueAfter: requeueInterval}, nil
 	}
@@ -106,12 +104,10 @@ func (r *ByoHostAgentUpgradeReconciler) Reconcile(ctx context.Context, req ctrl.
 	// next reconcile to notice them - summary alone only knows about state
 	// from before this tick started picking.
 	allInFlight := append(append([]*infrastructurev1beta1.ByoHost{}, summary.inFlight...), picked...)
-	upgrade.Status.InFlightHosts = toUpgradeAttempts(allInFlight, startedAt)
 	upgrade.Status.UnavailableCount = int32(len(summary.unavailable) + len(picked))
 
 	if len(summary.converged) == len(hosts) && len(hosts) > 0 {
 		upgrade.Status.Phase = infrastructurev1beta1.ByoHostAgentUpgradePhaseCompleted
-		upgrade.Status.InFlightHosts = nil
 		return ctrl.Result{}, nil
 	}
 	if len(allInFlight) > 0 {
@@ -163,6 +159,7 @@ func (r *ByoHostAgentUpgradeReconciler) pickAndAssign(ctx context.Context, upgra
 			Version:         upgrade.Spec.TargetVersion,
 			PackageURL:      upgrade.Spec.PackageURL,
 			PackageChecksum: upgrade.Spec.PackageChecksum,
+			AssignedAt:      metav1.Now(),
 		}
 		if err := r.Update(ctx, host); err != nil {
 			log.FromContext(ctx).Error(err, "failed to assign agent upgrade to host", "host", host.Name)
@@ -183,7 +180,6 @@ func (r *ByoHostAgentUpgradeReconciler) markFailed(upgrade *infrastructurev1beta
 		}
 	}
 	upgrade.Status.Phase = infrastructurev1beta1.ByoHostAgentUpgradePhaseFailed
-	upgrade.Status.InFlightHosts = nil
 	return ctrl.Result{}, nil
 }
 
@@ -199,7 +195,7 @@ type hostSummary struct {
 	unavailable map[string]struct{}
 }
 
-func summarizeHosts(hosts []infrastructurev1beta1.ByoHost, targetVersion string, startedAt map[string]metav1.Time, perHostTimeout time.Duration) hostSummary {
+func summarizeHosts(hosts []infrastructurev1beta1.ByoHost, targetVersion string, perHostTimeout time.Duration) hostSummary {
 	s := hostSummary{unavailable: map[string]struct{}{}}
 
 	for i := range hosts {
@@ -216,7 +212,7 @@ func summarizeHosts(hosts []infrastructurev1beta1.ByoHost, targetVersion string,
 		case assignedThisTarget:
 			// In flight: assigned but not yet converged, and not explicitly
 			// failed - includes hosts stuck silently (§2.2 step 8).
-			if start, ok := startedAt[host.Name]; ok && time.Since(start.Time) > perHostTimeout {
+			if time.Since(host.Spec.DesiredAgent.AssignedAt.Time) > perHostTimeout {
 				s.failed = append(s.failed, host)
 			} else {
 				s.inFlight = append(s.inFlight, host)
@@ -248,33 +244,6 @@ func pickHosts(candidates []*infrastructurev1beta1.ByoHost, n int) []*infrastruc
 		n = len(candidates)
 	}
 	return candidates[:n]
-}
-
-// inFlightStartTimes indexes Status.InFlightHosts by host name.
-func inFlightStartTimes(upgrade *infrastructurev1beta1.ByoHostAgentUpgrade) map[string]metav1.Time {
-	m := make(map[string]metav1.Time, len(upgrade.Status.InFlightHosts))
-	for _, a := range upgrade.Status.InFlightHosts {
-		m[a.HostName] = a.StartedAt
-	}
-	return m
-}
-
-// toUpgradeAttempts rebuilds Status.InFlightHosts for the current tick,
-// preserving each host's original StartedAt and stamping a new one for any
-// host that's in flight for the first time.
-func toUpgradeAttempts(inFlight []*infrastructurev1beta1.ByoHost, startedAt map[string]metav1.Time) []infrastructurev1beta1.ByoHostUpgradeAttempt {
-	if len(inFlight) == 0 {
-		return nil
-	}
-	attempts := make([]infrastructurev1beta1.ByoHostUpgradeAttempt, 0, len(inFlight))
-	for _, host := range inFlight {
-		start, ok := startedAt[host.Name]
-		if !ok {
-			start = metav1.Now()
-		}
-		attempts = append(attempts, infrastructurev1beta1.ByoHostUpgradeAttempt{HostName: host.Name, StartedAt: start})
-	}
-	return attempts
 }
 
 // SetupWithManager sets up the controller with the Manager.
