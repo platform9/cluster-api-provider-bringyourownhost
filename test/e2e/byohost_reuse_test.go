@@ -8,9 +8,7 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"os"
 
-	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -30,14 +28,14 @@ var (
 var _ = Describe("When BYO Host rejoins the capacity pool [Reuse]", func() {
 
 	var (
-		ctx                 context.Context
-		specName            = "byohost-reuse"
-		namespace           *corev1.Namespace
-		cancelWatches       context.CancelFunc
-		clusterResources    *clusterctl.ApplyClusterTemplateAndWaitResult
-		byohostContainerIDs []string
-		agentLogFile1       string
-		agentLogFile2       string
+		ctx              context.Context
+		specName         = "byohost-reuse"
+		namespace        *corev1.Namespace
+		cancelWatches    context.CancelFunc
+		clusterResources *clusterctl.ApplyClusterTemplateAndWaitResult
+		hosts            []byoHostHandle
+		agentLogFile1    string
+		agentLogFile2    string
 	)
 
 	BeforeEach(func() {
@@ -51,11 +49,10 @@ var _ = Describe("When BYO Host rejoins the capacity pool [Reuse]", func() {
 		Expect(err).NotTo(HaveOccurred())
 		setDockerClient(client)
 
-		hosts, err := spinUpByoHosts(ctx, dockerClient, namespace.Name, 2)
+		hosts, err = spinUpByoHosts(ctx, dockerClient, namespace.Name, 2)
 		Expect(err).NotTo(HaveOccurred())
 		for _, host := range hosts {
 			defer host.StopLog()
-			byohostContainerIDs = append(byohostContainerIDs, host.ContainerID)
 		}
 		byoHostName2 := hosts[1].Name
 		agentLogFile1, agentLogFile2 = hosts[0].LogFilePath, hosts[1].LogFilePath
@@ -130,32 +127,7 @@ var _ = Describe("When BYO Host rejoins the capacity pool [Reuse]", func() {
 		// Dumps all the resources in the spec namespace, then cleanups the cluster object and the spec namespace itself.
 		dumpSpecResourcesAndCleanup(ctx, specName, bootstrapClusterProxy, artifactFolder, namespace, cancelWatches, clusterResources.Cluster, e2eConfig.GetIntervals, skipCleanup)
 
-		if getDockerClient() != nil && len(byohostContainerIDs) != 0 {
-			for _, byohostContainerID := range byohostContainerIDs {
-				err := getDockerClient().ContainerStop(ctx, byohostContainerID, container.StopOptions{})
-				Expect(err).NotTo(HaveOccurred())
-
-				err = getDockerClient().ContainerRemove(ctx, byohostContainerID, container.RemoveOptions{})
-				Expect(err).NotTo(HaveOccurred())
-			}
-		}
-
-		err := os.Remove(agentLogFile1)
-		if err != nil {
-			Showf("Failed to remove file %s: %v", agentLogFile1, err)
-		}
-		err = os.Remove(agentLogFile2)
-		if err != nil {
-			Showf("Failed to remove file %s: %v", agentLogFile2, err)
-		}
-		err = os.Remove(ReadByohControllerManagerLogShellFile)
-		if err != nil {
-			Showf("Failed to remove file %s: %v", ReadByohControllerManagerLogShellFile, err)
-		}
-		err = os.Remove(ReadAllPodsShellFile)
-		if err != nil {
-			Showf("Failed to remove file %s: %v", ReadAllPodsShellFile, err)
-		}
+		teardownByoHosts(ctx, getDockerClient(), hosts)
 	})
 })
 
