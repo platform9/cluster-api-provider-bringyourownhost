@@ -1,3 +1,6 @@
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 package client
 
 import (
@@ -45,6 +48,9 @@ type K8sClient struct {
 	tenant      string
 	bearerToken string
 	regionName  string
+	// insecure mirrors the --insecure flag. Kept on the client because the kubeconfig
+	// SaveKubeConfig writes has to record it too, not just the requests made here.
+	insecure bool
 }
 
 // Client wraps the Kubernetes clientset and dynamic client.
@@ -53,15 +59,17 @@ type Client struct {
 	DynamicClient dynamic.Interface
 }
 
-// NewK8sClient creates a new Kubernetes client with provided credentials
-func NewK8sClient(fqdn, domain, tenant, token, regionName string) *K8sClient {
+// NewK8sClient creates a new Kubernetes client with provided credentials. When insecure is
+// true, TLS certificate verification is skipped -- see NewDUHTTPClient.
+func NewK8sClient(fqdn, domain, tenant, token, regionName string, insecure bool) *K8sClient {
 	client := &K8sClient{
-		client:      &http.Client{Timeout: DefaultTimeout},
+		client:      NewDUHTTPClient(DefaultTimeout, insecure),
 		fqdn:        fqdn,
 		domain:      domain,
 		tenant:      tenant,
 		bearerToken: token,
 		regionName:  regionName,
+		insecure:    insecure,
 	}
 	return client
 }
@@ -169,7 +177,17 @@ func (c *K8sClient) SaveKubeConfig(secretName string) error {
 		return fmt.Errorf("failed to create byoh directory: %v", err)
 	}
 
-	// Step 5: Write kubeconfig to byohDir
+	// Step 5: Record --insecure in the kubeconfig itself, so the host agent -- which has no
+	// TLS flags of its own and reads this file long after byohctl exits -- tolerates the same
+	// certificate byohctl was told to tolerate.
+	if c.insecure {
+		kubeconfig, err = MakeKubeconfigInsecure(kubeconfig)
+		if err != nil {
+			return fmt.Errorf("failed to apply --insecure to kubeconfig: %w", err)
+		}
+	}
+
+	// Step 6: Write kubeconfig to byohDir
 	kubeconfigPath := filepath.Join(byohDir, "config")
 
 	if err = os.WriteFile(kubeconfigPath, kubeconfig, service.DefaultFilePerms); err != nil {
