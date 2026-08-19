@@ -46,10 +46,14 @@ const (
 // unconditionally -- this isn't a sandboxed-network workaround, building locally is the only way
 // an arm64 e2e run gets a bundle at all today.
 //
+// k8sVersions builds and pushes a bundle for each distinct version given -- callers need more
+// than one whenever a spec upgrades a cluster from one Kubernetes version to another (each version
+// needs its own installable bundle, not just the one the cluster starts on).
+//
 // The second return value reports whether the returned registry is a plaintext local one that
 // needs BYOH_BUNDLE_REGISTRY_INSECURE set on the ByoHost container (see install.sh.tmpl) --
 // false when BUNDLE_REPO_OVERRIDE points at a real, presumably-TLS registry instead.
-func ensureLocalK8sBundleRegistry(ctx context.Context, dockerClient *client.Client, dockerNetwork, k8sVersion string) (bundleRepoAddr string, insecure bool, err error) {
+func ensureLocalK8sBundleRegistry(ctx context.Context, dockerClient *client.Client, dockerNetwork string, k8sVersions ...string) (bundleRepoAddr string, insecure bool, err error) {
 	if override := os.Getenv(bundleRepoOverrideEnvVar); override != "" {
 		return override, false, nil
 	}
@@ -69,25 +73,48 @@ func ensureLocalK8sBundleRegistry(ctx context.Context, dockerClient *client.Clie
 		return "", false, err
 	}
 
-	bundleDir, err := buildK8sBundle(ctx, repoRoot, debianArch, k8sVersion)
-	if err != nil {
-		return "", false, err
-	}
-	defer os.RemoveAll(bundleDir)
-
 	if err := startLocalBundleRegistry(ctx, dockerClient, dockerNetwork); err != nil {
 		return "", false, err
 	}
 
 	hostAddr := "localhost:" + localBundleRegistryHostPort
-	bundleTag := fmt.Sprintf("%s/%s:%s", hostAddr, installer.GetBundleName(osBundle), k8sVersion)
-
-	pushCmd := exec.CommandContext(ctx, imgpkgPath, "push", "-f", bundleDir, "-i", bundleTag) // #nosec G204 -- fixed args, no user input
-	if output, err := pushCmd.CombinedOutput(); err != nil {
-		return "", false, fmt.Errorf("failed to push local k8s bundle: %w\n%s", err, output)
+	for _, k8sVersion := range dedupeStrings(k8sVersions) {
+		if err := buildAndPushK8sBundle(ctx, repoRoot, imgpkgPath, debianArch, osBundle, hostAddr, k8sVersion); err != nil {
+			return "", false, err
+		}
 	}
 
 	return localBundleRegistryContainerName + ":5000", true, nil
+}
+
+// buildAndPushK8sBundle builds one Kubernetes version's bundle and pushes it to hostAddr.
+func buildAndPushK8sBundle(ctx context.Context, repoRoot, imgpkgPath, debianArch, osBundle, hostAddr, k8sVersion string) error {
+	bundleDir, err := buildK8sBundle(ctx, repoRoot, debianArch, k8sVersion)
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(bundleDir)
+
+	bundleTag := fmt.Sprintf("%s/%s:%s", hostAddr, installer.GetBundleName(osBundle), k8sVersion)
+	pushCmd := exec.CommandContext(ctx, imgpkgPath, "push", "-f", bundleDir, "-i", bundleTag) // #nosec G204 -- fixed args, no user input
+	if output, err := pushCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to push local k8s bundle %s: %w\n%s", k8sVersion, err, output)
+	}
+	return nil
+}
+
+// dedupeStrings drops repeats while preserving first-seen order (e.g. when the cluster's starting
+// version and an upgrade target happen to be the same version).
+func dedupeStrings(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // k8sBundleArchNames maps a Go GOARCH to the Debian architecture name (for apt/containerd

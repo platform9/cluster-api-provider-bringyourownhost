@@ -43,6 +43,13 @@ const (
 	CNIPath           = "CNI"
 	CNIResources      = "CNI_RESOURCES"
 	IPFamily          = "IP_FAMILY"
+
+	// kubernetesVersionUpgradeTo is the target version cluster_upgrade_test.go and
+	// clusterclass_upgrade_test.go both upgrade a cluster to. Kept as a single shared constant
+	// (rather than a literal duplicated in each spec file) so ensureLocalK8sBundleRegistry below
+	// knows to also build a bundle for it -- an upgrade needs an installable bundle for its target
+	// version, not just the one the cluster starts on.
+	kubernetesVersionUpgradeTo = "v1.31.2"
 )
 
 // Shared docker-host command-line flags used across this package's e2e specs.
@@ -264,7 +271,7 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	Expect(err).NotTo(HaveOccurred())
 
 	By("making a k8s installer bundle reachable, without quay.io")
-	bundleRepoForContainers, bundleRepoInsecureForContainers, err = ensureLocalK8sBundleRegistry(context.Background(), dockerClientForRegistry, dockerNetworkInterfaceKind, e2eConfig.GetVariableOrEmpty(KubernetesVersion))
+	bundleRepoForContainers, bundleRepoInsecureForContainers, err = ensureLocalK8sBundleRegistry(context.Background(), dockerClientForRegistry, dockerNetworkInterfaceKind, e2eConfig.GetVariableOrEmpty(KubernetesVersion), kubernetesVersionUpgradeTo)
 	Expect(err).NotTo(HaveOccurred())
 
 	clusterConName = e2eConfig.ManagementClusterName
