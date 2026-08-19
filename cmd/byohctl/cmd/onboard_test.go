@@ -433,6 +433,40 @@ func TestWriteBootstrapCredential(t *testing.T) {
 	require.Equal(t, "test-tenant-ns", string(namespace))
 }
 
+// TestWriteBootstrapCredentialInsecure covers the reason --insecure has to touch the
+// kubeconfig at all: the host agent reads this file after byohctl exits and has no TLS flags
+// of its own, so the setting has to be recorded rather than merely applied in-process.
+func TestWriteBootstrapCredentialInsecure(t *testing.T) {
+	byohDir := t.TempDir()
+	origConfDir := bootstrapAgentConfDir
+	bootstrapAgentConfDir = t.TempDir()
+	origInsecure := insecure
+	insecure = true
+	t.Cleanup(func() {
+		bootstrapAgentConfDir = origConfDir
+		insecure = origInsecure
+	})
+
+	srcPath := filepath.Join(t.TempDir(), "bootstrap-kubeconfig.yaml")
+	const kubeconfigContent = `apiVersion: v1
+kind: Config
+clusters:
+- name: du
+  cluster:
+    server: https://du.example.com
+    certificate-authority-data: dGVzdA==
+current-context: ""
+`
+	require.NoError(t, os.WriteFile(srcPath, []byte(kubeconfigContent), 0o600))
+
+	require.NoError(t, writeBootstrapCredential(byohDir, srcPath, "test-tenant-ns"))
+
+	written, err := os.ReadFile(filepath.Join(bootstrapAgentConfDir, "bootstrap-kubeconfig.yaml"))
+	require.NoError(t, err)
+	require.Contains(t, string(written), "insecure-skip-tls-verify: true")
+	require.NotContains(t, string(written), "certificate-authority-data")
+}
+
 func TestWriteBootstrapCredentialMissingSource(t *testing.T) {
 	byohDir := t.TempDir()
 	origConfDir := bootstrapAgentConfDir
