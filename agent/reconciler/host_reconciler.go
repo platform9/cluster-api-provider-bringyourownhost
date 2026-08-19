@@ -152,6 +152,14 @@ func (r *HostReconciler) reconcileNormal(ctx context.Context, byoHost *infrastru
 			}
 			r.Recorder.Event(byoHost, corev1.EventTypeNormal, "InstallScriptExecutionSucceeded", "install script executed")
 			conditions.MarkTrue(byoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded)
+
+			// Install can run long enough for the bootstrap secret to have been rotated in the meantime (e.g. CABPK issuing a fresh kubeadm join token); re-read it rather than joining with the copy fetched before install started.
+			bootstrapScript, err = r.getBootstrapScript(ctx, byoHost.Spec.BootstrapSecret.Name, byoHost.Spec.BootstrapSecret.Namespace)
+			if err != nil {
+				logger.Error(err, "error getting bootstrap script")
+				r.Recorder.Eventf(byoHost, corev1.EventTypeWarning, "ReadBootstrapSecretFailed", "bootstrap secret %s not found", byoHost.Spec.BootstrapSecret.Name)
+				return ctrl.Result{}, err
+			}
 		} else {
 			logger.Info("install script already executed")
 		}
