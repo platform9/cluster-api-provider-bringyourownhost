@@ -131,13 +131,6 @@ func (r *HostReconciler) reconcileNormal(ctx context.Context, byoHost *infrastru
 	}
 
 	if !conditions.IsTrue(byoHost, infrastructurev1beta1.K8sNodeBootstrapSucceeded) {
-		bootstrapScript, err := r.getBootstrapScript(ctx, byoHost.Spec.BootstrapSecret.Name, byoHost.Spec.BootstrapSecret.Namespace)
-		if err != nil {
-			logger.Error(err, "error getting bootstrap script")
-			r.Recorder.Eventf(byoHost, corev1.EventTypeWarning, "ReadBootstrapSecretFailed", "bootstrap secret %s not found", byoHost.Spec.BootstrapSecret.Name)
-			return ctrl.Result{}, err
-		}
-
 		if r.SkipK8sInstallation {
 			logger.Info("Skipping installation of k8s components")
 		} else if !conditions.IsTrue(byoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded) {
@@ -146,22 +139,24 @@ func (r *HostReconciler) reconcileNormal(ctx context.Context, byoHost *infrastru
 				conditions.MarkFalse(byoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded, infrastructurev1beta1.K8sInstallationSecretUnavailableReason, clusterv1.ConditionSeverityInfo, "")
 				return ctrl.Result{}, nil
 			}
-			err = r.executeInstallerController(ctx, byoHost)
+			err := r.executeInstallerController(ctx, byoHost)
 			if err != nil {
 				return ctrl.Result{}, err
 			}
 			r.Recorder.Event(byoHost, corev1.EventTypeNormal, "InstallScriptExecutionSucceeded", "install script executed")
 			conditions.MarkTrue(byoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded)
 
-			// Install can run long enough for the bootstrap secret to have been rotated in the meantime (e.g. CABPK issuing a fresh kubeadm join token); re-read it rather than joining with the copy fetched before install started.
-			bootstrapScript, err = r.getBootstrapScript(ctx, byoHost.Spec.BootstrapSecret.Name, byoHost.Spec.BootstrapSecret.Namespace)
-			if err != nil {
-				logger.Error(err, "error getting bootstrap script")
-				r.Recorder.Eventf(byoHost, corev1.EventTypeWarning, "ReadBootstrapSecretFailed", "bootstrap secret %s not found", byoHost.Spec.BootstrapSecret.Name)
-				return ctrl.Result{}, err
-			}
+			// Install has no fixed time bound, so reading BootstrapSecret here and joining with it now would risk a copy CABPK has since rotated. Read+join happens on the next reconcile instead, with nothing slow in between.
+			return ctrl.Result{}, nil
 		} else {
 			logger.Info("install script already executed")
+		}
+
+		bootstrapScript, err := r.getBootstrapScript(ctx, byoHost.Spec.BootstrapSecret.Name, byoHost.Spec.BootstrapSecret.Namespace)
+		if err != nil {
+			logger.Error(err, "error getting bootstrap script")
+			r.Recorder.Eventf(byoHost, corev1.EventTypeWarning, "ReadBootstrapSecretFailed", "bootstrap secret %s not found", byoHost.Spec.BootstrapSecret.Name)
+			return ctrl.Result{}, err
 		}
 
 		err = r.cleank8sdirectories(ctx)

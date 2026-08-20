@@ -149,6 +149,8 @@ var _ = Describe("Byohost Agent Tests", func() {
 			})
 
 			It("should return an error if we fail to load the bootstrap secret", func() {
+				// BootstrapSecret is only read once install has succeeded (see host_reconciler.go), so pre-mark install done to reach that read.
+				conditions.MarkTrue(byoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded)
 				byoHost.Spec.BootstrapSecret = &corev1.ObjectReference{
 					Kind:      kindSecret,
 					Namespace: nonExistentName,
@@ -304,6 +306,11 @@ runCmd:
 					})
 
 					It("should set K8sNodeBootstrapSucceeded to True if the boostrap execution succeeds", func() {
+						// install lands on the first reconcile, join on the next (see host_reconciler.go)
+						_, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
+							NamespacedName: byoHostLookupKey,
+						})
+						Expect(reconcilerErr).ToNot(HaveOccurred())
 
 						result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 							NamespacedName: byoHostLookupKey,
@@ -357,7 +364,13 @@ runCmd:
 							return nil
 						}
 
-						// first reconcile: install succeeds, join fails on the stale/expired token
+						// first reconcile: install only (see host_reconciler.go -- join lands on the next reconcile)
+						_, installErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
+							NamespacedName: byoHostLookupKey,
+						})
+						Expect(installErr).ToNot(HaveOccurred())
+
+						// second reconcile: join fails on the stale/expired token
 						_, firstErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 							NamespacedName: byoHostLookupKey,
 						})
@@ -381,7 +394,7 @@ runCmd:
 						latest.Data["value"] = []byte(freshSecretData)
 						Expect(k8sClient.Update(ctx, latest)).To(Succeed())
 
-						// second reconcile: install is skipped, so this attempt reads the secret fresh with no gap
+						// third reconcile: install is already done, so this attempt reads the secret fresh with no gap
 						_, secondErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 							NamespacedName: byoHostLookupKey,
 						})
@@ -529,15 +542,20 @@ runCmd:
 							Status: corev1.ConditionTrue,
 						}))
 
-						// assert events
+						// assert events -- join lands on the next reconcile (see host_reconciler.go), so only the install event has fired so far
 						events := eventutils.CollectEvents(recorder.Events)
 						Expect(events).Should(ConsistOf([]string{
 							eventInstallScriptExecutionSucceeded,
-							eventBootstrapK8sNodeSucceeded,
 						}))
 					})
 
 					It("should set K8sNodeBootstrapSucceeded to True if the boostrap execution succeeds", func() {
+						// install lands on the first reconcile, join on the next (see host_reconciler.go)
+						_, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
+							NamespacedName: byoHostLookupKey,
+						})
+						Expect(reconcilerErr).ToNot(HaveOccurred())
+
 						result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 							NamespacedName: byoHostLookupKey,
 						})

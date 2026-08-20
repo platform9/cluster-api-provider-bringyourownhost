@@ -137,12 +137,19 @@ func TestHostReconciler_HeartbeatSurvivesConcurrentConditionPatch(t *testing.T) 
 		t.Fatal("Reconcile did not return in time")
 	}
 
-	updated := &infrastructurev1beta1.ByoHost{}
-	require.NoError(t, k8sClient.Get(t.Context(), key, updated))
+	afterInstall := &infrastructurev1beta1.ByoHost{}
+	require.NoError(t, k8sClient.Get(t.Context(), key, afterInstall))
 
-	installCond := conditions.Get(updated, infrastructurev1beta1.K8sComponentsInstallationSucceeded)
+	installCond := conditions.Get(afterInstall, infrastructurev1beta1.K8sComponentsInstallationSucceeded)
 	require.NotNil(t, installCond)
 	assert.Equal(t, corev1.ConditionTrue, installCond.Status)
+
+	// join lands on its own reconcile (see host_reconciler.go) -- one more, fast, call to reach it
+	_, err := r.Reconcile(t.Context(), controllerruntime.Request{NamespacedName: key})
+	require.NoError(t, err)
+
+	updated := &infrastructurev1beta1.ByoHost{}
+	require.NoError(t, k8sClient.Get(t.Context(), key, updated))
 
 	bootstrapCond := conditions.Get(updated, infrastructurev1beta1.K8sNodeBootstrapSucceeded)
 	require.NotNil(t, bootstrapCond)
