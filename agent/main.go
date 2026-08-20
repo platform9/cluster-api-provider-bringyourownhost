@@ -1,4 +1,5 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package main
@@ -27,6 +28,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/rest"
 	klog "k8s.io/klog/v2"
 	"k8s.io/klog/v2/klogr"
@@ -35,6 +37,31 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+)
+
+// DefaultHeartbeatInterval is how often the agent refreshes its ByoHost
+// heartbeat timestamp, unless overridden via the --heartbeat-interval flag.
+const DefaultHeartbeatInterval = 30 * time.Second
+
+// DefaultMaxBlockingDuration bounds how long the agent keeps pulsing
+// heartbeats during a single kubeadm install/join call, unless overridden
+// via the --max-blocking-duration flag. Comfortably above any legitimate
+// install or join duration, so it only ever kicks in for a genuinely
+// wedged call.
+const DefaultMaxBlockingDuration = 30 * time.Minute
+
+var (
+	namespace           string
+	scheme              *runtime.Scheme
+	labels              = make(labelFlags)
+	metricsbindaddress  string
+	downloadpath        string
+	skipInstallation    bool
+	printVersion        bool
+	bootstrapKubeConfig string
+	certExpiryDuration  int64
+	heartbeatInterval   time.Duration
+	maxBlockingDuration time.Duration
 )
 
 // labelFlags is a flag that holds a map of label key values.
@@ -84,16 +111,24 @@ func (l *labelFlags) Set(value string) error {
 	}
 }
 
-// DefaultHeartbeatInterval is how often the agent refreshes its ByoHost
-// heartbeat timestamp, unless overridden via the --heartbeat-interval flag.
-const DefaultHeartbeatInterval = 30 * time.Second
+// agentOptions is the flag-derived configuration the manager and the host
+// reconciler need.
+type agentOptions struct {
+	hostName            string
+	namespace           string
+	metricsBindAddress  string
+	downloadPath        string
+	skipInstallation    bool
+	heartbeatInterval   time.Duration
+	maxBlockingDuration time.Duration
 
-// DefaultMaxBlockingDuration bounds how long the agent keeps pulsing
-// heartbeats during a single kubeadm install/join call, unless overridden
-// via the --max-blocking-duration flag. Comfortably above any legitimate
-// install or join duration, so it only ever kicks in for a genuinely
-// wedged call.
-const DefaultMaxBlockingDuration = 30 * time.Minute
+	// exit terminates the process after a successful agent upgrade install,
+	// so the process supervisor (systemd's Restart=always) relaunches from
+	// the same fixed ExecStart path, which by then points at the newly
+	// installed binary. See docs/proposals/agent-self-upgrade-adr.md §2.2
+	// step 5 for why this is preferred over syscall.Exec.
+	exit func()
+}
 
 func setupflags() {
 	klog.InitFlags(nil)
@@ -121,6 +156,19 @@ func setupflags() {
 	feature.MutableGates.AddFlag(pflag.CommandLine)
 }
 
+// newScheme returns the scheme covering every type the agent reads or writes.
+// A registration failure means a type was built wrong, which no caller can
+// recover from, so it panics rather than reporting.
+func newScheme() *runtime.Scheme {
+	s := runtime.NewScheme()
+	utilruntime.Must(infrastructurev1beta1.AddToScheme(s))
+	utilruntime.Must(corev1.AddToScheme(s))
+	utilruntime.Must(clusterv1.AddToScheme(s))
+	utilruntime.Must(certv1.AddToScheme(s))
+
+	return s
+}
+
 func setupTemplateParser() *cloudinit.TemplateParser {
 	var templateParser *cloudinit.TemplateParser
 	if registration.LocalHostRegistrar.ByoHostInfo.DefaultNetworkInterfaceName == "" {
@@ -135,127 +183,54 @@ func setupTemplateParser() *cloudinit.TemplateParser {
 	return templateParser
 }
 
-var (
-	namespace           string
-	scheme              *runtime.Scheme
-	labels              = make(labelFlags)
-	metricsbindaddress  string
-	downloadpath        string
-	skipInstallation    bool
-	printVersion        bool
-	bootstrapKubeConfig string
-	certExpiryDuration  int64
-	heartbeatInterval   time.Duration
-	maxBlockingDuration time.Duration
-)
-
-// TODO - fix logging
-func main() {
-	setupflags()
-	pflag.Parse()
-	if printVersion {
-		info := version.Get()
-		fmt.Printf("byoh-hostagent version: %#v\n", info)
-		return
-	}
-	scheme = runtime.NewScheme()
-	_ = infrastructurev1beta1.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
-	_ = clusterv1.AddToScheme(scheme)
-	_ = certv1.AddToScheme(scheme)
-
-	// klogr predates the textlogger migration; swapping formats is a separate, deliberate
-	// change outside this dependency bump's scope (see main.go for the same rationale).
-	logger := klogr.New() //nolint: staticcheck
-	ctrl.SetLogger(logger)
-	hostName, err := os.Hostname()
-	if err != nil {
-		logger.Error(err, "could not determine hostname")
-		return
-	}
-
-	_, err = os.Stat(registration.GetBYOHConfigPath())
-	// Enable bootstrap flow if --bootstrap-kubeconfig is provided
-	// and config doesn't already exists in ~/.byoh/
-	if bootstrapKubeConfig != "" && errors.Is(err, os.ErrNotExist) {
-		if err = handleBootstrapFlow(logger, hostName); err != nil {
-			logger.Error(err, "bootstrap flow failed")
-			os.Exit(1)
-		}
-	}
-	// Handle restart flow or if the ~/.byoh/config already exists
-	config := getConfig(logger)
-	k8sClient := getClient(logger, config)
-	registration.LocalHostRegistrar = &registration.HostRegistrar{K8sClient: k8sClient}
-	err = registration.LocalHostRegistrar.Register(hostName, namespace, labels)
-	if err != nil {
-		logger.Error(err, "error registering host %s registration in namespace %s", hostName, namespace)
-		return
-	}
-
-	// Start certificate rotation goroutine.
-	// This is behind a feature flag for now. Set 'CERTIFICATE_ROTATION=true' to enable it.
-	if os.Getenv("CERTIFICATE_ROTATION") == "true" {
-		go func() {
-			err = certificateRotation(logger, hostName, config)
-			if err != nil {
-				logger.Error(err, "certificate rotation failed")
-				return
-			}
-		}()
-	}
-
+// newManager builds the agent's controller manager. Its cache is scoped to
+// this host's namespace, and within that namespace to this host's own ByoHost,
+// so an agent never caches objects belonging to other hosts.
+func newManager(config *rest.Config, opts *agentOptions) (ctrl.Manager, error) {
 	mgr, err := ctrl.NewManager(config, ctrl.Options{
 		Scheme: scheme,
 		Cache: cache.Options{
-			// Scope the cache to this host's own namespace...
-			DefaultNamespaces: map[string]cache.Config{namespace: {}},
-			// ...and, within it, to the filtered watch of ByoHost based on the host
-			// name so only the ByoHost running for this host will be cached.
+			DefaultNamespaces: map[string]cache.Config{opts.namespace: {}},
 			ByObject: map[client.Object]cache.ByObject{
 				&infrastructurev1beta1.ByoHost{}: {
-					Field: fields.SelectorFromSet(fields.Set{"metadata.name": hostName}),
+					Field: fields.SelectorFromSet(fields.Set{"metadata.name": opts.hostName}),
 				},
 			},
 		},
-		Metrics: metricsserver.Options{BindAddress: metricsbindaddress},
+		Metrics: metricsserver.Options{BindAddress: opts.metricsBindAddress},
 	})
 	if err != nil {
-		logger.Error(err, "unable to start manager")
-		return
+		return nil, fmt.Errorf("create manager: %w", err)
 	}
 
-	if skipInstallation {
-		logger.Info("skip-installation flag set, skipping installer initialisation")
-	}
+	return mgr, nil
+}
+
+// setupHostReconciler registers the host reconciler with mgr. ctx must be the
+// context that also stops mgr: the reconciler's event filter captures it, so
+// one with a different lifetime leaves that filter running past the manager,
+// or dead before it.
+func setupHostReconciler(ctx context.Context, mgr ctrl.Manager, k8sClient client.Client, opts *agentOptions) error {
 	hostReconciler := &reconciler.HostReconciler{
-		Client:         k8sClient,
-		CmdRunner:      cloudinit.CmdRunner{},
-		FileWriter:     cloudinit.FileWriter{},
-		TemplateParser: setupTemplateParser(),
-		LookPath:       exec.LookPath,
-		PackagePull:    cloudinit.Pull,
-		// Exit terminates the process after a successful agent upgrade
-		// install, so the process supervisor (systemd's Restart=always)
-		// relaunches from the same fixed ExecStart path, which by then
-		// points at the newly installed binary. See
-		// docs/proposals/agent-self-upgrade-adr.md §2.2 step 5 for why this
-		// is preferred over syscall.Exec.
-		Exit:                func() { os.Exit(0) },
+		Client:              k8sClient,
+		CmdRunner:           cloudinit.CmdRunner{},
+		FileWriter:          cloudinit.FileWriter{},
+		TemplateParser:      setupTemplateParser(),
+		LookPath:            exec.LookPath,
+		PackagePull:         cloudinit.Pull,
+		Exit:                opts.exit,
 		Recorder:            mgr.GetEventRecorderFor("hostagent-controller"),
-		SkipK8sInstallation: skipInstallation,
-		DownloadPath:        downloadpath,
-		HeartbeatInterval:   heartbeatInterval,
-		MaxBlockingDuration: maxBlockingDuration,
+		SkipK8sInstallation: opts.skipInstallation,
+		DownloadPath:        opts.downloadPath,
+		HeartbeatInterval:   opts.heartbeatInterval,
+		MaxBlockingDuration: opts.maxBlockingDuration,
 	}
-	if err = hostReconciler.SetupWithManager(context.TODO(), mgr); err != nil {
-		logger.Error(err, "unable to create controller")
-		return
+
+	if err := hostReconciler.SetupWithManager(ctx, mgr); err != nil {
+		return fmt.Errorf("create host reconciler: %w", err)
 	}
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		logger.Error(err, "problem running manager")
-		return
-	}
+
+	return nil
 }
 
 func handleBootstrapFlow(logger logr.Logger, hostName string) error {
@@ -331,4 +306,93 @@ func getClient(logger logr.Logger, config *rest.Config) client.Client {
 	}
 
 	return k8sClient
+}
+
+// TODO - fix logging
+func main() {
+	setupflags()
+	pflag.Parse()
+	if printVersion {
+		info := version.Get()
+		fmt.Printf("byoh-hostagent version: %#v\n", info)
+		return
+	}
+	scheme = newScheme()
+
+	// klogr predates the textlogger migration; swapping formats is a separate, deliberate
+	// change outside this dependency bump's scope (see main.go for the same rationale).
+	logger := klogr.New() //nolint: staticcheck
+	ctrl.SetLogger(logger)
+
+	// SetupSignalHandler panics on a second call, so one context is built
+	// here for both the reconciler registration and mgr.Start.
+	ctx := ctrl.SetupSignalHandler()
+
+	hostName, err := os.Hostname()
+	if err != nil {
+		logger.Error(err, "could not determine hostname")
+		return
+	}
+
+	_, err = os.Stat(registration.GetBYOHConfigPath())
+	// Enable bootstrap flow if --bootstrap-kubeconfig is provided
+	// and config doesn't already exists in ~/.byoh/
+	if bootstrapKubeConfig != "" && errors.Is(err, os.ErrNotExist) {
+		if err = handleBootstrapFlow(logger, hostName); err != nil {
+			logger.Error(err, "bootstrap flow failed")
+			os.Exit(1)
+		}
+	}
+	// Handle restart flow or if the ~/.byoh/config already exists
+	config := getConfig(logger)
+	k8sClient := getClient(logger, config)
+	registration.LocalHostRegistrar = &registration.HostRegistrar{K8sClient: k8sClient}
+	err = registration.LocalHostRegistrar.Register(hostName, namespace, labels)
+	if err != nil {
+		logger.Error(err, "error registering host %s registration in namespace %s", hostName, namespace)
+		return
+	}
+
+	// Start certificate rotation goroutine.
+	// This is behind a feature flag for now. Set 'CERTIFICATE_ROTATION=true' to enable it.
+	if os.Getenv("CERTIFICATE_ROTATION") == "true" {
+		go func() {
+			err = certificateRotation(logger, hostName, config)
+			if err != nil {
+				logger.Error(err, "certificate rotation failed")
+				return
+			}
+		}()
+	}
+
+	opts := &agentOptions{
+		hostName:            hostName,
+		namespace:           namespace,
+		metricsBindAddress:  metricsbindaddress,
+		downloadPath:        downloadpath,
+		skipInstallation:    skipInstallation,
+		heartbeatInterval:   heartbeatInterval,
+		maxBlockingDuration: maxBlockingDuration,
+		exit:                func() { os.Exit(0) },
+	}
+
+	mgr, err := newManager(config, opts)
+	if err != nil {
+		logger.Error(err, "unable to start manager")
+		return
+	}
+
+	if skipInstallation {
+		logger.Info("skip-installation flag set, skipping installer initialisation")
+	}
+
+	if err := setupHostReconciler(ctx, mgr, k8sClient, opts); err != nil {
+		logger.Error(err, "unable to create controller")
+		return
+	}
+
+	if err := mgr.Start(ctx); err != nil {
+		logger.Error(err, "problem running manager")
+		return
+	}
 }
