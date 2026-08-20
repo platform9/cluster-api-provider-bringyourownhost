@@ -41,6 +41,7 @@ jobs:
     - name: Wait for controller manager image build
       if: ${{ github.event_name != 'workflow_dispatch' }}
       id: wait
+      timeout-minutes: 5
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: bash .ci/wait-for-job.sh build-controller-manager.yml build-controller-manager "${{ github.event.pull_request.head.sha || github.sha }}"
@@ -56,6 +57,7 @@ jobs:
     - name: Wait for agent bundle build
       if: ${{ github.event_name != 'workflow_dispatch' }}
       id: wait-bundle
+      timeout-minutes: 5
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: bash .ci/wait-for-job.sh build-agent-bundle.yml build-agent-bundle "${{ github.event.pull_request.head.sha || github.sha }}"
