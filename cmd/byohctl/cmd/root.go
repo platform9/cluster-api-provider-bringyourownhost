@@ -19,6 +19,14 @@ This tool helps onboard hosts to your Platform9 deployment.`,
 		if err := utils.InitLoggers(service.ByohDir, true); err != nil {
 			return fmt.Errorf("failed to initialize loggers: %v", err)
 		}
+		// onboard's own package install is about to make this warning's advice moot
+		// (it installs the canonical copy itself), so skip it there - it would otherwise
+		// fire on every single onboarding, the one invocation where it's guaranteed noise.
+		if cmd.Name() != "onboard" {
+			if ok, msg := service.CheckCanonicalPath(); !ok {
+				utils.LogWarn("%s", msg)
+			}
+		}
 		return nil
 	},
 }

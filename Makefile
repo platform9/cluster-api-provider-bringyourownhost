@@ -426,6 +426,7 @@ $(PF9_BYOHOST_SRCDIR):
 	mkdir -p $@
 
 AGENT_SRC_DIR := $(REPO_ROOT)
+BYOHCTL_DIR := $(REPO_ROOT)/cmd/byohctl
 RPM_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/rpmsrc
 DEB_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/debsrc
 
@@ -457,7 +458,11 @@ build-host-agent-rpm:  $(PF9_BYOHOST_RPM_FILE)
 
 #########################################################################
 # Independent of build-host-agent-binary/RELEASE_DIR, which stay pinned to amd64 for the release artifact.
-$(COMMON_SRC_ROOT):
+# byohctl reuses the same PACKAGE_GOARCH so both binaries in the package always match one arch.
+build-byohctl-binary:
+	$(MAKE) -C $(BYOHCTL_DIR) build GOARCH=$(PACKAGE_GOARCH)
+
+$(COMMON_SRC_ROOT): build-byohctl-binary
 	echo "Building COMMON_SRC_ROOT"
 	mkdir -p $(COMMON_SRC_ROOT)
 	echo "BUILDING COMMON_SRC_ROOT/binary for GOARCH=$(PACKAGE_GOARCH)"
@@ -468,6 +473,10 @@ $(COMMON_SRC_ROOT):
 	echo "BUILDING dir for pf9-byohost-service , COPING service pf9-byoh-agent.service "
 	mkdir -p $(COMMON_SRC_ROOT)/etc/systemd/system/
 	cp $(AGENT_SRC_DIR)/service/pf9-byohostagent.service $(COMMON_SRC_ROOT)/etc/systemd/system/pf9-byohost-agent.service
+	echo "BUILDING COMMON_SRC_ROOT/usr/bin COPING binary byohctl"
+	mkdir -p $(COMMON_SRC_ROOT)/usr/bin
+	cp $(BYOHCTL_DIR)/bin/byohctl $(COMMON_SRC_ROOT)/usr/bin/byohctl
+	chmod +x $(COMMON_SRC_ROOT)/usr/bin/byohctl
 
 $(DEB_SRC_ROOT): | $(COMMON_SRC_ROOT)
 	cp -a  $(COMMON_SRC_ROOT) $(DEB_SRC_ROOT)
