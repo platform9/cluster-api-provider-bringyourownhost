@@ -51,18 +51,22 @@ func spinUpByoHosts(ctx context.Context, dockerClient *client.Client, namespace 
 		if err != nil {
 			return hosts, err
 		}
-		output, containerID, err := runner.ExecByoDockerHost(byohost)
+
+		hosts = append(hosts, byoHostHandle{
+			Name:        byoHostName,
+			ContainerID: byohost.ID,
+			StopLog:     func() {},
+			LogFilePath: "",
+		})
+
+		output, _, err := runner.ExecByoDockerHost(byohost)
 		if err != nil {
 			return hosts, err
 		}
 
 		logFilePath := fmt.Sprintf("/tmp/host-agent-%s.log", byoHostName)
-		hosts = append(hosts, byoHostHandle{
-			Name:        byoHostName,
-			ContainerID: containerID,
-			StopLog:     StreamDockerLog(output, logFilePath),
-			LogFilePath: logFilePath,
-		})
+		hosts[len(hosts)-1].StopLog = StreamDockerLog(output, logFilePath)
+		hosts[len(hosts)-1].LogFilePath = logFilePath
 	}
 
 	return hosts, nil
