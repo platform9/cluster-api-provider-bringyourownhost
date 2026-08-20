@@ -100,6 +100,13 @@ type DesiredAgentSpec struct {
 	// above already covers. The agent refuses to install on mismatch.
 	// +optional
 	PackageChecksum string `json:"packageChecksum,omitempty"`
+
+	// AssignedAt is when the ByoHostAgentUpgrade rollout controller set
+	// this field, used to measure elapsed time against
+	// ByoHostAgentUpgradeSpec.PerHostTimeout. Only the controller reads or
+	// writes it; the agent ignores it.
+	// +optional
+	AssignedAt metav1.Time `json:"assignedAt,omitempty"`
 }
 
 // HostInfo is a set of details about the host platform.

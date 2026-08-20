@@ -153,9 +153,9 @@ On top of `ByoHostStatus.AgentVersion`
 
 ```go
 // DesiredAgent, when set, drives a managed agent upgrade on this host. The
-// three fields below are always set together — see DesiredAgentSpec — so
-// nil unambiguously means "no managed upgrade in progress," rather than
-// relying on convention across three independently-optional strings.
+// fields below are always set together — see DesiredAgentSpec — so nil
+// unambiguously means "no managed upgrade in progress," rather than
+// relying on convention across independently-optional fields.
 // +optional
 DesiredAgent *DesiredAgentSpec `json:"desiredAgent,omitempty"`
 
@@ -187,6 +187,12 @@ type DesiredAgentSpec struct {
 	// AgentUpgradeSucceeded=False with reason PackageChecksumMismatch.
 	// +optional
 	PackageChecksum string `json:"packageChecksum,omitempty"`
+
+	// AssignedAt is when the rollout controller set this field, used to
+	// measure elapsed time against PerHostTimeout (§2.3). Only the
+	// controller reads or writes it; the agent ignores it.
+	// +optional
+	AssignedAt metav1.Time `json:"assignedAt,omitempty"`
 }
 ```
 
@@ -200,10 +206,21 @@ duplicate logic the controller already owns and risks two different answers if i
 with itself. Selector evaluation stays the controller's job alone, for every host, all the time.
 `PackageChecksum` follows for the identical reason, not a separate one: since the agent can't reach
 the CR at all, anything it needs to act on has to be pushed down alongside the URL — there's no
-cheaper alternative once the URL is already there. Grouping the three fields under one struct
-(rather than three top-level, independently-optional strings) was a deliberate refinement over the
-original sketch: the controller only ever sets or reads them as a unit, so the type now enforces
-that invariant instead of relying on convention.
+cheaper alternative once the URL is already there. Grouping these fields under one struct (rather
+than independently-optional top-level fields) was a deliberate refinement over the original sketch:
+the controller only ever sets or reads them as a unit, so the type now enforces that invariant
+instead of relying on convention.
+
+**Revision (post-implementation review):** `AssignedAt` was added after `ByoHostAgentUpgradeStatus`
+already shipped with a separate `InFlightHosts []ByoHostUpgradeAttempt` list, tracking exactly the
+same fact (when a host was assigned) one level removed from the host it's about. Every tick, that
+list had to be rebuilt from a lookup keyed by host name, falling back to `metav1.Now()` for any
+host missing an entry — bookkeeping that can drift from the host it describes (e.g. across a retry
+via a second `ByoHostAgentUpgrade` targeting the same host). Moving the timestamp onto
+`DesiredAgentSpec` itself removes that whole class of bug: it's stamped exactly once, at the same
+write that sets `Version`/`PackageURL`/`PackageChecksum`, and read directly off the host the
+controller already has in hand — no separate list to keep in sync. `ByoHostAgentUpgradeStatus` no
+longer has an `InFlightHosts` field at all.
 
 Two new labels, mirroring the existing `AttachedByoMachineLabel` domain and pattern
 (`byoh.infrastructure.cluster.x-k8s.io/...`, `apis/infrastructure/v1beta1/byohost_types.go:21`,

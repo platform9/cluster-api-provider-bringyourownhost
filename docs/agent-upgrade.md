@@ -28,8 +28,9 @@ A single optional `desiredAgent` field on `ByoHostSpec` drives a host's own upgr
 | `desiredAgent.version` | The agent version this host should be running. Compared against the agent's own build version every reconcile tick. |
 | `desiredAgent.packageURL` | An OCI image reference — pulled via `imgpkg pull`, the same mechanism already used for k8s-component bundles — for a bundle containing the `.deb`/`.rpm` that installs `desiredAgent.version`. Pin this by digest (`@sha256:...`) for integrity; it's not templated and doesn't point at a Secret. |
 | `desiredAgent.packageChecksum` | Optional `sha256:<hex>` checksum of the specific `.deb`/`.rpm` extracted from the bundle (not the OCI image itself — digest-pinning the reference already covers that). |
+| `desiredAgent.assignedAt` | When the rollout controller assigned this upgrade. Only the controller reads this (to enforce `perHostTimeout`, below); the agent ignores it. |
 
-All three are always set together, as one object, by the `ByoHostAgentUpgrade` rollout controller
+All four are always set together, as one object, by the `ByoHostAgentUpgrade` rollout controller
 (below) — not by hand.
 
 On a mismatch between `desiredAgent.version` and its own version, the agent:
@@ -112,14 +113,15 @@ status:
   total: 4                  # hosts currently matching selector
   upgraded: 2                # hosts converged on targetVersion
   unavailableCount: 1        # see "What counts as unavailable" below
-  inFlightHosts:
-    - hostName: byohost-3
-      startedAt: "2026-08-16T12:00:00Z"
   failedHosts: []            # non-empty only once phase is Failed
   conditions:
     - type: RolloutAvailable
       status: "True"
 ```
+
+Per-host timing (when a host was assigned this rollout's `targetVersion`, which `perHostTimeout`
+measures against) lives on that host's own `ByoHost.spec.desiredAgent.assignedAt`, not here — the
+rollout controller stamps it in the same write as `version`/`packageURL`/`packageChecksum`.
 
 ### What counts as "unavailable," and why it matters
 

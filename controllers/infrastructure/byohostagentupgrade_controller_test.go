@@ -291,6 +291,8 @@ func TestByoHostAgentUpgradeController_PerHostTimeoutFailsAndHalts(t *testing.T)
 
 	upgrade = reconcileUpgrade(t, upgrade)
 	require.Equal(t, "v2.0.0", desiredVersion(refreshHost(t, stuck)))
+	require.NotEqual(t, infrastructurev1beta1.ByoHostAgentUpgradePhaseFailed, upgrade.Status.Phase,
+		"a host must not be treated as timed out on the same tick it was assigned")
 
 	time.Sleep(100 * time.Millisecond)
 	upgrade = reconcileUpgrade(t, upgrade)
