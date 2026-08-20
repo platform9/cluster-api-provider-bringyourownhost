@@ -74,17 +74,17 @@ func installSeams(t *testing.T, objs ...runtime.Object) (*client.Client, *testSe
 	service.KubeconfigFilePath = kubeconfigPath
 	t.Cleanup(func() { service.KubeconfigFilePath = origPath })
 
-	origGet := getK8sClient
-	getK8sClient = func(_ string) (*client.Client, error) { return fakeClient, nil }
-	t.Cleanup(func() { getK8sClient = origGet })
+	origGet := client.GetK8sClient
+	client.GetK8sClient = func(_ string) (*client.Client, error) { return fakeClient, nil }
+	t.Cleanup(func() { client.GetK8sClient = origGet })
 
 	seams := &testSeams{}
-	origAsk := askBool
-	askBool = func(_ string, _ ...interface{}) (bool, error) {
+	origAsk := utils.AskBool
+	utils.AskBool = func(_ string, _ ...interface{}) (bool, error) {
 		seams.askCalls++
 		return seams.askResp, seams.askErr
 	}
-	t.Cleanup(func() { askBool = origAsk })
+	t.Cleanup(func() { utils.AskBool = origAsk })
 
 	origPurge := service.PurgeDebianPackage
 	service.PurgeDebianPackage = func() error {
