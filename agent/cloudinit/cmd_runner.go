@@ -29,3 +29,14 @@ func (r CmdRunner) RunCmd(ctx context.Context, cmd string) error {
 	}
 	return nil
 }
+
+func Pull(ctx context.Context, ref, destDir string) error {
+	imgpkgPath, err := exec.LookPath("imgpkg")
+	if err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, imgpkgPath, "pull", "-i", ref, "-o", destDir) // #nosec G204 -- ref is admin-authored (ByoHostSpec.DesiredAgent.PackageURL), not external/untrusted input
+	cmd.Stderr = os.Stderr
+	cmd.Stdout = os.Stdout
+	return cmd.Run()
+}

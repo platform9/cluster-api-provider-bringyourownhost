@@ -171,7 +171,22 @@ var _ = Describe("Agent", func() {
 					return nil
 				}
 				return createdByoHost.ObjectMeta.Labels
-			}).Should(Equal(map[string]string{"site": "apac"}))
+			}).Should(HaveKeyWithValue("site", "apac"))
+		})
+
+		It("should mirror HostInfo.Architecture and the detected package family onto labels", func() {
+			byoHostLookupKey := types.NamespacedName{Name: hostName, Namespace: ns.Name}
+			createdByoHost := &infrastructurev1beta1.ByoHost{}
+			Eventually(func() map[string]string {
+				err := k8sClient.Get(context.TODO(), byoHostLookupKey, createdByoHost)
+				if err != nil {
+					return nil
+				}
+				return createdByoHost.ObjectMeta.Labels
+			}).Should(And(
+				HaveKeyWithValue(infrastructurev1beta1.HostArchitectureLabel, runtime.GOARCH),
+				HaveKeyWithValue(infrastructurev1beta1.HostOSFamilyLabel, infrastructurev1beta1.HostOSFamilyDebian),
+			))
 		})
 
 		It("should skip bootstrap kubeconfig flow in default mode", func() {
