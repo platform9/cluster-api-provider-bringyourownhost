@@ -336,7 +336,7 @@ func TestCertRotation(t *testing.T) {
 			var messages []string
 			logger := recordingLogger(&messages)
 
-			err := certRotation(logger, "test-host", &rest.Config{
+			err := certRotation(t.Context(), logger, "test-host", &rest.Config{
 				TLSClientConfig: rest.TLSClientConfig{CertData: tc.certData},
 			})
 

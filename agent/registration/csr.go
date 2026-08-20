@@ -1,4 +1,5 @@
 // Copyright 2022 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package registration
@@ -72,14 +73,14 @@ func NewByohCSR(bootstrapClientConfig *restclient.Config, logger logr.Logger, ex
 // BootstrapKubeconfig will create a CertificateSigningRequest for the host
 // its running on and once the CSR is approved it will fetch the Certificate
 // and create a kubeconfig which will be used then by the host reconciler
-func (bcsr *ByohCSR) BootstrapKubeconfig(hostName string) error {
+func (bcsr *ByohCSR) BootstrapKubeconfig(ctx context.Context, hostName string) error {
 	reqName, reqUID, err := bcsr.RequestBYOHClientCert(hostName)
 	if err != nil {
 		return err
 	}
 	bcsr.logger.Info("CSR request created")
 	// wait for certificate to be issued
-	ctx, cancel := context.WithTimeout(context.TODO(), CSRApprovalTimeout)
+	ctx, cancel := context.WithTimeout(ctx, CSRApprovalTimeout)
 	defer cancel()
 	bcsr.logger.Info("waiting for client certificate to be issued")
 	certData, err := csr.WaitForCertificate(ctx, bcsr.bootstrapClient, reqName, reqUID)
