@@ -1,4 +1,5 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package cloudinit
@@ -43,7 +44,7 @@ type Files struct {
 //   - parse the script to get the cloudinit data
 //   - execute the write_files directive
 //   - execute the run_cmd directive
-func (se ScriptExecutor) Execute(bootstrapScript string) error {
+func (se ScriptExecutor) Execute(ctx context.Context, bootstrapScript string) error {
 	cloudInitData := bootstrapConfig{}
 	if err := yaml.Unmarshal([]byte(bootstrapScript), &cloudInitData); err != nil {
 		return errors.Wrapf(err, "error parsing write_files action: %s", bootstrapScript)
@@ -74,7 +75,7 @@ func (se ScriptExecutor) Execute(bootstrapScript string) error {
 	}
 
 	for _, cmd := range cloudInitData.CommandsToExecute {
-		err := se.RunCmdExecutor.RunCmd(context.TODO(), cmd)
+		err := se.RunCmdExecutor.RunCmd(ctx, cmd)
 		if err != nil {
 			return errors.Wrap(err, fmt.Sprintf("Error running the command %s", cmd))
 		}
