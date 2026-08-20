@@ -1,3 +1,6 @@
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 package cmd
 
 import (
@@ -38,7 +41,7 @@ func runDeauthorise(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	err = pkg.PerformHostOperation(pkg.OperationDeauthorise, namespace)
+	err = pkg.PerformHostOperation(cmd.Context(), pkg.OperationDeauthorise, namespace)
 	if err != nil {
 		fmt.Println("Failed to deauthorise host. " + err.Error())
 		os.Exit(1)

@@ -453,7 +453,7 @@ func runOnboard(cmd *cobra.Command, args []string) {
 
 		// Check if region where user wants to onboard to is available for this tenant or not
 		// If not available, roll back the onboarding process
-		available, regions, err := k8sClient.CheckRegionAvailability(regionName)
+		available, regions, err := k8sClient.CheckRegionAvailability(cmd.Context(), regionName)
 		if err != nil {
 			utils.LogError("Failed to check region availability, rolling back onboarding process: %v", err)
 			if err := k8sClient.DeleteSavedKubeconfig(); err != nil {
