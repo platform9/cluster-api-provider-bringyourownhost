@@ -233,7 +233,9 @@ func TestByohostController_HeartbeatManagedFieldsTimeTracksServerWriteTime(t *te
 	// First write. Deliberately skewed 24h into the past, to prove the
 	// managedFields time is not derived from the value written into the field.
 	fresh := &infrastructurev1beta1.ByoHost{}
-	require.NoError(t, k8sManager.GetClient().Get(context.Background(), key, fresh))
+	require.Eventually(t, func() bool {
+		return k8sManager.GetClient().Get(context.Background(), key, fresh) == nil
+	}, 5*time.Second, 50*time.Millisecond, "expected the newly created ByoHost to appear in the cache")
 	helper, err := patch.NewHelper(fresh, k8sManager.GetClient())
 	require.NoError(t, err)
 	firstHeartbeat := metav1.NewTime(time.Now().Add(-24 * time.Hour))

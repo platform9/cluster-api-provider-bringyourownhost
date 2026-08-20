@@ -1,12 +1,20 @@
 ---
 name: code-comment-cleanup
-description: Audit the comments a PR/branch newly introduces and flag which ones are genuinely worth keeping vs. redundant or a future liability. Use when the user asks to "clean up comments", "review comments in this PR", "check the comments we added", or before merging a branch that added a lot of explanatory comments (agent-generated PRs especially tend to over-comment).
+description: Audit the comments a PR/branch newly introduces, plus any pre-existing comment the diff makes stale or redundant, and flag which ones are genuinely worth keeping vs. redundant or a future liability. Use when the user asks to "clean up comments", "review comments in this PR", "check the comments we added", or before merging a branch that added a lot of explanatory comments (agent-generated PRs especially tend to over-comment).
 ---
 
 # Code comment cleanup
 
-Goal: look only at comments a diff *adds*, and sort each into keep / trim / cut — don't
-re-litigate comments that already existed before this PR.
+Goal: sort every comment a diff *adds* into keep / trim / cut. Also sort any **pre-existing**
+comment the diff is *entangled with* — one whose factual claim the diff just made true, false,
+or redundant; one that predicted the very fix you just made; one you had to read to make the
+change. You own the shape of the code you touch, not just the lines the diff tool highlights —
+leaving an adjacent comment newly wrong, newly redundant, or newly vindicated-but-unremarked is
+a regression you introduced, even though nothing marks it as one. This is not license for a
+whole-file or whole-repo comment sweep: a pre-existing comment is in scope only when the diff
+itself changed whether that comment is true, needed, or unique — not merely because you read it
+or it sits near your edit. When in doubt, the question is "did my change alter the truth-value
+or necessity of this claim," not "did I happen to look at this."
 
 ## Rationale
 
@@ -72,6 +80,34 @@ stale macOS binary gets reused in a Linux container (`go install` has no GOOS/GO
 bind-mounted repo root → stale binary → "Exec format error") is a workaround-for-external-
 limitation KEEP case, but per the workaround test below, trim it to the one clause that
 matters rather than the full causal chain.
+
+## Step 1.5 — find pre-existing comments entangled with the diff
+
+For each hunk you just extracted, read the comment on the enclosing function/declaration too,
+not just the changed lines — `git diff`'s default context (3 lines) is usually too short to
+show a function-level docstring sitting above a change buried deeper in a long function. Ask
+of each pre-existing comment you encounter this way:
+
+- **Did the diff change the fact this comment states?** A comment describing the old
+  behavior of code the diff just rewrote is now simply wrong — that's a CUT-or-fix, not a
+  "leave it, predates the diff" case.
+- **Did the diff's own fix make the comment's claim newly true instead of aspirational?**
+  Worked example: a test's docstring claimed "polls with require.Eventually rather than a
+  single Get" while one code path in that same test still did a single Get — the docstring
+  was describing intent, not actual behavior. A diff that fixes the single Get to also poll
+  makes the docstring's claim fully accurate for the first time. That's worth noting (the
+  comment's status changed from aspirational to accurate) even though its text and verdict
+  don't change — not something to silently walk past.
+- **Did the diff add a new comment that duplicates one already sitting in the file?** This is
+  the repeated-copy CUT case from Step 2, just with the older copy being the pre-existing one
+  instead of the newer one — same test, same verdict (delete whichever copy is less clear or
+  less local, keep the other), it just runs in the opposite chronological direction from the
+  usual case.
+
+Do **not** open this pass on comments the diff never touched, wasn't adjacent to, and didn't
+change the truth of, purely because you happened to read the file. That's a full separate
+audit, not this skill's job — if the user wants that, they'll ask for it directly (e.g. via a
+repo-wide pass, not a PR-scoped cleanup).
 
 ## Step 2 — classify each comment
 
@@ -245,7 +281,10 @@ CUT case above: keep whichever instance is clearest or most locally relevant, cu
 Group findings by verdict. For each: file:line, the comment (or its first line if long), and
 a one-line reason tying it to the test above it failed/passed. Flag drift-liability trims
 separately even though they live under TRIM, since that's the reason a reviewer would want to
-know about, not just "too long."
+know about, not just "too long." Flag pre-existing comments from Step 1.5 separately too, and
+say explicitly why each is in scope despite predating the diff (fact the diff changed, claim
+the diff vindicated, older half of a duplicate) — a reviewer needs that justification to trust
+the verdict touches something outside the diff's own lines.
 
 If the diff added so many comments that a full one-by-one pass is impractical, triage rather
 than sample randomly: exported/public-surface doc comments first (wrong audience-targeting
@@ -258,7 +297,9 @@ Cutting/trimming comments still touches someone's finished work — confirm befo
 Default to confirming the Step 3 report as a whole (batch-approve the verdicts, not a
 per-comment back-and-forth); only drop to reviewing one-by-one if the user asks for that or
 pushes back on a specific verdict. Only ever remove or shorten CUT/TRIM comments; never touch a
-KEEP verdict, and never touch a comment that predates this diff.
+KEEP verdict. A comment that predates this diff stays untouched *unless* it earned a verdict
+via Step 1.5 — pre-existing comments the diff never made entangled with are exactly as off-limits
+as before; entangled ones are edited like any other CUT/TRIM.
 
 If the branch's history is going to be reshaped afterward (multi-commit PR, or the
 `git-history-cleanup` skill is coming next) — commit small, not one bulk commit. For each
