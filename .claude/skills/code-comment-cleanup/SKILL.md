@@ -116,6 +116,15 @@ actually missing something that matters? If no, cut it.
     read just the code, no comment — is a reader missing something *this specific retained
     clause* says? If the surviving clause is itself derivable from the adjacent code, the real
     verdict was CUT all along and TRIM just compressed a restatement instead of removing it.
+  - **This re-test applies even to a clause you author from scratch**, not just ones copied
+    over from the original comment. A common trigger: manufacturing a minimal leading sentence
+    to satisfy the convention that an exported symbol's doc comment starts with its name (e.g.
+    writing `// Pull fetches ref into destDir via imgpkg.` on `func Pull(ctx, ref, destDir)`
+    purely so the comment "looks like" proper Go doc style). Satisfying that convention is not
+    itself evidence the sentence carries information — run the exact same test on it as on
+    anything else: does it say something the signature doesn't already say? If every clause in
+    the comment fails this, the verdict is deleting the doc comment entirely, not keeping a
+    convention-shaped restatement.
   - **Watch for a clause that's rationale-*shaped* without being a rationale.** A clause
     connected with "so"/"because"/"which means" reads like a why, but the causal connector is
     grammar, not content — check whether the thing after it is derivable from code sitting right
@@ -148,7 +157,20 @@ actually missing something that matters? If no, cut it.
 
 **KEEP** — leave it exactly as-is. The comment documents something that isn't visible in the
 code itself, there's no code-level fix (rename/restructure) that would make it unnecessary,
-and its absence would cause a real future mistake:
+and its absence would cause a real future mistake.
+
+**General-knowledge filter, applies to every category below:** a fact is only KEEP-worthy if
+it's non-obvious *about this codebase or feature specifically* — not merely non-obvious in the
+abstract. Test: would a reader who is competent in the language/runtime/OS involved, but has
+never seen this codebase, already know this fact without being told? If yes, cut it, no matter
+which KEEP bullet it superficially resembles. Example: "imgpkg is expected to already be on
+PATH" on a function that invokes it via `exec.LookPath("imgpkg")` — true of *any* command
+invoked by name via `exec.LookPath`/shell PATH resolution, in any codebase; it restates a
+platform mechanism the reader already knows from general exec/OS knowledge, not a fact
+specific to this function's design. This is the same failure mode as restating the code, one
+level removed: instead of restating what the code does, the comment restates something the
+reader's general knowledge already supplies — the CUT test's question ("is a reader actually
+missing something") gets the same "no" answer either way.
 - a non-obvious invariant ("this is never reached in production, only via a fake in tests")
 - **a workaround for a specific external bug/limitation** — but only when *both* hold:
   1. The cause is genuinely external (a library/OS/runtime bug or limitation — not an internal
@@ -162,10 +184,11 @@ and its absence would cause a real future mistake:
      external world that can change without anyone re-checking, unlike the rest of this list,
      which describes something intrinsically true about this codebase's own design.
 
-  Cut it despite superficially matching this bullet if the "bug" is common ecosystem knowledge
-  nobody would question, or if the workaround code already reads as ordinary and nothing about
-  it looks suspicious enough to invite "cleanup" in the first place — there's no real risk to
-  guard against if no one would ever mistake it for cruft.
+  Cut it despite superficially matching this bullet if the "bug" fails the general-knowledge
+  filter above (common ecosystem knowledge nobody would question), or if the workaround code
+  already reads as ordinary and nothing about it looks suspicious enough to invite "cleanup" in
+  the first place — there's no real risk to guard against if no one would ever mistake it for
+  cruft.
 - the rationale for a lint/security suppression (`#nosec`, `//nolint`) — these are only ever
   correct *with* an explanation of why the suppression is safe; never cut these, and don't
   trim below a real justification
