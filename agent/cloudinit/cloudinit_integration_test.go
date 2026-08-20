@@ -1,4 +1,5 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package cloudinit_test
@@ -40,7 +41,7 @@ var _ = Describe("CloudinitIntegration", func() {
 		}
 	})
 
-	It("should be able to write files and execute commands", func() {
+	It("should be able to write files and execute commands", func(ctx SpecContext) {
 		fileName := path.Join(workDir, "file-1.txt")
 		fileOriginContent := "some-content-1"
 		fileNewContent := " run cmd"
@@ -51,7 +52,7 @@ content: %s
 runCmd:
 - echo -n '%s' > %s`, fileName, fileOriginContent, fileNewContent, fileName)
 
-		err := scriptExecutor.Execute(cloudInitScript)
+		err := scriptExecutor.Execute(ctx, cloudInitScript)
 		Expect(err).ToNot(HaveOccurred())
 
 		fileContents, errFileContents := os.ReadFile(fileName)
@@ -59,16 +60,16 @@ runCmd:
 		Expect(string(fileContents)).To(Equal(fileNewContent))
 	})
 
-	It("should return error if execute commands fails", func() {
+	It("should return error if execute commands fails", func(ctx SpecContext) {
 		cloudInitScript := `
 runCmd:
 - foo`
 
-		err := scriptExecutor.Execute(cloudInitScript)
+		err := scriptExecutor.Execute(ctx, cloudInitScript)
 		Expect(err).To(HaveOccurred())
 	})
 
-	It("should be able to write files with the correct permissions and in append mode", func() {
+	It("should be able to write files with the correct permissions and in append mode", func(ctx SpecContext) {
 		fileName := path.Join(workDir, "file-2.txt")
 		fileOriginContent := "some-content-2"
 		fileAppendContent := "some-content-append-2"
@@ -84,7 +85,7 @@ runCmd:
   content: %s
   append: %v`, fileName, strconv.FormatInt(int64(filePermission), 8), fileAppendContent, isAppend)
 
-		err = scriptExecutor.Execute(cloudInitScript)
+		err = scriptExecutor.Execute(ctx, cloudInitScript)
 		Expect(err).ToNot(HaveOccurred())
 
 		fileContents, errFileContents := os.ReadFile(fileName)
@@ -96,7 +97,7 @@ runCmd:
 		Expect(stats.Mode()).To(Equal(fs.FileMode(filePermission)))
 	})
 
-	It("should be able to write encoded content", func() {
+	It("should be able to write encoded content", func(ctx SpecContext) {
 		fileName := path.Join(workDir, "file-3.txt")
 		fileContent := "some-content-3"
 		fileBase64Content := base64.StdEncoding.EncodeToString([]byte(fileContent))
@@ -106,7 +107,7 @@ runCmd:
   content: %s
   encoding: base64`, fileName, fileBase64Content)
 
-		err := scriptExecutor.Execute(cloudInitScript)
+		err := scriptExecutor.Execute(ctx, cloudInitScript)
 		Expect(err).ToNot(HaveOccurred())
 
 		fileContents, err := os.ReadFile(fileName)
@@ -114,7 +115,7 @@ runCmd:
 		Expect(string(fileContents)).To(Equal(fileContent))
 	})
 
-	It("should be able to write gziped content", func() {
+	It("should be able to write gziped content", func(ctx SpecContext) {
 		fileName := path.Join(workDir, "file-4.txt")
 		fileContent := "some-content-4"
 		fileGzipContent, err := common.GzipData([]byte(fileContent))
@@ -126,7 +127,7 @@ runCmd:
   encoding: gzip+base64
   content: %s`, fileName, fileGzipBase64Content)
 
-		err = scriptExecutor.Execute(cloudInitScript)
+		err = scriptExecutor.Execute(ctx, cloudInitScript)
 		Expect(err).ToNot(HaveOccurred())
 
 		fileContents, err := os.ReadFile(fileName)
@@ -134,7 +135,7 @@ runCmd:
 		Expect(string(fileContents)).To(Equal(fileContent))
 	})
 
-	It("should be able to write template content", func() {
+	It("should be able to write template content", func(ctx SpecContext) {
 		fileName := path.Join(workDir, "file-5.txt")
 		fileContent := "The default interface name is {{ .DefaultNetworkInterfaceName }} "
 		replacedFileContent := "The default interface name is eth0"
@@ -143,7 +144,7 @@ runCmd:
 - path: %s
   content: %s`, fileName, fileContent)
 
-		err := scriptExecutor.Execute(cloudInitScript)
+		err := scriptExecutor.Execute(ctx, cloudInitScript)
 		Expect(err).ToNot(HaveOccurred())
 
 		fileContents, err := os.ReadFile(fileName)
@@ -151,10 +152,10 @@ runCmd:
 		Expect(string(fileContents)).To(Equal(replacedFileContent))
 	})
 
-	It("should return error for invalid template content", func() {
+	It("should return error for invalid template content", func(ctx SpecContext) {
 		cloudInitScript := "invalid-content"
 
-		err := scriptExecutor.Execute(cloudInitScript)
+		err := scriptExecutor.Execute(ctx, cloudInitScript)
 		Expect(err).To(HaveOccurred())
 	})
 

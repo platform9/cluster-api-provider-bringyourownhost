@@ -536,7 +536,7 @@ func (r *HostReconciler) bootstrapK8sNode(ctx context.Context, bootstrapScript s
 	return cloudinit.ScriptExecutor{
 		WriteFilesExecutor:    r.FileWriter,
 		RunCmdExecutor:        r.CmdRunner,
-		ParseTemplateExecutor: r.TemplateParser}.Execute(bootstrapScript)
+		ParseTemplateExecutor: r.TemplateParser}.Execute(ctx, bootstrapScript)
 }
 
 func (r *HostReconciler) removeSentinelFile(ctx context.Context, byoHost *infrastructurev1beta1.ByoHost) error {
