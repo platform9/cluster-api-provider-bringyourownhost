@@ -227,8 +227,9 @@ prepare-byoh-docker-host-image:
 build-packaging-test-image: ## Build the Rocky Linux image used by test-packaging
 	docker build test/e2e/packaging -f test/e2e/packaging/RockyDockerFile -t $(PACKAGING_TEST_RPM_IMG)
 
+PACKAGING_GINKGO_FOCUS ?=
 test-packaging: build-packaging-test-image prepare-byoh-docker-host-image ## Run the pf9-byohost RPM/deb install/uninstall tests
-	go test ./test/e2e/packaging/... -v -timeout 5m
+	go test ./test/e2e/packaging/... -v -timeout 5m -args -ginkgo.focus="$(PACKAGING_GINKGO_FOCUS)"
 
 prepare-byoh-docker-host-image-dev:
 	docker build test/e2e -f docs/BYOHDockerFileDev -t ${BYOH_BASE_IMG_DEV}
