@@ -1,3 +1,6 @@
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 // cmd/byohctl/cmd/onboard.go
 package cmd
 
@@ -232,6 +235,7 @@ type OnboardConfig struct {
 	Tenant      string `yaml:"tenant"`
 	Verbosity   string `yaml:"verbosity"`
 	Region      string `yaml:"region"`
+	Insecure    bool   `yaml:"insecure"`
 }
 
 func LoadOnboardConfig(path string) (*OnboardConfig, error) {
@@ -252,6 +256,15 @@ func writeBootstrapCredential(byohDir, bootstrapKubeconfigPath, namespace string
 	data, err := os.ReadFile(bootstrapKubeconfigPath)
 	if err != nil {
 		return fmt.Errorf("failed to read bootstrap kubeconfig %s: %w", bootstrapKubeconfigPath, err)
+	}
+	// The agent copies this stanza's TLS settings into the kubeconfig it generates after the
+	// bootstrap-token-to-certificate exchange (agent/registration/csr.go), so recording
+	// --insecure here is what makes it stick for the life of the host.
+	if insecure {
+		data, err = client.MakeKubeconfigInsecure(data)
+		if err != nil {
+			return fmt.Errorf("failed to apply --insecure to bootstrap kubeconfig: %w", err)
+		}
 	}
 	if err := os.MkdirAll(bootstrapAgentConfDir, service.DefaultDirPerms); err != nil {
 		return fmt.Errorf("failed to create %s: %w", bootstrapAgentConfDir, err)
@@ -292,6 +305,11 @@ func mergeConfigWithFlags(cfg *OnboardConfig) {
 	}
 	if regionName == "" {
 		regionName = cfg.Region
+	}
+	// Boolean, so there is no "unset" sentinel to compare against: the flag can only turn
+	// this on, never off, matching how the string flags above take precedence.
+	if cfg.Insecure {
+		insecure = true
 	}
 }
 
@@ -418,14 +436,14 @@ func runOnboard(cmd *cobra.Command, args []string) {
 		utils.LogDebug("Using FQDN: %s, Domain: %s, Tenant: %s", fqdn, domain, tenant)
 
 		utils.LogDebug("Getting authentication token for user %s", username)
-		authClient := client.NewAuthClient(fqdn, clientToken)
+		authClient := client.NewAuthClient(fqdn, clientToken, insecure)
 		token, err := authClient.GetToken(username, password)
 		if err != nil {
 			utils.LogError("Failed to get authentication token: %v", err)
 			os.Exit(1)
 		}
 
-		k8sClient := client.NewK8sClient(fqdn, domain, tenant, token, regionName)
+		k8sClient := client.NewK8sClient(fqdn, domain, tenant, token, regionName, insecure)
 
 		utils.LogInfo("Saving kubeconfig from bootstrap secret")
 		if err := k8sClient.SaveKubeConfig("byoh-bootstrap-kc"); err != nil {

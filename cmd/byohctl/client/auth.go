@@ -1,3 +1,6 @@
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 package client
 
 import (
@@ -19,9 +22,11 @@ type AuthClient struct {
 	clientToken string
 }
 
-func NewAuthClient(fqdn, clientToken string) *AuthClient {
+// NewAuthClient creates a client for the DU's token endpoint. When insecure is true,
+// TLS certificate verification is skipped -- see NewDUHTTPClient.
+func NewAuthClient(fqdn, clientToken string, insecure bool) *AuthClient {
 	return &AuthClient{
-		client:      &http.Client{Timeout: 30 * time.Second},
+		client:      NewDUHTTPClient(DefaultTimeout, insecure),
 		fqdn:        fqdn,
 		clientToken: clientToken,
 	}
