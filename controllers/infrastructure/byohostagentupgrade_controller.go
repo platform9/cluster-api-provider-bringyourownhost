@@ -5,6 +5,7 @@ package controllers
 
 import (
 	"context"
+	"math"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -73,7 +74,7 @@ func (r *ByoHostAgentUpgradeReconciler) Reconcile(ctx context.Context, req ctrl.
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	upgrade.Status.Total = int32(len(hosts))
+	upgrade.Status.Total = clampToInt32(len(hosts))
 
 	maxUnavailable, err := resolveMaxUnavailable(upgrade, len(hosts))
 	if err != nil {
@@ -82,14 +83,14 @@ func (r *ByoHostAgentUpgradeReconciler) Reconcile(ctx context.Context, req ctrl.
 	perHostTimeout := resolvePerHostTimeout(upgrade)
 
 	summary := summarizeHosts(hosts, upgrade.Spec.TargetVersion, perHostTimeout)
-	upgrade.Status.Upgraded = int32(len(summary.converged))
+	upgrade.Status.Upgraded = clampToInt32(len(summary.converged))
 
 	if len(summary.failed) > 0 {
 		return r.markFailed(upgrade, summary.failed)
 	}
 
 	if len(summary.unavailable) >= maxUnavailable {
-		upgrade.Status.UnavailableCount = int32(len(summary.unavailable))
+		upgrade.Status.UnavailableCount = clampToInt32(len(summary.unavailable))
 		conditions.MarkFalse(upgrade, infrastructurev1beta1.RolloutAvailable, infrastructurev1beta1.InsufficientAvailabilityBudgetReason, clusterv1.ConditionSeverityWarning, "")
 		return ctrl.Result{RequeueAfter: requeueInterval}, nil
 	}
@@ -104,7 +105,7 @@ func (r *ByoHostAgentUpgradeReconciler) Reconcile(ctx context.Context, req ctrl.
 	// next reconcile to notice them - summary alone only knows about state
 	// from before this tick started picking.
 	allInFlight := append(append([]*infrastructurev1beta1.ByoHost{}, summary.inFlight...), picked...)
-	upgrade.Status.UnavailableCount = int32(len(summary.unavailable) + len(picked))
+	upgrade.Status.UnavailableCount = clampToInt32(len(summary.unavailable) + len(picked))
 
 	if len(summary.converged) == len(hosts) && len(hosts) > 0 {
 		upgrade.Status.Phase = infrastructurev1beta1.ByoHostAgentUpgradePhaseCompleted
@@ -231,6 +232,20 @@ func summarizeHosts(hosts []infrastructurev1beta1.ByoHost, targetVersion string,
 		}
 	}
 	return s
+}
+
+// clampToInt32 narrows n to int32, saturating at the int32 bounds instead of
+// wrapping. Host counts never approach 2^31, so the saturation is unreachable
+// in practice. It is here so the narrowing is provably safe rather than
+// resting on that assumption.
+func clampToInt32(n int) int32 {
+	if n > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if n < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(n)
 }
 
 // pickHosts returns up to n hosts from candidates, in list order. Ordering
