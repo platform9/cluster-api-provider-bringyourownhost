@@ -87,6 +87,13 @@ func (l *labelFlags) Set(value string) error {
 // heartbeat timestamp, unless overridden via the --heartbeat-interval flag.
 const DefaultHeartbeatInterval = 30 * time.Second
 
+// DefaultMaxBlockingDuration bounds how long the agent keeps pulsing
+// heartbeats during a single kubeadm install/join call, unless overridden
+// via the --max-blocking-duration flag. Comfortably above any legitimate
+// install or join duration, so it only ever kicks in for a genuinely
+// wedged call.
+const DefaultMaxBlockingDuration = 30 * time.Minute
+
 func setupflags() {
 	klog.InitFlags(nil)
 	// clear any discard loggers set by dependecies
@@ -101,6 +108,7 @@ func setupflags() {
 	flag.BoolVar(&printVersion, "version", false, "Print the version of the agent")
 	flag.StringVar(&bootstrapKubeConfig, "bootstrap-kubeconfig", "", "Provide bootstrap kubeconfig for bootstrap token workflow")
 	flag.DurationVar(&heartbeatInterval, "heartbeat-interval", DefaultHeartbeatInterval, "How often the agent refreshes its ByoHost heartbeat timestamp")
+	flag.DurationVar(&maxBlockingDuration, "max-blocking-duration", DefaultMaxBlockingDuration, "How long the agent keeps pulsing heartbeats during a single kubeadm install/join call before giving up")
 
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	hiddenFlags := []string{"log-flush-frequency", "alsologtostderr", "log-backtrace-at", "log-dir", "logtostderr", "stderrthreshold", "vmodule", "azure-container-registry-config",
@@ -137,6 +145,7 @@ var (
 	bootstrapKubeConfig string
 	certExpiryDuration  int64
 	heartbeatInterval   time.Duration
+	maxBlockingDuration time.Duration
 )
 
 // TODO - fix logging
@@ -227,6 +236,7 @@ func main() {
 		SkipK8sInstallation: skipInstallation,
 		DownloadPath:        downloadpath,
 		HeartbeatInterval:   heartbeatInterval,
+		MaxBlockingDuration: maxBlockingDuration,
 	}
 	if err = hostReconciler.SetupWithManager(context.TODO(), mgr); err != nil {
 		logger.Error(err, "unable to create controller")
