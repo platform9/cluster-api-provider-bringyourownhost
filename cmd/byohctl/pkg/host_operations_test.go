@@ -16,6 +16,7 @@ import (
 
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/client"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/service"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils"
 	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 )
 

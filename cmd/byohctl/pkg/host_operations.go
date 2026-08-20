@@ -54,12 +54,15 @@ func PerformHostOperation(operationType HostOperationType, namespace string, for
 		// There might be a chance that the byohost object is not present in the management cluster
 		// If decommission, ask user to proceed with host cleanup or not, run dpkg purge if yes
 		if operationType == OperationDecommission {
-			continueDecommission := force
-			if !continueDecommission {
+			if !force {
 				// Ask user to proceed with host cleanup or not
-				continueDecommission, err = utils.AskBool("Do you want to proceed with host cleanup? (y/n)")
+				continueDecommission, err := utils.AskBool("Do you want to proceed with host cleanup? (y/n)")
 				if err != nil {
 					return fmt.Errorf("failed to get user input: %v", err)
+				}
+				if !continueDecommission {
+					utils.LogInfo("Host cleanup declined by user; skipping dpkg purge")
+					return nil
 				}
 			} else {
 				utils.LogInfo("--force set: proceeding with host cleanup despite unreachable management plane")
