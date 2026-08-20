@@ -29,7 +29,8 @@ mkdir -p $BUNDLE_PATH
 imgpkg pull -i $BUNDLE_ADDR -o $BUNDLE_PATH
 
 ## disable swap
-swapoff -a && sed -ri '/\sswap\s/s/^#?/#/' /etc/fstab
+swapoff -a
+sed -ri '/\sswap\s/s/^#?/#/' /etc/fstab
 
 ## disable firewall, save current state so uninstall can restore it
 if command -v ufw >>/dev/null; then
@@ -41,14 +42,17 @@ if command -v ufw >>/dev/null; then
 fi
 
 ## load kernal modules
-modprobe overlay && modprobe br_netfilter
+modprobe overlay
+modprobe br_netfilter
 
 ## adding os configuration
-tar -C / -xvf "$BUNDLE_PATH/conf.tar" && sysctl --system 
+tar -C / -xvf "$BUNDLE_PATH/conf.tar"
+sysctl --system
 
 ## installing deb packages
 for pkg in cri-tools kubernetes-cni kubectl kubelet kubeadm; do
-    dpkg --install "$BUNDLE_PATH/$pkg.deb" && apt-mark hold $pkg
+    dpkg --install "$BUNDLE_PATH/$pkg.deb"
+    apt-mark hold $pkg
 done
 
 ## intalling containerd
@@ -61,6 +65,8 @@ containerd config default > /etc/containerd/config.toml
 sed -i 's/^disabled_plugins = \["cri"\]/disabled_plugins = \[\]/' /etc/containerd/config.toml
 
 ## starting containerd service
-systemctl daemon-reload && systemctl enable containerd && systemctl restart containerd
+systemctl daemon-reload
+systemctl enable containerd
+systemctl restart containerd
 
 echo "Installation complete!"
