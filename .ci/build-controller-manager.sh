@@ -36,8 +36,7 @@ fi
 
 main() {
   # Move to the project directory
-  pushd "${project_root}"
-  trap on_exit EXIT
+  cd "${project_root}"
 
   if [ -n "${BASH_DEBUG:-}" ]; then
     set -x
@@ -70,16 +69,6 @@ main() {
   cat "${CONTAINER_TAG}" && echo ""
   echo "Stored image full tag in ${CONTAINER_FULL_TAG}:"
   cat "${CONTAINER_FULL_TAG}" && echo ""
-}
-
-on_exit() {
-  ret=$?
-  info "-------cleanup--------"
-  if [ -z "${SKIP_CLEANUP:-}" ]; then
-    make docker-clean IMG="${IMAGE_REGISTRY_NAME_TAG}" || true
-  fi
-  popd
-  exit ${ret}
 }
 
 configure_go() {
