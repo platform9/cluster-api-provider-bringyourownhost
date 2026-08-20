@@ -149,7 +149,7 @@ var _ = Describe("Byohost Agent Tests", func() {
 			})
 
 			It("should return an error if we fail to load the bootstrap secret", func() {
-				// BootstrapSecret is only read once install has succeeded (see host_reconciler.go), so pre-mark install done to reach that read.
+				// host_reconciler.go returns before reading BootstrapSecret unless install is already marked done; mark it here since this test isn't exercising install.
 				conditions.MarkTrue(byoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded)
 				byoHost.Spec.BootstrapSecret = &corev1.ObjectReference{
 					Kind:      kindSecret,
@@ -205,6 +205,10 @@ runCmd:
 					})
 					Expect(result).To(Equal(controllerruntime.Result{}))
 					Expect(reconcilerErr).ToNot(HaveOccurred())
+
+					// only the join step's runCmd/write_files ran -- no install call, and no second reconcile was needed to reach it
+					Expect(fakeCommandRunner.RunCmdCallCount()).To(Equal(1))
+					Expect(fakeFileWriter.WriteToFileCallCount()).To(Equal(1))
 
 					updatedByoHost := &infrastructurev1beta1.ByoHost{}
 					err := k8sClient.Get(ctx, byoHostLookupKey, updatedByoHost)

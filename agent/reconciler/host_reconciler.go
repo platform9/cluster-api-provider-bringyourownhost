@@ -131,6 +131,7 @@ func (r *HostReconciler) reconcileNormal(ctx context.Context, byoHost *infrastru
 	}
 
 	if !conditions.IsTrue(byoHost, infrastructurev1beta1.K8sNodeBootstrapSucceeded) {
+		// Both branches below fall through to the BootstrapSecret read further down within this same call: neither one runs anything slow first, so there's nothing that could go stale by the time they get there.
 		if r.SkipK8sInstallation {
 			logger.Info("Skipping installation of k8s components")
 		} else if !conditions.IsTrue(byoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded) {
@@ -146,7 +147,7 @@ func (r *HostReconciler) reconcileNormal(ctx context.Context, byoHost *infrastru
 			r.Recorder.Event(byoHost, corev1.EventTypeNormal, "InstallScriptExecutionSucceeded", "install script executed")
 			conditions.MarkTrue(byoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded)
 
-			// Install has no fixed time bound, so reading BootstrapSecret here and joining with it now would risk a copy CABPK has since rotated. Read+join happens on the next reconcile instead, with nothing slow in between.
+			// Stop here instead of reading BootstrapSecret and joining right away: install has no time bound, so the kubeadm join token it contains could be rotated while we wait. Read it on the next reconcile instead, immediately before joining, so nothing slow can happen in between.
 			return ctrl.Result{}, nil
 		} else {
 			logger.Info("install script already executed")
