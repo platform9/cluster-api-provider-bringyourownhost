@@ -59,7 +59,7 @@ var _ = Describe("When BYO Host rejoins the capacity pool [Reuse]", func() {
 
 		By("Creating a cluster")
 
-		setControlPlaneIP(context.Background(), dockerClient)
+		setControlPlaneIP(ctx, dockerClient)
 		applyClusterAndWait(ctx, namespace.Name, clusterName, specName, e2eConfig.GetVariableOrEmpty(KubernetesVersion), clusterctl.DefaultFlavor, 1, 1, clusterResources)
 
 		// Assert on byohost cluster label to match clusterName
