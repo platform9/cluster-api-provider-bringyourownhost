@@ -288,6 +288,7 @@ linux-vm-image: ## Build the Linux container image used by the *-linux-vm target
 		-e LINUX_VM=1 \
 		-e GINKGO_FOCUS -e GINKGO_SKIP -e GINKGO_NODES -e SKIP_RESOURCE_CLEANUP -e USE_EXISTING_CLUSTER \
 		-e BYOH_AGENT_BUNDLE_URL \
+		-e E2E_OS_IMAGE -e E2E_K8S_VERSION_FROM -e E2E_K8S_VERSION_TO -e IP_FAMILY \
 		-w /workspace \
 		$(LINUX_VM_IMG) \
 		make $*

@@ -30,8 +30,8 @@ var _ = Describe("Clusterclass upgrade test [K8s-Upgrade-ClusterClass]", func() 
 		dockerClient                 *client.Client
 		hosts                        []byoHostHandle
 		allAgentLogFiles             []string
-		kubernetesVersionUpgradeFrom = "v1.31.0"
-		kubernetesVersionUpgradeTo   = "v1.31.2"
+		kubernetesVersionUpgradeFrom = getEnvOrDefault("E2E_K8S_VERSION_FROM", "v1.31.0")
+		kubernetesVersionUpgradeTo   = getEnvOrDefault("E2E_K8S_VERSION_TO", "v1.31.2")
 		etcdUpgradeVersion           = "3.5.15-0"
 		coreDNSUpgradeVersion        = "v1.11.3"
 	)
