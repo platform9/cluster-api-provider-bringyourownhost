@@ -2,15 +2,13 @@ module github.com/vmware-tanzu/cluster-api-provider-bringyourownhost
 
 go 1.26.4
 
-replace github.com/insomniacslk/dhcp => github.com/harvester/dhcp v0.0.0-20220421024905-28b38eafefe3
-
 require (
 	github.com/docker/docker v28.0.2+incompatible
 	github.com/docker/go-connections v0.5.0
 	github.com/docker/go-units v0.5.0
 	github.com/go-logr/logr v1.4.4
 	github.com/jackpal/gateway v1.2.0
-	github.com/kube-vip/kube-vip v0.5.5
+	github.com/kube-vip/kube-vip v0.9.2
 	github.com/maxbrunsfeld/counterfeiter/v6 v6.12.2
 	github.com/onsi/ginkgo/v2 v2.28.0
 	github.com/onsi/gomega v1.42.1
@@ -53,7 +51,6 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.6.0 // indirect
 	github.com/cloudflare/circl v1.6.1 // indirect
 	github.com/containerd/log v0.1.0 // indirect
-	github.com/coreos/go-iptables v0.6.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/drone/envsubst/v2 v2.0.0-20210730161058-179042472c46 // indirect
@@ -61,13 +58,13 @@ require (
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/florianl/go-conntrack v0.3.0 // indirect
+	github.com/florianl/go-conntrack v0.4.0 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-logr/zapr v1.3.0 // indirect
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect
-	github.com/go-openapi/jsonreference v0.20.2 // indirect
+	github.com/go-openapi/jsonreference v0.21.0 // indirect
 	github.com/go-openapi/swag v0.23.0 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
@@ -76,7 +73,7 @@ require (
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/cel-go v0.22.0 // indirect
-	github.com/google/gnostic-models v0.6.8 // indirect
+	github.com/google/gnostic-models v0.6.9 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-github/v53 v53.2.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
@@ -86,21 +83,19 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
 	github.com/huandu/xstrings v1.5.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/insomniacslk/dhcp v0.0.0-20220119180841-3c283ff8b7dd // indirect
+	github.com/insomniacslk/dhcp v0.0.0-20241224095048-b56fa0d5f25d // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/josharian/native v1.1.0 // indirect
 	github.com/jpillora/backoff v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.18.7 // indirect
-	github.com/mailru/easyjson v0.7.7 // indirect
+	github.com/mailru/easyjson v0.9.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.19 // indirect
-	github.com/mdlayher/arp v0.0.0-20191213142603-f72070a231fc // indirect
-	github.com/mdlayher/ethernet v0.0.0-20190606142754-0394541c37b7 // indirect
-	github.com/mdlayher/ndp v0.10.0 // indirect
+	github.com/mdlayher/ndp v1.1.0 // indirect
 	github.com/mdlayher/netlink v1.7.2 // indirect
-	github.com/mdlayher/raw v0.0.0-20211126142749-4eae47f3d54b // indirect
+	github.com/mdlayher/packet v1.1.2 // indirect
 	github.com/mdlayher/socket v0.5.1 // indirect
 	github.com/mitchellh/copystructure v1.2.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
@@ -118,6 +113,7 @@ require (
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
+	github.com/pierrec/lz4/v4 v4.1.22 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
@@ -133,12 +129,11 @@ require (
 	github.com/spf13/viper v1.21.0 // indirect
 	github.com/stoewer/go-strcase v1.3.0 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
-	github.com/u-root/uio v0.0.0-20220204230159-dac05f7d2cb4 // indirect
+	github.com/u-root/uio v0.0.0-20240224005618-d2acac8f3701 // indirect
 	github.com/valyala/fastjson v1.6.4 // indirect
 	github.com/vishvananda/netlink v1.3.1-0.20250303224720-0e7078ed04c8 // indirect
 	github.com/vishvananda/netns v0.0.5 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
-	gitlab.com/golang-commonmark/puny v0.0.0-20191124015043-9f83538fa04f // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.65.0 // indirect
 	go.opentelemetry.io/otel v1.45.0 // indirect
@@ -174,9 +169,9 @@ require (
 	gotest.tools/v3 v3.5.2 // indirect
 	k8s.io/apiextensions-apiserver v0.32.3 // indirect
 	k8s.io/apiserver v0.32.3 // indirect
-	k8s.io/kube-openapi v0.0.0-20241105132330-32ad38e42d3f // indirect
+	k8s.io/kube-openapi v0.0.0-20241212222426-2c72e554b1e7 // indirect
 	sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.34.0 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/kind v0.32.0 // indirect
-	sigs.k8s.io/structured-merge-diff/v4 v4.4.2 // indirect
+	sigs.k8s.io/structured-merge-diff/v4 v4.5.0 // indirect
 )
