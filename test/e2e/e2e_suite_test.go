@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -42,6 +43,13 @@ const (
 	CNIPath           = "CNI"
 	CNIResources      = "CNI_RESOURCES"
 	IPFamily          = "IP_FAMILY"
+
+	// kubernetesVersionUpgradeTo is the target version cluster_upgrade_test.go and
+	// clusterclass_upgrade_test.go both upgrade a cluster to. Kept as a single shared constant
+	// (rather than a literal duplicated in each spec file) so ensureLocalK8sBundleRegistry below
+	// knows to also build a bundle for it -- an upgrade needs an installable bundle for its target
+	// version, not just the one the cluster starts on.
+	kubernetesVersionUpgradeTo = "v1.31.2"
 )
 
 // Shared docker-host command-line flags used across this package's e2e specs.
@@ -95,6 +103,15 @@ var (
 
 	// Together with ensureLocalAgentBundleRegistry
 	byohAgentBundleURLForContainers string
+
+	// Together with ensureLocalK8sBundleRegistry -- the k8s installer bundle's registry address,
+	// used as K8sInstallerConfig's bundleRepo (${BUNDLE_REPO} in the e2e cluster templates).
+	bundleRepoForContainers string
+
+	// bundleRepoInsecureForContainers is ensureLocalK8sBundleRegistry's second return value --
+	// true unless BUNDLE_REPO_OVERRIDE pointed bundleRepoForContainers at a real (non-local)
+	// registry. Controls whether ByoHost containers get BYOH_BUNDLE_REGISTRY_INSECURE set.
+	bundleRepoInsecureForContainers bool
 )
 
 func init() {
@@ -110,6 +127,24 @@ func TestE2E(t *testing.T) {
 	RunSpecs(t, "Controller Suite")
 }
 
+// bundleRepoClusterctlVariables returns the ClusterctlVariables override every spec's
+// ConfigClusterInput passes so the e2e cluster templates' ${BUNDLE_REPO} resolves to whatever
+// ensureLocalK8sBundleRegistry set bundleRepoForContainers to, rather than provider.yaml's
+// quay.io/platform9 default.
+func bundleRepoClusterctlVariables() map[string]string {
+	return map[string]string{"BUNDLE_REPO": bundleRepoForContainers}
+}
+
+// byoHostRunnerEnv returns the env ByoHostRunner should set on its ByoHost container -- see
+// install.sh.tmpl's BYOH_BUNDLE_REGISTRY_INSECURE check, needed only when
+// ensureLocalK8sBundleRegistry actually built a plaintext local registry.
+func byoHostRunnerEnv() []string {
+	if !bundleRepoInsecureForContainers {
+		return nil
+	}
+	return []string{"BYOH_BUNDLE_REGISTRY_INSECURE=1"}
+}
+
 // sharedSuiteData is the state the "run once" SynchronizedBeforeSuite closure hands to the
 // "run on every ParallelNode" closure. Every field here must be read by more than one Ginkgo
 // process under GINKGO_NODES>1, so it has to cross the process boundary via this struct rather
@@ -123,6 +158,8 @@ type sharedSuiteData struct {
 	pathToHostAgentBinary           string
 	pathToByohctlBinary             string
 	byohAgentBundleURLForContainers string
+	bundleRepoForContainers         string
+	bundleRepoInsecureForContainers bool
 }
 
 func formatSharedSuiteData(d *sharedSuiteData) []byte {
@@ -135,13 +172,19 @@ func formatSharedSuiteData(d *sharedSuiteData) []byte {
 		d.pathToHostAgentBinary,
 		d.pathToByohctlBinary,
 		d.byohAgentBundleURLForContainers,
+		d.bundleRepoForContainers,
+		strconv.FormatBool(d.bundleRepoInsecureForContainers),
 	}, ","))
 }
 
 func parseSharedSuiteData(data []byte) (sharedSuiteData, error) {
 	parts := strings.Split(string(data), ",")
-	if len(parts) != 8 {
-		return sharedSuiteData{}, fmt.Errorf("expected 8 comma-separated fields in shared suite data, got %d", len(parts))
+	if len(parts) != 10 {
+		return sharedSuiteData{}, fmt.Errorf("expected 10 comma-separated fields in shared suite data, got %d", len(parts))
+	}
+	bundleRepoInsecure, err := strconv.ParseBool(parts[9])
+	if err != nil {
+		return sharedSuiteData{}, fmt.Errorf("invalid bundleRepoInsecureForContainers field %q: %w", parts[9], err)
 	}
 
 	return sharedSuiteData{
@@ -153,6 +196,8 @@ func parseSharedSuiteData(data []byte) (sharedSuiteData, error) {
 		pathToHostAgentBinary:           parts[5],
 		pathToByohctlBinary:             parts[6],
 		byohAgentBundleURLForContainers: parts[7],
+		bundleRepoForContainers:         parts[8],
+		bundleRepoInsecureForContainers: bundleRepoInsecure,
 	}, nil
 }
 
@@ -225,6 +270,10 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	byohAgentBundleURLForContainers, err = ensureLocalAgentBundleRegistry(context.Background(), dockerClientForRegistry, dockerNetworkInterfaceKind)
 	Expect(err).NotTo(HaveOccurred())
 
+	By("making a k8s installer bundle reachable, without quay.io")
+	bundleRepoForContainers, bundleRepoInsecureForContainers, err = ensureLocalK8sBundleRegistry(context.Background(), dockerClientForRegistry, dockerNetworkInterfaceKind, e2eConfig.GetVariableOrEmpty(KubernetesVersion), kubernetesVersionUpgradeTo)
+	Expect(err).NotTo(HaveOccurred())
+
 	clusterConName = e2eConfig.ManagementClusterName
 	return formatSharedSuiteData(&sharedSuiteData{
 		artifactFolder:                  artifactFolder,
@@ -235,6 +284,8 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 		pathToHostAgentBinary:           pathToHostAgentBinary,
 		pathToByohctlBinary:             pathToByohctlBinary,
 		byohAgentBundleURLForContainers: byohAgentBundleURLForContainers,
+		bundleRepoForContainers:         bundleRepoForContainers,
+		bundleRepoInsecureForContainers: bundleRepoInsecureForContainers,
 	})
 }, func(data []byte) {
 	// Before each ParallelNode.
@@ -249,6 +300,8 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	pathToHostAgentBinary = shared.pathToHostAgentBinary
 	pathToByohctlBinary = shared.pathToByohctlBinary
 	byohAgentBundleURLForContainers = shared.byohAgentBundleURLForContainers
+	bundleRepoForContainers = shared.bundleRepoForContainers
+	bundleRepoInsecureForContainers = shared.bundleRepoInsecureForContainers
 
 	e2eConfig = loadE2EConfig(configPath)
 	bootstrapClusterProxy = framework.NewClusterProxy("bootstrap", shared.kubeconfigPath, initScheme(), framework.WithMachineLogCollector(framework.DockerLogCollector{}))
@@ -267,9 +320,9 @@ var _ = SynchronizedAfterSuite(func() {
 		tearDown(bootstrapClusterProvider, bootstrapClusterProxy)
 	}
 
-	if byohAgentBundleURLForContainers != "" {
+	if byohAgentBundleURLForContainers != "" || bundleRepoForContainers != "" {
 		if dockerClientForRegistry, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation()); err == nil {
-			_ = dockerClientForRegistry.ContainerRemove(context.Background(), agentBundleRegistryContainerName, container.RemoveOptions{Force: true})
+			_ = dockerClientForRegistry.ContainerRemove(context.Background(), localBundleRegistryContainerName, container.RemoveOptions{Force: true})
 		}
 	}
 })
@@ -396,6 +449,7 @@ func applyClusterAndWait(ctx context.Context, namespace, clusterName, specName, 
 			KubernetesVersion:        k8sVersion,
 			ControlPlaneMachineCount: ptr.To(cpCount),
 			WorkerMachineCount:       ptr.To(workerCount),
+			ClusterctlVariables:      bundleRepoClusterctlVariables(),
 		},
 		WaitForClusterIntervals:      e2eConfig.GetIntervals(specName, "wait-cluster"),
 		WaitForControlPlaneIntervals: e2eConfig.GetIntervals(specName, "wait-control-plane"),

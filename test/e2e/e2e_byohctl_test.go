@@ -71,6 +71,7 @@ var _ = Describe("When a host onboards via byohctl using a bootstrap kubeconfig,
 			Namespace:             namespace.Name,
 			DockerClient:          dockerClient,
 			NetworkInterface:      dockerNetworkInterfaceKind,
+			Env:                   byoHostRunnerEnv(),
 			bootstrapClusterProxy: bootstrapClusterProxy,
 			CommandArgs: map[string]string{
 				agentFlagBootstrapKubeconfig: byohctlBootstrapConfPath,

@@ -26,7 +26,11 @@ fi
 
 echo "downloading bundle"
 mkdir -p $BUNDLE_PATH
-imgpkg pull -i $BUNDLE_ADDR -o $BUNDLE_PATH
+IMGPKG_EXTRA_ARGS=""
+if [ -n "${BYOH_BUNDLE_REGISTRY_INSECURE:-}" ]; then
+    IMGPKG_EXTRA_ARGS="--registry-insecure"
+fi
+imgpkg pull -i $BUNDLE_ADDR -o $BUNDLE_PATH $IMGPKG_EXTRA_ARGS
 
 ## disable swap
 swapoff -a
