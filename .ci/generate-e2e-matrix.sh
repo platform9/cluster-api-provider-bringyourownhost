@@ -13,6 +13,42 @@ set -Eeuo pipefail
 # Writes "matrix=<json>" to $GITHUB_OUTPUT if set, otherwise prints the JSON
 # to stdout (for local debugging via `make generate-e2e-matrix-json`).
 
+# Ginkgo v2's -ginkgo.focus reports "SUCCESS!" and exits 0 when it matches
+# zero specs (verified directly: a typo'd focus runs 0 of N specs and still
+# passes) -- a Describe() tag renamed in a spec file without updating the
+# case statement above would silently turn a matrix case into a no-op that
+# reports green forever. Catch that here, once, before the expensive matrix
+# job starts, by checking every focus value actually appears in the source
+# it's supposed to select.
+verify_focus_values_are_real() {
+  local json=$1
+  local suite focus dir stale=0
+
+  while IFS= read -r obj; do
+    suite=$(jq -r '.suite' <<<"${obj}")
+    focus=$(jq -r '.ginkgo_focus' <<<"${obj}")
+    [[ -z "${focus}" ]] && continue
+    dir="test/e2e"
+    [[ "${suite}" == "packaging" ]] && dir="test/e2e/packaging"
+
+    # @tsv would double-escape the backslashes in a \[Tag\] focus regex, so
+    # fields are pulled directly off each object above instead. Unescape
+    # \[ / \] back to literal [ / ] to grep for the plain Describe() text.
+    local literal=${focus//\\[/[}
+    literal=${literal//\\]/]}
+
+    if ! grep -rFq -- "${literal}" "${dir}"/*.go; then
+      echo "generate-e2e-matrix.sh: GINKGO_FOCUS '${focus}' (literal: '${literal}') matches no Describe() under ${dir}/*.go -- stale mapping in this script" >&2
+      stale=1
+    fi
+  done < <(jq -c '.[]' <<<"${json}")
+
+  if ((stale)); then
+    echo "generate-e2e-matrix.sh: refusing to generate a matrix with stale focus values -- a case above would silently run 0 specs and report success" >&2
+    exit 1
+  fi
+}
+
 main() {
   local tsv=$1
   local rows="[]"
@@ -71,6 +107,8 @@ main() {
   local json
   json=$(jq -c '.' <<<"${rows}")
   echo "generated $(jq 'length' <<<"${json}") matrix cases from ${tsv}" >&2
+
+  verify_focus_values_are_real "${json}"
 
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     echo "matrix=${json}" >>"${GITHUB_OUTPUT}"
