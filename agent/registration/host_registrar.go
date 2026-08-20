@@ -44,9 +44,8 @@ type HostRegistrar struct {
 // Register is called on agent startup
 // This function registers the byohost as available capacity in the management cluster
 // If the CR is already present, we consider this to be a restart / reboot of the agent process
-func (hr *HostRegistrar) Register(hostName, namespace string, hostLabels map[string]string) error {
+func (hr *HostRegistrar) Register(ctx context.Context, hostName, namespace string, hostLabels map[string]string) error {
 	klog.Info("Registering ByoHost")
-	ctx := context.TODO()
 	byoHost := &infrastructurev1beta1.ByoHost{}
 	err := hr.K8sClient.Get(ctx, types.NamespacedName{Name: hostName, Namespace: namespace}, byoHost)
 	if err != nil {

@@ -1,11 +1,10 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package registration_test
 
 import (
-	"context"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/registration"
@@ -18,21 +17,20 @@ var _ = Describe("Host Registrar Tests", func() {
 		hr               registration.HostRegistrar
 		byoHost          *infrastructurev1beta1.ByoHost
 		defaultNamespace = "default"
-		ctx              = context.TODO()
 	)
 
-	BeforeEach(func() {
+	BeforeEach(func(ctx SpecContext) {
 		hr = registration.HostRegistrar{K8sClient: k8sClient}
 		byoHost = builder.ByoHost(defaultNamespace, "host").Build()
 		Expect(k8sClient.Create(ctx, byoHost)).Should(Succeed())
 	})
 
-	AfterEach(func() {
+	AfterEach(func(ctx SpecContext) {
 		Expect(k8sClient.Delete(ctx, byoHost)).ToNot(HaveOccurred())
 	})
 
 	Context("When a ByoHost exists and registration is done", func() {
-		It("Should update the host details on the byohost successfully", func() {
+		It("Should update the host details on the byohost successfully", func(ctx SpecContext) {
 			Expect(hr.UpdateHost(ctx, byoHost)).ToNot(HaveOccurred())
 		})
 	})

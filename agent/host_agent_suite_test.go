@@ -52,6 +52,11 @@ var (
 	// hostNameSuffix is a per-run Unix timestamp appended to os.Hostname() to make
 	// container names unique across test runs, preventing conflicts from stale containers.
 	hostNameSuffix string
+	// suiteCtx spans the whole suite. A ByoHostRunner's context is created in a
+	// BeforeEach but its docker calls continue through the spec and into AfterEach,
+	// so it cannot be rooted on a per-node SpecContext, which Ginkgo cancels as
+	// soon as the node body returns.
+	suiteCtx context.Context
 )
 
 const (
@@ -60,7 +65,13 @@ const (
 )
 
 func TestHostAgent(t *testing.T) {
+	suiteCtx = t.Context()
 	RegisterFailHandler(Fail)
+	// Gomega drops its default Eventually timeout once an assertion carries a
+	// context, leaving a failing wait to block until the whole suite times out.
+	// The specs here pass a context to propagate it, not to bound the wait, so
+	// keep the default timeout in force.
+	EnforceDefaultTimeoutsWhenUsingContexts()
 	RunSpecs(t, "Agent Suite")
 }
 
