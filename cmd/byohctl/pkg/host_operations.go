@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/client"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/service"
