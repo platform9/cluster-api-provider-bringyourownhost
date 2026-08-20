@@ -1,4 +1,5 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package v1beta1_test
@@ -48,9 +49,16 @@ var (
 	testEnv              *envtest.Environment
 	ctx                  context.Context
 	cancel               context.CancelFunc
+
+	// suiteCtx spans the whole suite. A context injected into BeforeSuite is
+	// canceled as soon as BeforeSuite returns, which would kill the webhook
+	// manager started from it, so root the manager's context on t.Context()
+	// instead. The testing package cancels that only after RunSpecs returns.
+	suiteCtx context.Context
 )
 
 func TestAPIs(t *testing.T) {
+	suiteCtx = t.Context()
 	RegisterFailHandler(Fail)
 
 	RunSpecsWithDefaultAndCustomReporters(t,
@@ -61,7 +69,7 @@ func TestAPIs(t *testing.T) {
 var _ = BeforeSuite(func() {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
-	ctx, cancel = context.WithCancel(context.TODO())
+	ctx, cancel = context.WithCancel(suiteCtx)
 
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{

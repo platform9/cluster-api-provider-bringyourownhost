@@ -1,4 +1,5 @@
 // Copyright 2022 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package controllers_test
@@ -56,7 +57,7 @@ var _ = Describe("Controllers/BoottrapKubeconfigController", func() {
 				Status: infrav1.BootstrapKubeconfigStatus{},
 			}
 			Expect(k8sClientUncached.Create(ctx, bootstrapKubeConfig)).Should(Succeed())
-			WaitForObjectsToBePopulatedInCache(bootstrapKubeConfig)
+			WaitForObjectsToBePopulatedInCache(ctx, bootstrapKubeConfig)
 
 			bootstrapKubeconfigLookupKey = types.NamespacedName{Name: bootstrapKubeConfig.Name, Namespace: bootstrapKubeConfig.Namespace}
 		})

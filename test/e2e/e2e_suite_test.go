@@ -336,7 +336,7 @@ func initScheme() *runtime.Scheme {
 }
 
 func loadE2EConfig(configPath string) *clusterctl.E2EConfig {
-	config := clusterctl.LoadE2EConfig(context.TODO(), clusterctl.LoadE2EConfigInput{ConfigPath: configPath})
+	config := clusterctl.LoadE2EConfig(context.Background(), clusterctl.LoadE2EConfigInput{ConfigPath: configPath})
 	Expect(config).NotTo(BeNil(), "Failed to load E2E config from %s", configPath)
 
 	return config
@@ -355,7 +355,7 @@ func createClusterctlLocalRepository(config *clusterctl.E2EConfig, repositoryFol
 
 	createRepositoryInput.RegisterClusterResourceSetConfigMapTransformation(cniPath, CNIResources)
 
-	clusterctlConfig := clusterctl.CreateRepository(context.TODO(), createRepositoryInput)
+	clusterctlConfig := clusterctl.CreateRepository(context.Background(), createRepositoryInput)
 	Expect(clusterctlConfig).To(BeAnExistingFile(), "The clusterctl config file does not exists in the local repository %s", repositoryFolder)
 	return clusterctlConfig
 }
@@ -364,7 +364,7 @@ func setupBootstrapCluster(config *clusterctl.E2EConfig, scheme *runtime.Scheme,
 	var clusterProvider bootstrap.ClusterProvider
 	kubeconfigPath := existingClusterKubeConfig
 	if !useExistingCluster {
-		clusterProvider = bootstrap.CreateKindBootstrapClusterAndLoadImages(context.TODO(), bootstrap.CreateKindBootstrapClusterAndLoadImagesInput{
+		clusterProvider = bootstrap.CreateKindBootstrapClusterAndLoadImages(context.Background(), bootstrap.CreateKindBootstrapClusterAndLoadImagesInput{
 			Name:               config.ManagementClusterName,
 			KubernetesVersion:  "v1.26.6",
 			RequiresDockerSock: config.HasDockerProvider(),
@@ -384,7 +384,7 @@ func setupBootstrapCluster(config *clusterctl.E2EConfig, scheme *runtime.Scheme,
 }
 
 func initBootstrapCluster(bootstrapClusterProxy framework.ClusterProxy, config *clusterctl.E2EConfig, clusterctlConfig, artifactFolder string) {
-	clusterctl.InitManagementClusterAndWatchControllerLogs(context.TODO(), clusterctl.InitManagementClusterAndWatchControllerLogsInput{
+	clusterctl.InitManagementClusterAndWatchControllerLogs(context.Background(), clusterctl.InitManagementClusterAndWatchControllerLogsInput{
 		ClusterProxy:            bootstrapClusterProxy,
 		ClusterctlConfigPath:    clusterctlConfig,
 		InfrastructureProviders: config.InfrastructureProviders(),
@@ -394,10 +394,10 @@ func initBootstrapCluster(bootstrapClusterProxy framework.ClusterProxy, config *
 
 func tearDown(bootstrapClusterProvider bootstrap.ClusterProvider, bootstrapClusterProxy framework.ClusterProxy) {
 	if bootstrapClusterProxy != nil {
-		bootstrapClusterProxy.Dispose(context.TODO())
+		bootstrapClusterProxy.Dispose(context.Background())
 	}
 	if bootstrapClusterProvider != nil {
-		bootstrapClusterProvider.Dispose(context.TODO())
+		bootstrapClusterProvider.Dispose(context.Background())
 	}
 }
 
@@ -416,7 +416,7 @@ func setupSpecNamespace(ctx context.Context, specName string, clusterProxy frame
 // commonSpecSetup runs the BeforeEach argument validation and namespace setup shared by every
 // spec in this package -- pulled out so each spec's BeforeEach is a one-line call.
 func commonSpecSetup(specName string) (ctx context.Context, namespace *corev1.Namespace, cancelWatches context.CancelFunc, clusterResources *clusterctl.ApplyClusterTemplateAndWaitResult) {
-	ctx = context.TODO()
+	ctx = context.Background()
 	Expect(ctx).NotTo(BeNil(), "ctx is required for %s spec", specName)
 
 	Expect(e2eConfig).NotTo(BeNil(), "Invalid argument. e2eConfig can't be nil when calling %s spec", specName)
@@ -515,7 +515,7 @@ func generateBootstrapKubeconfig(ctx context.Context, clusterProxy framework.Clu
 		WithSkipTLSVerify(skipTLS).
 		WithCAData(caData).
 		Build()
-	Expect(clusterProxy.GetClient().Create(context.TODO(), bootstrapKubeconfigCRD)).NotTo(HaveOccurred(), "failed to create test BootstrapKubeconfig CRD")
+	Expect(clusterProxy.GetClient().Create(context.Background(), bootstrapKubeconfigCRD)).NotTo(HaveOccurred(), "failed to create test BootstrapKubeconfig CRD")
 
 	bootstrapKubeconfigLookupKey := types.NamespacedName{
 		Name:      bootstrapKubeconfigCRD.Name,

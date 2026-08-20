@@ -37,7 +37,7 @@ var _ = Describe("When a host onboards via byohctl using a bootstrap kubeconfig,
 	)
 
 	BeforeEach(func() {
-		ctx = context.TODO()
+		ctx = context.Background()
 
 		if byohAgentBundleURLForContainers == "" {
 			reason := fmt.Sprintf("no agent bundle available for byohctl's SetupAgent to install "+
