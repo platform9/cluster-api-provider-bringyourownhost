@@ -20,6 +20,8 @@ BYOH_BASE_IMG = byoh/node:e2e
 BYOH_BASE_IMG_DEV = byoh/node:dev
 LINUX_VM_IMG = byoh/linux-test-runner:dev
 PACKAGING_TEST_RPM_IMG = byoh/packaging-test-rocky:dev
+PICT_IMG = byoh/pict:dev
+PICT_DIR = $(REPO_ROOT)/test/e2e/pict
 # Path to the podman machine's own socket, from inside the VM (not the macOS-side
 # forwarding socket at /var/run/docker.sock). See the *-linux-vm targets below.
 LINUX_VM_PODMAN_SOCK ?= /run/podman/podman.sock
@@ -225,8 +227,9 @@ prepare-byoh-docker-host-image:
 build-packaging-test-image: ## Build the Rocky Linux image used by test-packaging
 	docker build test/e2e/packaging -f test/e2e/packaging/RockyDockerFile -t $(PACKAGING_TEST_RPM_IMG)
 
+PACKAGING_GINKGO_FOCUS ?=
 test-packaging: build-packaging-test-image prepare-byoh-docker-host-image ## Run the pf9-byohost RPM/deb install/uninstall tests
-	go test ./test/e2e/packaging/... -v -timeout 5m
+	go test ./test/e2e/packaging/... -v -timeout 5m -args -ginkgo.focus="$(PACKAGING_GINKGO_FOCUS)"
 
 prepare-byoh-docker-host-image-dev:
 	docker build test/e2e -f docs/BYOHDockerFileDev -t ${BYOH_BASE_IMG_DEV}
@@ -234,6 +237,22 @@ prepare-byoh-docker-host-image-dev:
 cluster-templates-v1beta1: kustomize ## Generate cluster templates for v1beta1
 	$(KUSTOMIZE) build $(BYOH_TEMPLATES)/v1beta1/templates/vm --load-restrictor LoadRestrictionsNone > $(BYOH_TEMPLATES)/v1beta1/templates/vm/cluster-template.yaml
 	$(KUSTOMIZE) build $(BYOH_TEMPLATES)/v1beta1/templates/docker --load-restrictor LoadRestrictionsNone > $(BYOH_TEMPLATES)/v1beta1/templates/docker/cluster-template.yaml
+
+##@ PICT
+
+pict-image: ## Build the PICT (pairwise combinatorial test generator) image from its Homebrew bottle
+	docker build -f hack/docker/pict.Dockerfile -t $(PICT_IMG) hack/docker
+
+# /o:1 (each value covered at least once) instead of PICT's default /o:2
+# (every pair covered): each row is a full e2e run, and with only one
+# real parameter besides Scenario today, pairwise coverage of exactly two
+# parameters is the same thing as the full cross product -- no
+# combinatorial saving over a naive nested loop, just more rows. Revisit
+# once model.pict grows a third free parameter (e.g. OS, once a second
+# real image exists), where pairwise actually starts saving cases.
+PICT_OPTS = /o:1
+generate-pict: pict-image ## Regenerate test/e2e/pict/generated-matrix.tsv from model.pict
+	docker run --rm -v $(PICT_DIR):/var/pict:Z $(PICT_IMG) model.pict $(PICT_OPTS) > $(PICT_DIR)/generated-matrix.tsv
 
 ##@ Test
 
