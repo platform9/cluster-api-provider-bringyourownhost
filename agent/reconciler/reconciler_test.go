@@ -519,7 +519,8 @@ runCmd:
 						result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 							NamespacedName: byoHostLookupKey,
 						})
-						Expect(result).To(Equal(controllerruntime.Result{}))
+						// requeues immediately after install rather than waiting on HeartbeatInterval -- see the Reconcile wrapper
+						Expect(result).To(Equal(controllerruntime.Result{Requeue: true}))
 						Expect(reconcilerErr).NotTo(HaveOccurred())
 
 						updatedByoHost := &infrastructurev1beta1.ByoHost{}
@@ -533,7 +534,8 @@ runCmd:
 						result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 							NamespacedName: byoHostLookupKey,
 						})
-						Expect(result).To(Equal(controllerruntime.Result{}))
+						// requeues immediately rather than waiting on HeartbeatInterval -- see the Reconcile wrapper
+						Expect(result).To(Equal(controllerruntime.Result{Requeue: true}))
 						Expect(reconcilerErr).ToNot(HaveOccurred())
 
 						updatedByoHost := &infrastructurev1beta1.ByoHost{}
@@ -545,6 +547,16 @@ runCmd:
 							Type:   infrastructurev1beta1.K8sComponentsInstallationSucceeded,
 							Status: corev1.ConditionTrue,
 						}))
+					})
+
+					It("should requeue immediately after install regardless of HeartbeatInterval", func() {
+						hostReconciler.HeartbeatInterval = time.Hour // deliberately huge -- the post-install requeue must not inherit this
+
+						result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
+							NamespacedName: byoHostLookupKey,
+						})
+						Expect(reconcilerErr).ToNot(HaveOccurred())
+						Expect(result).To(Equal(controllerruntime.Result{Requeue: true}))
 
 						// assert events -- join lands on the next reconcile (see host_reconciler.go), so only the install event has fired so far
 						events := eventutils.CollectEvents(recorder.Events)

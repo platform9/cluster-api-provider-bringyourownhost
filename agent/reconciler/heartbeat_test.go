@@ -145,8 +145,9 @@ func TestHostReconciler_HeartbeatSurvivesConcurrentConditionPatch(t *testing.T) 
 	assert.Equal(t, corev1.ConditionTrue, installCond.Status)
 
 	// join lands on its own reconcile (see host_reconciler.go) -- one more, fast, call to reach it
-	_, err := r.Reconcile(t.Context(), controllerruntime.Request{NamespacedName: key})
+	joinResult, err := r.Reconcile(t.Context(), controllerruntime.Request{NamespacedName: key})
 	require.NoError(t, err)
+	assert.Equal(t, controllerruntime.Result{RequeueAfter: r.HeartbeatInterval}, joinResult)
 
 	updated := &infrastructurev1beta1.ByoHost{}
 	require.NoError(t, k8sClient.Get(t.Context(), key, updated))

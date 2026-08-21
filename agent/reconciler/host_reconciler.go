@@ -93,7 +93,10 @@ func (r *HostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctr
 	}
 
 	result, err := r.reconcileNormal(ctx, byoHost)
-	if err == nil {
+	// Only apply the default heartbeat-driven requeue cadence if reconcileNormal
+	// didn't already ask for something more specific (e.g. an immediate
+	// requeue to continue a multi-step reconcile without waiting on it).
+	if err == nil && result.RequeueAfter == 0 && !result.Requeue {
 		result.RequeueAfter = r.HeartbeatInterval
 	}
 	return result, err
@@ -147,8 +150,8 @@ func (r *HostReconciler) reconcileNormal(ctx context.Context, byoHost *infrastru
 			r.Recorder.Event(byoHost, corev1.EventTypeNormal, "InstallScriptExecutionSucceeded", "install script executed")
 			conditions.MarkTrue(byoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded)
 
-			// Stop here instead of reading BootstrapSecret and joining right away: install has no time bound, so the kubeadm join token it contains could be rotated while we wait. Read it on the next reconcile instead, immediately before joining, so nothing slow can happen in between.
-			return ctrl.Result{}, nil
+			// Stop here instead of reading BootstrapSecret and joining right away: install has no time bound, so the kubeadm join token it contains could be rotated while we wait. Requeue immediately (not tied to HeartbeatInterval) so the next reconcile reads it fresh right before joining, with nothing slow in between.
+			return ctrl.Result{Requeue: true}, nil
 		} else {
 			logger.Info("install script already executed")
 		}
