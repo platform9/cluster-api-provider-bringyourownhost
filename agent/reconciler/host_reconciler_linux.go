@@ -12,9 +12,13 @@ import "github.com/kube-vip/kube-vip/pkg/vip"
 // has no equivalent outside Linux and is never exercised on a non-Linux
 // build in practice, since the agent only ever runs on Linux BYOH hosts.
 func deleteIP(ip, iface string) error {
-	network, err := vip.NewConfig(ip, iface, "", false, 0)
+	networks, err := vip.NewConfig(ip, iface, false, "", false, 0, 0, 0, "", "", "", false, nil)
 	if err != nil {
 		return nil
 	}
-	return network.DeleteIP()
+	if len(networks) == 0 {
+		return nil
+	}
+	_, err = networks[0].DeleteIP()
+	return err
 }

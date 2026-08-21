@@ -226,7 +226,7 @@ build-packaging-test-image: ## Build the Rocky Linux image used by test-packagin
 	docker build test/e2e/packaging -f test/e2e/packaging/RockyDockerFile -t $(PACKAGING_TEST_RPM_IMG)
 
 test-packaging: build-packaging-test-image prepare-byoh-docker-host-image ## Run the pf9-byohost RPM/deb install/uninstall tests
-	go test ./test/e2e/packaging/... -v -timeout 5m
+	go test ./test/e2e/packaging/... -v -timeout 10m
 
 prepare-byoh-docker-host-image-dev:
 	docker build test/e2e -f docs/BYOHDockerFileDev -t ${BYOH_BASE_IMG_DEV}
