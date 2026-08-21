@@ -231,7 +231,7 @@ func (c *K8sClient) CheckDNSResolution() ([]string, error) {
 }
 
 // GetK8sClient returns a new Kubernetes client from given kubeconfig
-func GetK8sClient(kubeconfigPath string) (*Client, error) {
+var GetK8sClient = func(kubeconfigPath string) (*Client, error) {
 
 	// Build the config from the kubeconfig file.
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)

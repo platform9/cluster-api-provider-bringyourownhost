@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/client"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/service"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils"
@@ -16,8 +17,8 @@ const (
 	OperationDecommission HostOperationType = "decommission"
 )
 
-// PerformHostOperation performs the common steps for host deauthorisation or decommissioning
-func PerformHostOperation(operationType HostOperationType, namespace string) error {
+// PerformHostOperation performs the common steps for host deauthorisation or decommissioning.
+func PerformHostOperation(operationType HostOperationType, namespace string, force bool) error {
 
 	// Deauthorise and decommission host steps -
 	// 1. Authenticate with Platform9 with the kubeconfig present in the agent directory ( kubeconfig )
@@ -53,13 +54,18 @@ func PerformHostOperation(operationType HostOperationType, namespace string) err
 		// There might be a chance that the byohost object is not present in the management cluster
 		// If decommission, ask user to proceed with host cleanup or not, run dpkg purge if yes
 		if operationType == OperationDecommission {
-			// Ask user to proceed with host cleanup or not
-			continueDecommission, err := utils.AskBool("Do you want to proceed with host cleanup? (y/n)")
-			if err != nil {
-				return fmt.Errorf("failed to get user input: %v", err)
-			}
-			if !continueDecommission {
-				return nil
+			if !force {
+				// Ask user to proceed with host cleanup or not
+				continueDecommission, err := utils.AskBool("Do you want to proceed with host cleanup? (y/n)")
+				if err != nil {
+					return fmt.Errorf("failed to get user input: %v", err)
+				}
+				if !continueDecommission {
+					utils.LogInfo("Host cleanup declined by user; skipping dpkg purge")
+					return nil
+				}
+			} else {
+				utils.LogInfo("--force set: proceeding with host cleanup despite unreachable management plane")
 			}
 			err = service.PurgeDebianPackage()
 			if err != nil {
@@ -71,6 +77,10 @@ func PerformHostOperation(operationType HostOperationType, namespace string) err
 
 		// If its here, the operationType is deauthorise
 		// For deathorise byoHost object must be present in the management cluster
+		if force {
+			utils.LogInfo("--force set: management plane unreachable or ByoHost missing; treating deauthorise as a no-op")
+			return nil
+		}
 		return fmt.Errorf("Cannot proceed ahead with the deauthorisation. Either restart the pf9-byohost-agent service or decommission and re-onboard.")
 	}
 

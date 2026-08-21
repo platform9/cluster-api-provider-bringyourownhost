@@ -11,6 +11,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var deauthoriseForce bool
+
 var deauthoriseCmd = &cobra.Command{
 	Use:   "deauthorise",
 	Short: "Deauthorise a host from the respective byo cluster",
@@ -26,6 +28,7 @@ This command will:
 func init() {
 	rootCmd.AddCommand(deauthoriseCmd)
 	deauthoriseCmd.Flags().StringVarP(&verbosity, "verbosity", "v", "minimal", "Log verbosity level (all, important, minimal, critical, none)")
+	deauthoriseCmd.Flags().BoolVarP(&deauthoriseForce, "force", "f", false, "Force deauthorise of the host.")
 }
 
 func runDeauthorise(cmd *cobra.Command, args []string) {
@@ -38,7 +41,7 @@ func runDeauthorise(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	err = pkg.PerformHostOperation(pkg.OperationDeauthorise, namespace)
+	err = pkg.PerformHostOperation(pkg.OperationDeauthorise, namespace, deauthoriseForce)
 	if err != nil {
 		fmt.Println("Failed to deauthorise host. " + err.Error())
 		os.Exit(1)
