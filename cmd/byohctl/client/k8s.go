@@ -38,6 +38,9 @@ const (
 	DefaultFilePerms = 0644
 	// DefaultDirPerms is the default directory permissions
 	DefaultDirPerms = 0755
+	// machineRefPollInterval is how long to wait between checks for a
+	// ByoHost's machineRef being cleared.
+	machineRefPollInterval = 5 * time.Second
 )
 
 // K8sClient handles Kubernetes API operations
@@ -309,7 +312,7 @@ func (client *Client) DeleteByoHostObject(namespace string) error {
 }
 
 // AnnotateMachineObject annotates the machine object with the given annotation
-func (client *Client) AnnotateMachineObject(machineObj *unstructured.Unstructured, namespace, annotationKey, annotationValue string) error {
+func (client *Client) AnnotateMachineObject(ctx context.Context, machineObj *unstructured.Unstructured, namespace, annotationKey, annotationValue string) error {
 	machineGVR := schema.GroupVersionResource{
 		Group:    "cluster.x-k8s.io",
 		Version:  "v1beta1",
@@ -325,7 +328,7 @@ func (client *Client) AnnotateMachineObject(machineObj *unstructured.Unstructure
 	machineObj.SetAnnotations(annotations)
 
 	// Update the machine object
-	_, err := client.DynamicClient.Resource(machineGVR).Namespace(namespace).Update(context.TODO(), machineObj, metav1.UpdateOptions{})
+	_, err := client.DynamicClient.Resource(machineGVR).Namespace(namespace).Update(ctx, machineObj, metav1.UpdateOptions{})
 	if err != nil {
 		return fmt.Errorf("error updating machine object: %v", err)
 	}
@@ -334,8 +337,7 @@ func (client *Client) AnnotateMachineObject(machineObj *unstructured.Unstructure
 }
 
 // ScaleDownMachineDeployment scales down the machine deployment by 1
-func (client *Client) ScaleDownMachineDeployment(machineObj *unstructured.Unstructured, namespace string) error {
-
+func (client *Client) ScaleDownMachineDeployment(ctx context.Context, machineObj *unstructured.Unstructured, namespace string) error {
 	// Get machine deployment name from machine object
 	machineDeploymentName := machineObj.GetLabels()["cluster.x-k8s.io/deployment-name"]
 
@@ -349,7 +351,7 @@ func (client *Client) ScaleDownMachineDeployment(machineObj *unstructured.Unstru
 	}
 
 	// Get the machine deployment object
-	unstructuredDeploymentObj, err := client.DynamicClient.Resource(deploymentGVR).Namespace(namespace).Get(context.TODO(), machineDeploymentName, metav1.GetOptions{})
+	unstructuredDeploymentObj, err := client.DynamicClient.Resource(deploymentGVR).Namespace(namespace).Get(ctx, machineDeploymentName, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("error getting machine deployment object: %v", err)
 	}
@@ -371,7 +373,7 @@ func (client *Client) ScaleDownMachineDeployment(machineObj *unstructured.Unstru
 	}
 
 	// Update the machine deployment object
-	_, err = client.DynamicClient.Resource(deploymentGVR).Namespace(namespace).Update(context.TODO(), updatedUnstructured, metav1.UpdateOptions{})
+	_, err = client.DynamicClient.Resource(deploymentGVR).Namespace(namespace).Update(ctx, updatedUnstructured, metav1.UpdateOptions{})
 	if err != nil {
 		return fmt.Errorf("error updating machine deployment object: %v", err)
 	}
@@ -380,7 +382,7 @@ func (client *Client) ScaleDownMachineDeployment(machineObj *unstructured.Unstru
 }
 
 // GetMachineObject returns the machine object
-func (client *Client) GetUnstructuredMachineObject(namespace, machineName string) (*unstructured.Unstructured, error) {
+func (client *Client) GetUnstructuredMachineObject(ctx context.Context, namespace, machineName string) (*unstructured.Unstructured, error) {
 	machineGVR := schema.GroupVersionResource{
 		Group:    "cluster.x-k8s.io",
 		Version:  "v1beta1",
@@ -388,7 +390,7 @@ func (client *Client) GetUnstructuredMachineObject(namespace, machineName string
 	}
 
 	// Get the machine object
-	unstructuredMachineObj, err := client.DynamicClient.Resource(machineGVR).Namespace(namespace).Get(context.TODO(), machineName, metav1.GetOptions{})
+	unstructuredMachineObj, err := client.DynamicClient.Resource(machineGVR).Namespace(namespace).Get(ctx, machineName, metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("error getting machine object: %v", err)
 	}
@@ -397,8 +399,7 @@ func (client *Client) GetUnstructuredMachineObject(namespace, machineName string
 }
 
 // GetMachineDeploymentReplicaCount returns the replica count of the machine deployment
-func (client *Client) GetMachineDeploymentReplicaCount(machineObj *unstructured.Unstructured, namespace string) (int32, error) {
-
+func (client *Client) GetMachineDeploymentReplicaCount(ctx context.Context, machineObj *unstructured.Unstructured, namespace string) (int32, error) {
 	// Get machine deployment name from machine object
 	machineDeploymentName := machineObj.GetLabels()["cluster.x-k8s.io/deployment-name"]
 
@@ -412,7 +413,7 @@ func (client *Client) GetMachineDeploymentReplicaCount(machineObj *unstructured.
 	}
 
 	// Get the machine deployment object
-	unstructuredDeploymentObj, err := client.DynamicClient.Resource(deploymentGVR).Namespace(namespace).Get(context.TODO(), machineDeploymentName, metav1.GetOptions{})
+	unstructuredDeploymentObj, err := client.DynamicClient.Resource(deploymentGVR).Namespace(namespace).Get(ctx, machineDeploymentName, metav1.GetOptions{})
 	if err != nil {
 		return 0, fmt.Errorf("error getting machine deployment object: %v", err)
 	}
@@ -426,10 +427,15 @@ func (client *Client) GetMachineDeploymentReplicaCount(machineObj *unstructured.
 }
 
 // WaitForMachineRefToBeUnset waits for the machineRef to be unset from the byohost object status field
-func (client *Client) WaitForMachineRefToBeUnset(byoHost *infrastructurev1beta1.ByoHost, namespace string) error {
+func (client *Client) WaitForMachineRefToBeUnset(ctx context.Context, byoHost *infrastructurev1beta1.ByoHost, namespace string) error {
 	startTime := time.Now()
 
 	for {
+		// Stop polling once the caller gives up.
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("waiting for machineRef to be unset: %w", err)
+		}
+
 		// Check if we've exceeded the timeout
 		if time.Since(startTime) > service.WaitForMachineRefToBeUnsetTimeout {
 			return fmt.Errorf("timeout waiting for machineRef to be unset")
@@ -449,12 +455,16 @@ func (client *Client) WaitForMachineRefToBeUnset(byoHost *infrastructurev1beta1.
 
 		// Wait a bit before checking again
 		utils.LogInfo("Waiting for machineRef to be unset...")
-		time.Sleep(5 * time.Second)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for machineRef to be unset: %w", ctx.Err())
+		case <-time.After(machineRefPollInterval):
+		}
 	}
 }
 
 // CheckRegionAvailability checks if the region is available for the tenant
-func (c *K8sClient) CheckRegionAvailability(regionName string) (bool, []string, error) {
+func (c *K8sClient) CheckRegionAvailability(ctx context.Context, regionName string) (bool, []string, error) {
 	// Create a client from the kubeconfig
 	client, err := GetK8sClient(service.KubeconfigFilePath)
 	if err != nil {
@@ -462,7 +472,7 @@ func (c *K8sClient) CheckRegionAvailability(regionName string) (bool, []string, 
 	}
 
 	// Get the region configmap from the management cluster from the tenant namespace
-	regionConfigMap, err := client.Clientset.CoreV1().ConfigMaps(c.getNamespace()).Get(context.TODO(), "region-config", metav1.GetOptions{})
+	regionConfigMap, err := client.Clientset.CoreV1().ConfigMaps(c.getNamespace()).Get(ctx, "region-config", metav1.GetOptions{})
 	if err != nil {
 		return false, nil, fmt.Errorf("error getting region configmap: %v", err)
 	}

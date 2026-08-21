@@ -1,6 +1,10 @@
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 package pkg
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -17,7 +21,7 @@ const (
 )
 
 // PerformHostOperation performs the common steps for host deauthorisation or decommissioning
-func PerformHostOperation(operationType HostOperationType, namespace string) error {
+func PerformHostOperation(ctx context.Context, operationType HostOperationType, namespace string) error {
 
 	// Deauthorise and decommission host steps -
 	// 1. Authenticate with Platform9 with the kubeconfig present in the agent directory ( kubeconfig )
@@ -93,7 +97,7 @@ func PerformHostOperation(operationType HostOperationType, namespace string) err
 	machineName := byoHost.Status.MachineRef.Name
 
 	// Get the machine object ( unstructured )
-	unstructuredMachineObj, err := client.GetUnstructuredMachineObject(namespace, machineName)
+	unstructuredMachineObj, err := client.GetUnstructuredMachineObject(ctx, namespace, machineName)
 	if err != nil {
 		return fmt.Errorf("failed to get machine object: %v", err)
 	}
@@ -106,7 +110,7 @@ func PerformHostOperation(operationType HostOperationType, namespace string) err
 	// So when doing de-auth, check if the node count in the workload cluster and stop the de-auth if that is last node.
 
 	// Check machine deployment replica count. If it is 1, then warn and ask the user to continue de-uth or not.
-	replicaCount, err := client.GetMachineDeploymentReplicaCount(unstructuredMachineObj, namespace)
+	replicaCount, err := client.GetMachineDeploymentReplicaCount(ctx, unstructuredMachineObj, namespace)
 	if err != nil {
 		return fmt.Errorf("failed to get machine deployment replica count: %v", err)
 	}
@@ -124,20 +128,20 @@ func PerformHostOperation(operationType HostOperationType, namespace string) err
 		}
 
 		// Since this is the last machine in the cluster, annotate machine objects to exclude the node drain
-		err = client.AnnotateMachineObject(unstructuredMachineObj, namespace, "machine.cluster.x-k8s.io/exclude-node-draining", "")
+		err = client.AnnotateMachineObject(ctx, unstructuredMachineObj, namespace, "machine.cluster.x-k8s.io/exclude-node-draining", "")
 		if err != nil {
 			return fmt.Errorf("failed to annotate the last machine object to be deauth: %v", err)
 		}
 	}
 
 	// Get the fresh machine object from the server to get the updated machine object
-	unstructuredMachineObj, err = client.GetUnstructuredMachineObject(namespace, machineName)
+	unstructuredMachineObj, err = client.GetUnstructuredMachineObject(ctx, namespace, machineName)
 	if err != nil {
 		return fmt.Errorf("failed to get machine object: %v", err)
 	}
 
 	// 5. Annonate the respective machine object with "cluster.x-k8s.io/delete-machine"="yes"
-	err = client.AnnotateMachineObject(unstructuredMachineObj, namespace, "cluster.x-k8s.io/delete-machine", "yes")
+	err = client.AnnotateMachineObject(ctx, unstructuredMachineObj, namespace, "cluster.x-k8s.io/delete-machine", "yes")
 	if err != nil {
 		return fmt.Errorf("failed to annotate machine object: %v", err)
 	}
@@ -145,7 +149,7 @@ func PerformHostOperation(operationType HostOperationType, namespace string) err
 	utils.LogSuccess("Successfully annotated machine object that needs to be removed from the cluster")
 
 	// 6. Scale down the machine deployment by 1
-	err = client.ScaleDownMachineDeployment(unstructuredMachineObj, namespace)
+	err = client.ScaleDownMachineDeployment(ctx, unstructuredMachineObj, namespace)
 	if err != nil {
 		return fmt.Errorf("failed to scale down machine deployment: %v", err)
 	}
@@ -153,7 +157,7 @@ func PerformHostOperation(operationType HostOperationType, namespace string) err
 	utils.LogSuccess("Successfully scaled down machine deployment by 1")
 
 	// 7. Wait for machineRef to be unset from the byohost object status field
-	err = client.WaitForMachineRefToBeUnset(byoHost, namespace)
+	err = client.WaitForMachineRefToBeUnset(ctx, byoHost, namespace)
 	if err != nil {
 		return fmt.Errorf("failed to wait for machineRef to be unset: %v", err)
 	}
