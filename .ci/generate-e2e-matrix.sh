@@ -74,10 +74,27 @@ main() {
         ;;
     esac
 
-    case "${scenario}" in
-      Join | Installer | Reuse | ClusterClass | MDScale)
+    # e2e_suite_test.go's SynchronizedBeforeSuite builds a local k8s bundle
+    # for KUBERNETES_VERSION unconditionally, before any spec runs,
+    # regardless of GINKGO_FOCUS -- confirmed by running this: leaving it
+    # unset for ByoHCtl/UpgradeCluster/UpgradeClusterClass failed the whole
+    # suite's setup with 'unexpected Kubernetes version format ""', even
+    # though none of those three scenarios read KUBERNETES_VERSION in their
+    # own spec body. clusterctl's GetVariableOrEmpty (unlike this repo's own
+    # getEnvOrDefault, used for E2E_K8S_VERSION_FROM/_TO) treats an
+    # explicitly-empty env var as set, so it can't be left blank the way
+    # those two safely can. Every suite=="e2e" row needs a real value here;
+    # only suite=="packaging" rows (a separate Go test binary, no
+    # SynchronizedBeforeSuite) are exempt.
+    if [[ "${suite}" == "e2e" ]]; then
+      if [[ "${k8s_version}" == "NA" ]]; then
+        kubernetes_version="v1.31.0"
+      else
         kubernetes_version="${k8s_version}"
-        ;;
+      fi
+    fi
+
+    case "${scenario}" in
       UpgradeCluster | UpgradeClusterClass)
         e2e_k8s_version_from="${k8s_version}"
         # model.pict has no upgrade-target column -- it has no independent
