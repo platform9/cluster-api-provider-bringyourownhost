@@ -10,6 +10,14 @@
 name: e2e-matrix
 
 on:
+  # TEMPORARY, for this PR's own review only: workflow_dispatch can't
+  # dispatch a workflow that doesn't exist on the default branch yet, so
+  # there's no way to get a real execution of a brand-new workflow_dispatch
+  # workflow before it merges except by triggering it some other way once.
+  # Remove this pull_request trigger again before merging -- see the plan
+  # this PR is part of for why workflow_dispatch-only is the intended,
+  # permanent state.
+  pull_request: {}
   workflow_dispatch: {}
 
 permissions:
