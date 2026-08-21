@@ -40,16 +40,17 @@ make deploy                   # Deploy controller to cluster
 make run                      # Run controller locally against $KUBECONFIG cluster
 ```
 
-### Prefer `make` targets over raw `go`/`gofmt`
+### Always use `make` targets — never invoke `go`/`gofmt` directly
 
-Default to `make <target>` (`build`, `vet`, `fmt`, `lint`, `*-test`) instead of typing
-`go build`/`go test`/`go vet`/`go run`/`gofmt` directly — even when the flags would be identical
-to what the target runs internally. Targets pin this repo's `GOTOOLCHAIN` (`Makefile:8`), set up
-required env/tooling (`fetch_ext_bins.sh`), pass build tags a raw invocation easily misses (e.g.
-`-tags=e2e` for `test/e2e`), and scope `golangci-lint`'s cache per-worktree to avoid cross-worktree
-cache poisoning when `make lint` runs concurrently in other worktrees. Skipping the target tends to
-produce false-negative failures (or false-positive lint findings against the wrong files) that
-look like real regressions rather than faster feedback.
+Never type `go build`, `go test`, `go vet`, `go run`, or the standalone `gofmt` binary as the
+literal command in this repo — including narrow, one-off sanity checks, and even when the flags
+would be identical to what a Makefile target already runs internally. Use `make <target>`
+(`build`, `vet`, `fmt`, `lint`, `*-test`) instead. Targets pin this repo's `GOTOOLCHAIN`
+(`Makefile:8`), set up required env/tooling (`fetch_ext_bins.sh`), pass build tags a raw
+invocation easily misses (e.g. `-tags=e2e` for `test/e2e`), and scope `golangci-lint`'s cache
+per-worktree to avoid cross-worktree cache poisoning when `make lint` runs concurrently in other
+worktrees. Skipping the target produces false-negative failures (or false-positive lint findings
+against the wrong files) that look like real regressions rather than faster feedback.
 
 ```bash
 # Full suites
