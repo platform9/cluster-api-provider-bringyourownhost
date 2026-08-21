@@ -112,9 +112,16 @@ main() {
     # "[PR-Blocking]" spec tag from e2e_test.go), which reads as if this
     # gated, optional matrix were blocking something. label is what the
     # workflow's job `name:` displays instead.
-    label="${scenario}"
-    [[ "${suite}" == "e2e" ]] && label="${scenario} (${kubernetes_version})"
+    job_label="${scenario}"
+    [[ "${suite}" == "e2e" ]] && job_label="${scenario} (${kubernetes_version})"
 
+    # jq's `label $out | ...`/`break $out` control-flow keyword makes
+    # $label itself unparseable as a --arg/variable name (confirmed: even
+    # `jq -n --arg label 1 '$label'` alone fails on jq 1.6, the version
+    # this repo's CI runners have -- unrelated to whether the resulting
+    # object *key* is named "label", which works fine either way). Named
+    # job_label here to avoid that, independent of the "label" JSON field
+    # name below.
     row=$(jq -nc \
       --arg scenario "${scenario}" \
       --arg suite "${suite}" \
@@ -122,12 +129,12 @@ main() {
       --arg kubernetes_version "${kubernetes_version}" \
       --arg e2e_k8s_version_from "${e2e_k8s_version_from}" \
       --arg e2e_k8s_version_to "${e2e_k8s_version_to}" \
-      --arg label "${label}" \
+      --arg job_label "${job_label}" \
       '{scenario: $scenario, suite: $suite, ginkgo_focus: $ginkgo_focus,
         kubernetes_version: $kubernetes_version,
         e2e_k8s_version_from: $e2e_k8s_version_from,
         e2e_k8s_version_to: $e2e_k8s_version_to,
-        label: $label}')
+        label: $job_label}')
 
     rows=$(jq -c --argjson row "${row}" '. + [$row]' <<<"${rows}")
   done < <(tail -n +2 "${tsv}")
