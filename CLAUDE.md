@@ -23,6 +23,7 @@ make agent-test               # Agent tests only
 make webhook-test             # Webhook tests only
 make cmd-test                 # byohctl tests (cd cmd && go test ./...)
 make test-e2e                 # End-to-end tests (requires a cluster)
+make test-e2e-linux-vm        # E2E tests in Linux VM (use on macOS to avoid false negatives)
 
 # Code quality
 make lint                     # Run golangci-lint
@@ -39,12 +40,18 @@ make deploy                   # Deploy controller to cluster
 make run                      # Run controller locally against $KUBECONFIG cluster
 ```
 
-To run a single Ginkgo test suite directly:
+### Running Specific Tests
+
 ```bash
-go test ./controllers/infrastructure/... -v -run "TestControllers"
-# Or with Ginkgo CLI:
+# Unit/controller tests
 ginkgo -v -focus "description of test" ./controllers/infrastructure/
+go test ./controllers/infrastructure/... -v -run "TestControllers"
+
+# E2E tests (use -linux-vm variant on macOS)
+yes | make GINKGO_FOCUS="test description" test-e2e-linux-vm 2>&1 | tee /tmp/e2e.log
 ```
+
+On macOS, use `-linux-vm` targets to run tests in a Linux VM via Docker; plain targets can give false negatives in the macOS sandbox.
 
 ## Architecture
 
