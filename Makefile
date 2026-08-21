@@ -124,8 +124,10 @@ vet: ## Run go vet against code.
 	GOOS=linux go vet ./...
 
 GOLANGCI_LINT = $(shell pwd)/bin/golangci-lint
+# Scope the cache to this checkout — golangci-lint's default cache is shared machine-wide, which cross-contaminates concurrent runs across worktrees.
+GOLANGCI_LINT_CACHE = $(shell pwd)/bin/golangci-lint-cache
 lint: golangci-lint
-	${GOLANGCI_LINT} run
+	GOLANGCI_LINT_CACHE=$(GOLANGCI_LINT_CACHE) ${GOLANGCI_LINT} run
 golangci-lint:
 	$(call go-get-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2)
 
