@@ -109,7 +109,10 @@ func (r *HostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctr
 	}
 
 	result, err := r.reconcileNormal(ctx, byoHost)
-	if err == nil {
+	// Only apply the default heartbeat-driven requeue cadence if reconcileNormal
+	// didn't already ask for something more specific (e.g. an immediate
+	// requeue to continue a multi-step reconcile without waiting on it).
+	if err == nil && result.RequeueAfter == 0 && !result.Requeue {
 		result.RequeueAfter = r.HeartbeatInterval
 	}
 	return result, err
@@ -151,13 +154,7 @@ func (r *HostReconciler) reconcileNormal(ctx context.Context, byoHost *infrastru
 	}
 
 	if !conditions.IsTrue(byoHost, infrastructurev1beta1.K8sNodeBootstrapSucceeded) {
-		bootstrapScript, err := r.getBootstrapScript(ctx, byoHost.Spec.BootstrapSecret.Name, byoHost.Spec.BootstrapSecret.Namespace)
-		if err != nil {
-			logger.Error(err, "error getting bootstrap script")
-			r.Recorder.Eventf(byoHost, corev1.EventTypeWarning, "ReadBootstrapSecretFailed", "bootstrap secret %s not found", byoHost.Spec.BootstrapSecret.Name)
-			return ctrl.Result{}, err
-		}
-
+		// Both branches below fall through to the BootstrapSecret read further down within this same call: neither one runs anything slow first, so there's nothing that could go stale by the time they get there.
 		if r.SkipK8sInstallation {
 			logger.Info("Skipping installation of k8s components")
 		} else if !conditions.IsTrue(byoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded) {
@@ -166,14 +163,24 @@ func (r *HostReconciler) reconcileNormal(ctx context.Context, byoHost *infrastru
 				conditions.MarkFalse(byoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded, infrastructurev1beta1.K8sInstallationSecretUnavailableReason, clusterv1.ConditionSeverityInfo, "")
 				return ctrl.Result{}, nil
 			}
-			err = r.executeInstallerController(ctx, byoHost)
+			err := r.executeInstallerController(ctx, byoHost)
 			if err != nil {
 				return ctrl.Result{}, err
 			}
 			r.Recorder.Event(byoHost, corev1.EventTypeNormal, "InstallScriptExecutionSucceeded", "install script executed")
 			conditions.MarkTrue(byoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded)
+
+			// Stop here instead of reading BootstrapSecret and joining right away: install has no time bound, so the kubeadm join token it contains could be rotated while we wait. Requeue immediately (not tied to HeartbeatInterval) so the next reconcile reads it fresh right before joining, with nothing slow in between.
+			return ctrl.Result{Requeue: true}, nil
 		} else {
 			logger.Info("install script already executed")
+		}
+
+		bootstrapScript, err := r.getBootstrapScript(ctx, byoHost.Spec.BootstrapSecret.Name, byoHost.Spec.BootstrapSecret.Namespace)
+		if err != nil {
+			logger.Error(err, "error getting bootstrap script")
+			r.Recorder.Eventf(byoHost, corev1.EventTypeWarning, "ReadBootstrapSecretFailed", "bootstrap secret %s not found", byoHost.Spec.BootstrapSecret.Name)
+			return ctrl.Result{}, err
 		}
 
 		err = r.cleank8sdirectories(ctx)
