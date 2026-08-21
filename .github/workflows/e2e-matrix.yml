@@ -87,6 +87,7 @@ jobs:
           retention-days: 1
 
   test:
+    name: test (${{ matrix.label }})
     needs: [ generate-matrix, build ]
     runs-on: ubuntu-22.04
     strategy:

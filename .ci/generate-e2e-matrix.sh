@@ -106,6 +106,15 @@ main() {
         ;;
     esac
 
+    # GitHub Actions auto-names a matrix job by concatenating every field in
+    # its object -- without this, the job title leaks the raw GINKGO_FOCUS
+    # regex (e.g. Join's is literally the pre-existing, unrelated
+    # "[PR-Blocking]" spec tag from e2e_test.go), which reads as if this
+    # gated, optional matrix were blocking something. label is what the
+    # workflow's job `name:` displays instead.
+    label="${scenario}"
+    [[ "${suite}" == "e2e" ]] && label="${scenario} (${kubernetes_version})"
+
     row=$(jq -nc \
       --arg scenario "${scenario}" \
       --arg suite "${suite}" \
@@ -113,10 +122,12 @@ main() {
       --arg kubernetes_version "${kubernetes_version}" \
       --arg e2e_k8s_version_from "${e2e_k8s_version_from}" \
       --arg e2e_k8s_version_to "${e2e_k8s_version_to}" \
+      --arg label "${label}" \
       '{scenario: $scenario, suite: $suite, ginkgo_focus: $ginkgo_focus,
         kubernetes_version: $kubernetes_version,
         e2e_k8s_version_from: $e2e_k8s_version_from,
-        e2e_k8s_version_to: $e2e_k8s_version_to}')
+        e2e_k8s_version_to: $e2e_k8s_version_to,
+        label: $label}')
 
     rows=$(jq -c --argjson row "${row}" '. + [$row]' <<<"${rows}")
   done < <(tail -n +2 "${tsv}")
