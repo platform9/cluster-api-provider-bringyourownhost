@@ -47,9 +47,7 @@ func buildFixtureAgentBinary(gitVersion string) (string, error) {
 // golang:1.26.4, the base this suite's own linux-test-runner image builds from), so this needs no
 // new dependency at all.
 //
-// If postinstFails is true, the fixture's postinst script deliberately exits non-zero -- for the
-// halt-on-explicit-failure scenario (docs/proposals/agent-self-upgrade-adr.md §5.3's second spec).
-func buildFixtureAgentDeb(ctx context.Context, binaryPath, gitVersion string, postinstFails bool) (debDir string, err error) {
+func buildFixtureAgentDeb(ctx context.Context, binaryPath, gitVersion string) (debDir string, err error) {
 	stageDir, err := os.MkdirTemp("", "agent-fixture-deb-*")
 	if err != nil {
 		return "", err
@@ -84,9 +82,6 @@ func buildFixtureAgentDeb(ctx context.Context, binaryPath, gitVersion string, po
 	}
 
 	postinst := "#!/bin/sh\nset -e\nchmod +x " + systemdAgentBinaryPath + "\n"
-	if postinstFails {
-		postinst += "exit 1\n"
-	}
 	if writeErr := os.WriteFile(filepath.Join(debianDir, "postinst"), []byte(postinst), 0755); writeErr != nil { //nolint:gosec // dpkg requires postinst to be executable
 		return "", writeErr
 	}

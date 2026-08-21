@@ -65,7 +65,7 @@ var _ = Describe("When an agent upgrade rollout stages across a fleet [AgentUpgr
 		Expect(err).NotTo(HaveOccurred())
 
 		By("Packaging the new version as a .deb fixture and pushing it to the local registry")
-		newDebDir, err := buildFixtureAgentDeb(ctx, newBinary, newVersion, false)
+		newDebDir, err := buildFixtureAgentDeb(ctx, newBinary, newVersion)
 		Expect(err).NotTo(HaveOccurred())
 		packageURL, err := pushFixtureAgentBundle(ctx, dockerClient, dockerNetworkInterfaceKind, newDebDir,
 			fmt.Sprintf("agent-fixture-%s:e2e", util.RandomString(6)))

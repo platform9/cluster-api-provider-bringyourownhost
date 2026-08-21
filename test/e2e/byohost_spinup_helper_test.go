@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"sigs.k8s.io/cluster-api/util"
 )
@@ -21,9 +22,30 @@ type byoHostHandle struct {
 	LogFilePath string
 }
 
-// spinUpByoHosts creates count BYO hosts. On error it returns the handles created so
-// far alongside the error.
+// spinUpByoHosts creates count BYO hosts, each running agentBinaryPath as a bare, attached
+// `docker exec` process. On error it returns the handles created so far alongside the error.
 func spinUpByoHosts(ctx context.Context, dockerClient *client.Client, namespace string, count int) ([]byoHostHandle, error) {
+	return spinUpByoHostsCommon(ctx, dockerClient, namespace, count, pathToHostAgentBinary,
+		func(runner *ByoHostRunner, byohost *container.CreateResponse) (func(), string, error) {
+			output, _, err := runner.ExecByoDockerHost(byohost)
+			if err != nil {
+				return nil, "", err
+			}
+			logFilePath := fmt.Sprintf("/tmp/host-agent-%s.log", runner.ByoHostName)
+			return StreamDockerLog(output, logFilePath), logFilePath, nil
+		})
+}
+
+// spinUpByoHostsCommon creates count BYO hosts and, for each, calls startAgent once the container
+// exists -- shared between spinUpByoHosts (bare docker exec) and
+// spinUpByoHostsWithSystemdAgent (systemd unit), which differ only in how the agent process
+// actually gets started. A host is always appended to the returned slice before startAgent runs,
+// so a failure partway through it still leaves the container tracked for the caller's
+// teardownByoHosts -- otherwise its ID is lost and the container leaks.
+func spinUpByoHostsCommon(ctx context.Context, dockerClient *client.Client, namespace string, count int, agentBinaryPath string,
+	startAgent func(runner *ByoHostRunner, byohost *container.CreateResponse) (stopLog func(), logFilePath string, err error),
+) ([]byoHostHandle, error) {
+
 	hosts := make([]byoHostHandle, 0, count)
 
 	for i := 0; i < count; i++ {
@@ -34,7 +56,7 @@ func spinUpByoHosts(ctx context.Context, dockerClient *client.Client, namespace 
 			clusterConName:        clusterConName,
 			ByoHostName:           byoHostName,
 			Namespace:             namespace,
-			PathToHostAgentBinary: pathToHostAgentBinary,
+			PathToHostAgentBinary: agentBinaryPath,
 			DockerClient:          dockerClient,
 			NetworkInterface:      dockerNetworkInterfaceKind,
 			Env:                   byoHostRunnerEnv(),
@@ -59,13 +81,11 @@ func spinUpByoHosts(ctx context.Context, dockerClient *client.Client, namespace 
 			LogFilePath: "",
 		})
 
-		output, _, err := runner.ExecByoDockerHost(byohost)
+		stopLog, logFilePath, err := startAgent(&runner, byohost)
 		if err != nil {
 			return hosts, err
 		}
-
-		logFilePath := fmt.Sprintf("/tmp/host-agent-%s.log", byoHostName)
-		hosts[len(hosts)-1].StopLog = StreamDockerLog(output, logFilePath)
+		hosts[len(hosts)-1].StopLog = stopLog
 		hosts[len(hosts)-1].LogFilePath = logFilePath
 	}
 

@@ -10,12 +10,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/pkg/errors"
-	"sigs.k8s.io/cluster-api/util"
 )
 
 // The e2e harness's default spinUpByoHosts path (byohost_spinup_helper_test.go) starts the agent
@@ -48,55 +49,14 @@ const (
 // than whatever this suite's own build produces, so it's a parameter rather than hardcoded. On
 // error it returns the handles created so far alongside the error.
 func spinUpByoHostsWithSystemdAgent(ctx context.Context, dockerClient *client.Client, namespace string, count int, agentBinaryPath string) ([]byoHostHandle, error) {
-	hosts := make([]byoHostHandle, 0, count)
-
-	for i := 0; i < count; i++ {
-		byoHostName := fmt.Sprintf("byohost-%s", util.RandomString(6))
-
-		runner := ByoHostRunner{
-			Context:               ctx,
-			clusterConName:        clusterConName,
-			ByoHostName:           byoHostName,
-			Namespace:             namespace,
-			PathToHostAgentBinary: agentBinaryPath,
-			DockerClient:          dockerClient,
-			NetworkInterface:      dockerNetworkInterfaceKind,
-			Env:                   byoHostRunnerEnv(),
-			bootstrapClusterProxy: bootstrapClusterProxy,
-			CommandArgs: map[string]string{
-				agentFlagBootstrapKubeconfig: bootstrapConfPath,
-				agentFlagNamespace:           namespace,
-			},
-			BootstrapKubeconfigData: generateBootstrapKubeconfig(ctx, bootstrapClusterProxy, clusterConName),
-		}
-
-		// SetupByoDockerHost also copies the agent binary to /agent and the kubeconfig to
-		// bootstrapConfPath -- the /agent copy goes unused by this systemd path (it never calls
-		// ExecByoDockerHost), but reusing the existing helper as-is is simpler than forking it
-		// just to skip one small, harmless extra copy.
-		byohost, err := runner.SetupByoDockerHost()
-		if err != nil {
-			return hosts, err
-		}
-
-		// Append before installSystemdAgentUnit, not after: the container above already exists
-		// once SetupByoDockerHost returns, so a failure partway through installing the unit must
-		// still leave this host in the returned slice, or the caller's teardownByoHosts(hosts)
-		// never sees the container's ID and leaks it.
-		logFilePath := fmt.Sprintf("/tmp/host-agent-%s.log", byoHostName)
-		hosts = append(hosts, byoHostHandle{
-			Name:        byoHostName,
-			ContainerID: byohost.ID,
-			StopLog:     copySystemdAgentLog(ctx, dockerClient, byohost.ID, logFilePath),
-			LogFilePath: logFilePath,
+	return spinUpByoHostsCommon(ctx, dockerClient, namespace, count, agentBinaryPath,
+		func(runner *ByoHostRunner, byohost *container.CreateResponse) (func(), string, error) {
+			if err := installSystemdAgentUnit(ctx, dockerClient, byohost.ID, namespace, agentBinaryPath); err != nil {
+				return nil, "", err
+			}
+			logFilePath := fmt.Sprintf("/tmp/host-agent-%s.log", runner.ByoHostName)
+			return copySystemdAgentLog(ctx, dockerClient, byohost.ID, logFilePath), logFilePath, nil
 		})
-
-		if err := installSystemdAgentUnit(ctx, dockerClient, byohost.ID, namespace, agentBinaryPath); err != nil {
-			return hosts, err
-		}
-	}
-
-	return hosts, nil
 }
 
 // installSystemdAgentUnit copies the real agent binary and systemd unit into containerID at the
@@ -230,4 +190,20 @@ func copySystemdAgentLog(ctx context.Context, dockerClient *client.Client, conta
 		// Same multiplexed-stream caveat as containerCommandOutput -- demux, don't read raw.
 		_, _ = stdcopy.StdCopy(f, f, resp.Reader) //nolint:errcheck // best-effort log snapshot for test diagnostics
 	}
+}
+
+// mainPID reads the current MainPID systemd reports for the agent unit inside containerID,
+// returning 0 if the unit isn't running or the read fails (e.g. mid-restart) rather than erroring
+// -- callers poll this via Eventually, where a transient 0 is expected, not a failure.
+func mainPID(ctx context.Context, dockerClient *client.Client, containerID string) int {
+	out, err := containerCommandOutput(ctx, dockerClient, containerID,
+		"systemctl", "show", "-p", "MainPID", "--value", systemdAgentServiceUnitName)
+	if err != nil {
+		return 0
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return 0
+	}
+	return pid
 }
