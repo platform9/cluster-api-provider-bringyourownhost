@@ -40,18 +40,36 @@ make deploy                   # Deploy controller to cluster
 make run                      # Run controller locally against $KUBECONFIG cluster
 ```
 
-### Running Specific Tests
+### Always use `make` targets — never invoke `go`/`gofmt` directly
+
+Never type `go build`, `go test`, `go vet`, `go run`, or the standalone `gofmt` binary as the
+literal command in this repo — including narrow, one-off sanity checks, and even when the flags
+would be identical to what a Makefile target already runs internally. Use `make <target>`
+(`build`, `vet`, `fmt`, `lint`, `*-test`) instead. Targets pin this repo's `GOTOOLCHAIN`
+(`Makefile:8`), set up required env/tooling (`fetch_ext_bins.sh`), pass build tags a raw
+invocation easily misses (e.g. `-tags=e2e` for `test/e2e`), and scope `golangci-lint`'s cache
+per-worktree to avoid cross-worktree cache poisoning when `make lint` runs concurrently in other
+worktrees. Skipping the target produces false-negative failures (or false-positive lint findings
+against the wrong files) that look like real regressions rather than faster feedback.
 
 ```bash
-# Unit/controller tests
-ginkgo -v -focus "description of test" ./controllers/infrastructure/
-go test ./controllers/infrastructure/... -v -run "TestControllers"
-
-# E2E tests (use -linux-vm variant on macOS)
-yes | make GINKGO_FOCUS="test description" test-e2e-linux-vm 2>&1 | tee /tmp/e2e.log
+# Full suites
+make controller-test   # ./controllers/infrastructure/
+make agent-test        # ./agent/...
+make webhook-test      # ./apis/infrastructure/v1beta1
+make test-e2e-linux-vm GINKGO_FOCUS="test description"   # e2e, scoped to one spec (macOS-safe)
 ```
 
-On macOS, use `-linux-vm` targets to run tests in a Linux VM via Docker; plain targets can give false negatives in the macOS sandbox.
+**Known gap:** `controller-test`/`agent-test`/`webhook-test` don't expose a focus/skip variable the
+way `test-e2e` does via `GINKGO_FOCUS`. If you genuinely need to scope one of those down to a
+single spec while iterating, it's fine to drop to `ginkgo -focus "description" <pkg>` or
+`go test -run "TestName" <pkg>` for that one iteration — but re-run the full `make <target>`
+before treating the change as verified. The raw command is a speed shortcut for iteration, not a
+substitute for the make-driven signal.
+
+On macOS, always use the `-linux-vm` variant for anything that spins up docker/systemd containers
+(`agent-test-linux-vm`, `test-e2e-linux-vm`) — plain targets give false-negative failures in the
+macOS sandbox (no real dockerd, no `/etc/os-release`), not real regressions.
 
 ## Architecture
 
