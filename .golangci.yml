@@ -10,6 +10,7 @@ linters:
     - dupl
     - dupword
     - errcheck
+    - forbidigo
     - funlen
     - goconst
     - gocritic
@@ -52,6 +53,14 @@ linters:
               desc: removed to clear CVE-2025-15558; do not reintroduce
     dupl:
       threshold: 200
+    forbidigo:
+      # Match the resolved symbol, not the source text, so an aliased import
+      # is caught too.
+      analyze-types: true
+      forbid:
+        - pattern: ^context\.TODO$
+          pkg: ^context$
+          msg: take the context from the caller instead of starting a new one
     funlen:
       lines: 100
       statements: 50
