@@ -349,7 +349,7 @@ func findPackageArtifact(dir, family string) (string, error) {
 // verifyChecksum checks path's sha256 against expected, formatted
 // "sha256:<hex>".
 func verifyChecksum(path, expected string) error {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path comes from findPackageArtifact's filepath.Glob() with validated single match
 	if err != nil {
 		return err
 	}
