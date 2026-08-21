@@ -56,7 +56,7 @@ var _ = Describe("Cluster upgrade test [K8s-Upgrade-Cluster]", func() {
 
 		By("creating a workload cluster with one control plane node and one worker node")
 
-		setControlPlaneIP(context.Background(), dockerClient)
+		setControlPlaneIP(ctx, dockerClient)
 		applyClusterAndWait(ctx, namespace.Name, clusterName, specName, kubernetesVersionUpgradeFrom, clusterctl.DefaultFlavor, 1, 1, clusterResources)
 
 		By("Upgrading the control plane")

@@ -88,12 +88,12 @@ func setupReconcilers() {
 		WithBundleBaseRegistry("projects.registry.vmware.com/cluster_api_provider_bringyourownhost").
 		WithBundleTag("1.0").
 		Build()
-	if err := cl.Create(context.Background(), byoCluster); err != nil {
+	if err := cl.Create(ctx, byoCluster); err != nil {
 		panic(err)
 	}
 
 	capiCluster = builder.Cluster(defaultNamespace, defaultClusterName).WithInfrastructureRef(byoCluster).Build()
-	if err := cl.Create(context.Background(), capiCluster); err != nil {
+	if err := cl.Create(ctx, capiCluster); err != nil {
 		panic(err)
 	}
 
@@ -106,12 +106,12 @@ func setupReconcilers() {
 		Tracker:  remote.NewTestClusterCacheTracker(logr.New(logf.NullLogSink{}), cl, clientFake, scheme.Scheme, client.ObjectKey{Name: capiCluster.Name, Namespace: capiCluster.Namespace}), //nolint: staticcheck // mirrors the deprecated-but-supported remote.ClusterCacheTracker used by ByoMachineReconciler.Tracker
 		Recorder: recorder,
 	}
-	if err := reconciler.SetupWithManager(context.TODO(), k8sManager); err != nil {
+	if err := reconciler.SetupWithManager(ctx, k8sManager); err != nil {
 		panic(err)
 	}
 
 	byoClusterReconciler = &controllers.ByoClusterReconciler{Client: cl}
-	if err := byoClusterReconciler.SetupWithManager(context.TODO(), k8sManager); err != nil {
+	if err := byoClusterReconciler.SetupWithManager(ctx, k8sManager); err != nil {
 		panic(err)
 	}
 
@@ -169,7 +169,7 @@ func setupReconcilers() {
 		}
 	}()
 
-	if !k8sManager.GetCache().WaitForCacheSync(context.TODO()) {
+	if !k8sManager.GetCache().WaitForCacheSync(ctx) {
 		panic("cache never synced")
 	}
 }
@@ -179,7 +179,16 @@ func setupReconcilers() {
 // and Go-native TestXxx functions.
 func TestMain(m *testing.M) {
 	logf.SetLogger(zap.New(zap.UseDevMode(true)))
-	ctx, cancel = context.WithCancel(context.TODO())
+	// Gomega drops its default Eventually timeout once an assertion carries a
+	// context. WaitForObjectsToBePopulatedInCache passes the suite context to
+	// propagate it, not to bound the wait, and that context lives until m.Run()
+	// returns - so without this a never-populated cache would hang the suite
+	// instead of failing in a second.
+	EnforceDefaultTimeoutsWhenUsingContexts()
+
+	// TestMain owns the suite lifetime: this context is canceled below, after
+	// m.Run() returns, so it safely spans the manager cache and every spec.
+	ctx, cancel = context.WithCancel(context.Background())
 
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
@@ -234,16 +243,16 @@ func TestAPIs(t *testing.T) {
 		[]Reporter{})
 }
 
-func WaitForObjectsToBePopulatedInCache(objects ...client.Object) {
+func WaitForObjectsToBePopulatedInCache(ctx context.Context, objects ...client.Object) {
 	for _, object := range objects {
 		objectCopy := object.DeepCopyObject().(client.Object)
 		key := client.ObjectKeyFromObject(object)
-		Eventually(func() (done bool) {
-			if err := reconciler.Client.Get(context.TODO(), key, objectCopy); err != nil {
+		Eventually(func(ctx context.Context) (done bool) {
+			if err := reconciler.Client.Get(ctx, key, objectCopy); err != nil {
 				return false
 			}
 			return true
-		}).Should(BeTrue())
+		}).WithContext(ctx).Should(BeTrue())
 	}
 }
 
@@ -251,12 +260,12 @@ func WaitForObjectsToBePopulatedInCache(objects ...client.Object) {
 // satisfies testObjectUpdatedFunc. It uses a plain polling loop so it works in
 // both Ginkgo tests and Go-native TestXxx functions (Gomega's Eventually
 // requires RegisterFailHandler which is only set up inside TestAPIs).
-func WaitForObjectToBeUpdatedInCache(object client.Object, testObjectUpdatedFunc func(client.Object) bool) {
+func WaitForObjectToBeUpdatedInCache(ctx context.Context, object client.Object, testObjectUpdatedFunc func(client.Object) bool) {
 	objectCopy := object.DeepCopyObject().(client.Object)
 	key := client.ObjectKeyFromObject(object)
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if err := reconciler.Get(context.TODO(), key, objectCopy); err == nil {
+		if err := reconciler.Get(ctx, key, objectCopy); err == nil {
 			if testObjectUpdatedFunc(objectCopy) {
 				return
 			}

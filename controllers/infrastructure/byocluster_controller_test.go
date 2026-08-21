@@ -1,4 +1,5 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package controllers_test
@@ -47,7 +48,7 @@ var _ = Describe("Controllers/ByoclusterController", func() {
 	It("should not throw error when OwnerRef is not set", func() {
 		byoCluster = builder.ByoCluster(defaultNamespace, "byocluster-not-link-cluster").Build()
 		Expect(k8sClientUncached.Create(ctx, byoCluster)).Should(Succeed())
-		WaitForObjectsToBePopulatedInCache(byoCluster)
+		WaitForObjectsToBePopulatedInCache(ctx, byoCluster)
 
 		_, err := byoClusterReconciler.Reconcile(ctx, reconcile.Request{
 			NamespacedName: types.NamespacedName{
@@ -61,13 +62,13 @@ var _ = Describe("Controllers/ByoclusterController", func() {
 			WithPausedField(true).
 			Build()
 		Expect(k8sClientUncached.Create(ctx, cluster)).Should(Succeed())
-		WaitForObjectsToBePopulatedInCache(cluster)
+		WaitForObjectsToBePopulatedInCache(ctx, cluster)
 
 		byoCluster = builder.ByoCluster(defaultNamespace, "byocluster-paused").
 			WithOwnerCluster(cluster).
 			Build()
 		Expect(k8sClientUncached.Create(ctx, byoCluster)).Should(Succeed())
-		WaitForObjectsToBePopulatedInCache(byoCluster)
+		WaitForObjectsToBePopulatedInCache(ctx, byoCluster)
 
 		_, err := byoClusterReconciler.Reconcile(ctx, reconcile.Request{
 			NamespacedName: types.NamespacedName{
@@ -80,13 +81,13 @@ var _ = Describe("Controllers/ByoclusterController", func() {
 		cluster = builder.Cluster(defaultNamespace, "byocluster-deleted").
 			Build()
 		Expect(k8sClientUncached.Create(ctx, cluster)).Should(Succeed())
-		WaitForObjectsToBePopulatedInCache(cluster)
+		WaitForObjectsToBePopulatedInCache(ctx, cluster)
 
 		byoCluster = builder.ByoCluster(defaultNamespace, "byocluster-deleted").
 			WithOwnerCluster(cluster).
 			Build()
 		Expect(k8sClientUncached.Create(ctx, byoCluster)).Should(Succeed())
-		WaitForObjectsToBePopulatedInCache(byoCluster)
+		WaitForObjectsToBePopulatedInCache(ctx, byoCluster)
 
 		byoClusterLookupKey := types.NamespacedName{Name: byoCluster.Name, Namespace: byoCluster.Namespace}
 		_, err := byoClusterReconciler.Reconcile(ctx, reconcile.Request{
@@ -94,7 +95,7 @@ var _ = Describe("Controllers/ByoclusterController", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(k8sClientUncached.Delete(ctx, byoCluster)).Should(Succeed())
-		WaitForObjectToBeUpdatedInCache(byoCluster, func(object client.Object) bool {
+		WaitForObjectToBeUpdatedInCache(ctx, byoCluster, func(object client.Object) bool {
 			return !object.(*infrastructurev1beta1.ByoCluster).DeletionTimestamp.IsZero()
 		})
 
@@ -113,13 +114,13 @@ var _ = Describe("Controllers/ByoclusterController", func() {
 		cluster = builder.Cluster(defaultNamespace, "byocluster-finalizer").
 			Build()
 		Expect(k8sClientUncached.Create(ctx, cluster)).Should(Succeed())
-		WaitForObjectsToBePopulatedInCache(cluster)
+		WaitForObjectsToBePopulatedInCache(ctx, cluster)
 
 		byoCluster = builder.ByoCluster(defaultNamespace, "byocluster-finalizer").
 			WithOwnerCluster(cluster).
 			Build()
 		Expect(k8sClientUncached.Create(ctx, byoCluster)).Should(Succeed())
-		WaitForObjectsToBePopulatedInCache(byoCluster)
+		WaitForObjectsToBePopulatedInCache(ctx, byoCluster)
 
 		byoClusterLookupKey := types.NamespacedName{Name: byoCluster.Name, Namespace: byoCluster.Namespace}
 		_, err := byoClusterReconciler.Reconcile(ctx, reconcile.Request{

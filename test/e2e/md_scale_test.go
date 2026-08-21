@@ -55,7 +55,7 @@ var _ = Describe("When testing MachineDeployment scale out/in [MD-Scale]", func(
 
 		By("creating a workload cluster with one control plane node and one worker node")
 
-		setControlPlaneIP(context.Background(), dockerClient)
+		setControlPlaneIP(ctx, dockerClient)
 		applyClusterAndWait(ctx, namespace.Name, clusterName, specName, e2eConfig.GetVariableOrEmpty(KubernetesVersion), clusterctl.DefaultFlavor, 3, 1, clusterResources)
 
 		Expect(clusterResources.MachineDeployments[0].Spec.Replicas).To(Equal(ptr.To(int32(1))))

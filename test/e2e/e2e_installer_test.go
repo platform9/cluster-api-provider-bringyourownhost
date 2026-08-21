@@ -56,7 +56,7 @@ var _ = Describe("When BYOH joins existing cluster [Installer]", func() {
 		byoHostName1, agentLogFile1 = hosts[0].Name, hosts[0].LogFilePath
 		byoHostName2, agentLogFile2 = hosts[1].Name, hosts[1].LogFilePath
 
-		setControlPlaneIP(context.Background(), dockerClient)
+		setControlPlaneIP(ctx, dockerClient)
 		applyClusterAndWait(ctx, namespace.Name, clusterName, specName, e2eConfig.GetVariableOrEmpty(KubernetesVersion), clusterctl.DefaultFlavor, 1, 1, clusterResources)
 
 		By("Checking the ByoHost conditions reflect a successful join")
