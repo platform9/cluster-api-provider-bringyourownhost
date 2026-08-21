@@ -83,7 +83,7 @@ var _ = Describe("pf9-byohost deb", func() {
 		Expect(exitCode).To(Equal(0), "dpkg -r failed:\n%s", uninstallOutput)
 
 		By("asserting the binary, unit file, byohctl, and generated conf directory are gone")
-		assertPathsRemoved(ctx, containerID, []string{
+		assertPathsRemoved(ctx, containerID, "dpkg -r", []string{
 			"/binary/pf9-byoh-hostagent",
 			"/etc/systemd/system/pf9-byohost-agent.service",
 			"/etc/pf9-byohost-agent.service.d",

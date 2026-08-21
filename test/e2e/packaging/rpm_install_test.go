@@ -4,79 +4,16 @@
 package packaging_test
 
 import (
-	"archive/tar"
-	"bytes"
-	"context"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
-	"github.com/docker/docker/api/types/container"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
 const rpmContainerPath = "/root/pf9-byohost.rpm"
-
-func copyFileToContainer(ctx context.Context, containerID, localPath, containerPath string) error {
-	content, err := os.ReadFile(localPath)
-	if err != nil {
-		return err
-	}
-
-	var buf bytes.Buffer
-	tw := tar.NewWriter(&buf)
-	if err := tw.WriteHeader(&tar.Header{
-		Name: strings.TrimPrefix(containerPath, "/"),
-		Mode: 0644,
-		Size: int64(len(content)),
-	}); err != nil {
-		return err
-	}
-	if _, err := tw.Write(content); err != nil {
-		return err
-	}
-	if err := tw.Close(); err != nil {
-		return err
-	}
-
-	return dockerClient.CopyToContainer(ctx, containerID, "/", &buf, container.CopyToContainerOptions{})
-}
-
-func execInContainer(ctx context.Context, containerID string, cmd, env []string) (output string, exitCode int, err error) {
-	created, err := dockerClient.ContainerExecCreate(ctx, containerID, container.ExecOptions{
-		Cmd:          cmd,
-		Env:          env,
-		AttachStdout: true,
-		AttachStderr: true,
-		Tty:          true,
-	})
-	if err != nil {
-		return "", 0, err
-	}
-
-	// Tty must match the exec's own creation config: mismatched Tty here can
-	// leave the daemon multiplexing stdout/stderr with an 8-byte frame header
-	// per chunk instead of returning the raw stream, corrupting the output.
-	attached, err := dockerClient.ContainerExecAttach(ctx, created.ID, container.ExecAttachOptions{Tty: true})
-	if err != nil {
-		return "", 0, err
-	}
-	defer attached.Close()
-
-	outputBytes, err := io.ReadAll(attached.Reader)
-	if err != nil {
-		return "", 0, err
-	}
-
-	inspected, err := dockerClient.ContainerExecInspect(ctx, created.ID)
-	if err != nil {
-		return string(outputBytes), 0, err
-	}
-	return string(outputBytes), inspected.ExitCode, nil
-}
 
 var _ = Describe("pf9-byohost RPM", func() {
 	It("installs cleanly and uninstalls cleanly", func() {
@@ -132,7 +69,7 @@ var _ = Describe("pf9-byohost RPM", func() {
 		Expect(exitCode).To(Equal(0), "rpm -e failed:\n%s", uninstallOutput)
 
 		By("asserting the binary, unit file, and byohctl are gone")
-		assertPathsRemoved(ctx, containerID, []string{
+		assertPathsRemoved(ctx, containerID, "rpm -e", []string{
 			"/binary/pf9-byoh-hostagent",
 			"/etc/systemd/system/pf9-byohost-agent.service",
 			"/usr/bin/byohctl",
