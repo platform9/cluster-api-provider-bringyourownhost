@@ -38,18 +38,16 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Check helm chart is up to date
-        run: |
-          make helm
-          if [[ -n "$(git status --porcelain -- charts/)" ]]; then
-            echo "::error::Helm chart is out of date. Run 'make helm' and commit the result."
-            git status --porcelain -- charts/
-            git diff -- charts/
-            exit 1
-          fi
-
       - name: Generate helm chart
         run: make helm TAG=$(make tag)
+      - name: Check helm chart is up to date
+        run: |
+          if [[ -n "$(git status --porcelain -- charts/templates/)" ]]; then
+            echo "::error::Helm chart templates are out of date. Run 'make helm' and commit the result."
+            git status --porcelain -- charts/templates/
+            git diff -- charts/templates/
+            exit 1
+          fi
       - name: Package helm chart
         run: make helm-package TAG=$(make tag)
       - name: Upload helm chart artifact
