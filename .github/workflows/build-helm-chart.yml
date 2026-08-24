@@ -38,8 +38,14 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Print tag
+        id: tag
+        run: |
+          TAG=$(make tag)
+          echo "Generated tag: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
       - name: Generate helm chart
-        run: make helm TAG=$(make tag)
+        run: make helm TAG=${{ steps.tag.outputs.tag }}
       - name: Check helm chart is up to date
         run: |
           if [[ -n "$(git status --porcelain -- charts/templates/)" ]]; then
