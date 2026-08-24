@@ -55,7 +55,7 @@ jobs:
             exit 1
           fi
       - name: Package helm chart
-        run: make helm-package TAG=$(make tag)
+        run: make helm-package TAG=${{ steps.tag.outputs.tag }}
       - name: Upload helm chart artifact
         uses: actions/upload-artifact@v4
         with:
