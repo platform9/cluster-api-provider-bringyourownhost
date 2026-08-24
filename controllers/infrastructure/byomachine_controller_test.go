@@ -232,6 +232,40 @@ var _ = Describe("Controllers/ByomachineController", func() {
 			})
 		})
 
+		Context("When the only BYO Host is still being cleaned up", func() {
+			var cleaningHost *infrastructurev1beta1.ByoHost
+
+			BeforeEach(func() {
+				cleaningHost = builder.ByoHost(defaultNamespace, "host-mid-cleanup").Build()
+				Expect(k8sClientUncached.Create(ctx, cleaningHost)).Should(Succeed())
+
+				ph, err := patch.NewHelper(cleaningHost, k8sClientUncached)
+				Expect(err).ShouldNot(HaveOccurred())
+				cleaningHost.Annotations = map[string]string{
+					infrastructurev1beta1.HostCleanupAnnotation: "",
+				}
+				Expect(ph.Patch(ctx, cleaningHost, patch.WithStatusObservedGeneration{})).Should(Succeed())
+				WaitForObjectToBeUpdatedInCache(ctx, cleaningHost, func(object client.Object) bool {
+					_, ok := object.(*infrastructurev1beta1.ByoHost).Annotations[infrastructurev1beta1.HostCleanupAnnotation]
+					return ok
+				})
+			})
+
+			AfterEach(func() {
+				Expect(k8sClientUncached.Delete(ctx, cleaningHost)).ToNot(HaveOccurred())
+			})
+
+			It("should not attach the host to a new ByoMachine", func() {
+				_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: byoMachineLookupKey})
+				Expect(err).To(MatchError("no hosts found"))
+
+				updatedHost := &infrastructurev1beta1.ByoHost{}
+				Expect(k8sClientUncached.Get(ctx, types.NamespacedName{Name: cleaningHost.Name, Namespace: cleaningHost.Namespace}, updatedHost)).To(Succeed())
+				Expect(updatedHost.Status.MachineRef).To(BeNil())
+				Expect(updatedHost.Labels).NotTo(HaveKey(clusterv1.ClusterNameLabel))
+			})
+		})
+
 		Context("When a single BYO Host is available", func() {
 			BeforeEach(func() {
 				byoHost = builder.ByoHost(defaultNamespace, "single-available-default-host").Build()
@@ -414,6 +448,29 @@ var _ = Describe("Controllers/ByomachineController", func() {
 						Expect(k8sClientUncached.Get(ctx, byoHostLookupKey, createdByoHost)).NotTo(HaveOccurred())
 
 						Expect(createdByoHost.Annotations[infrastructurev1beta1.HostCleanupAnnotation]).Should(Equal(""))
+					})
+
+					It("should release manager-owned attachment fields on byohost", func() {
+						ph, err := patch.NewHelper(byoHost, k8sClientUncached)
+						Expect(err).ShouldNot(HaveOccurred())
+						if byoHost.Labels == nil {
+							byoHost.Labels = make(map[string]string)
+						}
+						byoHost.Labels[clusterv1.ClusterNameLabel] = defaultClusterName
+						Expect(ph.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).Should(Succeed())
+						WaitForObjectToBeUpdatedInCache(ctx, byoHost, func(object client.Object) bool {
+							return object.(*infrastructurev1beta1.ByoHost).Labels[clusterv1.ClusterNameLabel] == defaultClusterName
+						})
+
+						_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: byoMachineLookupKey})
+						Expect(err).NotTo(HaveOccurred())
+
+						createdByoHost := &infrastructurev1beta1.ByoHost{}
+						Expect(k8sClientUncached.Get(ctx, byoHostLookupKey, createdByoHost)).NotTo(HaveOccurred())
+
+						Expect(createdByoHost.Status.MachineRef).To(BeNil())
+						Expect(createdByoHost.Labels).NotTo(HaveKey(clusterv1.ClusterNameLabel))
+						Expect(createdByoHost.Labels).NotTo(HaveKey(infrastructurev1beta1.AttachedByoMachineLabel))
 					})
 
 					It("should delete the byomachine object", func() {

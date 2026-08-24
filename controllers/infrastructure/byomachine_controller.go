@@ -566,14 +566,15 @@ func (r *ByoMachineReconciler) attachByoHost(ctx context.Context, machineScope *
 		logger.Error(err, "failed to list byohosts")
 		return ctrl.Result{RequeueAfter: RequeueForbyohost}, err
 	}
-	if len(hostsList.Items) == 0 {
+	availableHosts := filterHostsAvailableForAttach(hostsList.Items)
+	if len(availableHosts) == 0 {
 		logger.Info("No hosts found, waiting..")
 		r.Recorder.Eventf(machineScope.ByoMachine, corev1.EventTypeWarning, "ByoHostSelectionFailed", "No available ByoHost")
 		conditions.MarkFalse(machineScope.ByoMachine, infrav1.BYOHostReady, infrav1.BYOHostsUnavailableReason, clusterv1.ConditionSeverityInfo, "")
 		return ctrl.Result{RequeueAfter: RequeueForbyohost}, errors.New("no hosts found")
 	}
 	// TODO- Needs smarter logic
-	host := hostsList.Items[0]
+	host := availableHosts[0]
 
 	byohostHelper, err := patch.NewHelper(&host, r.Client)
 	if err != nil {
@@ -659,14 +660,16 @@ func (r *ByoMachineReconciler) markHostForCleanup(ctx context.Context, machineSc
 	}
 	machineScope.ByoHost.Annotations[infrav1.HostCleanupAnnotation] = ""
 
-	// Debug: Log the value and presence of the upgrade-in-progress annotation
+	// Release manager-owned attachment fields eagerly so an offline agent can't strand the host.
+	machineScope.ByoHost.Status.MachineRef = nil
+	delete(machineScope.ByoHost.Labels, clusterv1.ClusterNameLabel)
+	delete(machineScope.ByoHost.Labels, infrav1.AttachedByoMachineLabel)
+
 	upgradeInProgress, ok := machineScope.ByoMachine.Annotations["barista.platform9.io/upgrade-in-progress"]
-	logger.Info("DEBUG: upgrade-in-progress annotation check", "value", upgradeInProgress, "present", ok)
-	// Improved logic: skip label removal only if annotation exists and is set to "true"
 	if ok && upgradeInProgress == "true" {
-		logger.Info("Upgrade in progress: skipping removal of pf9 cluster label from ByoHost %s", machineScope.ByoHost.Name)
+		logger.Info("Upgrade in progress: skipping removal of pf9 cluster label from ByoHost", "byohost", machineScope.ByoHost.Name)
 	} else {
-		logger.Info("Removing pf9 cluster label %s from ByoHost %s", infrav1.ClusterLabel, machineScope.ByoHost.Name)
+		logger.Info("Removing pf9 cluster labels from ByoHost", "byohost", machineScope.ByoHost.Name)
 		delete(machineScope.ByoHost.Labels, infrav1.ClusterLabel)
 		delete(machineScope.ByoHost.Labels, infrav1.ClusterLabelCP)
 	}
@@ -733,6 +736,18 @@ func (r *ByoMachineReconciler) createInstallerConfig(ctx context.Context, machin
 		return err
 	}
 	return nil
+}
+
+// filterHostsAvailableForAttach drops hosts still carrying HostCleanupAnnotation (agent cleanup pending).
+func filterHostsAvailableForAttach(hosts []infrav1.ByoHost) []infrav1.ByoHost {
+	available := hosts[:0]
+	for i := range hosts {
+		if _, cleaningUp := hosts[i].Annotations[infrav1.HostCleanupAnnotation]; cleaningUp {
+			continue
+		}
+		available = append(available, hosts[i])
+	}
+	return available
 }
 
 func generateSafeLabelValue(namespace, name string) string {
