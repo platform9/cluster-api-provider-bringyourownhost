@@ -1,6 +1,7 @@
 package pkg
 
 import (
+	"context"
 	"os"
 	"testing"
 
@@ -121,7 +122,7 @@ func TestPerformHostOperation(t *testing.T) {
 			k8sClient := fakeClient(t, tt.objs...)
 			io := &stubIO{confirmResp: tt.confirmResp}
 
-			err := PerformHostOperation(k8sClient, io, tt.operation, testNamespace, tt.force)
+			err := PerformHostOperation(context.Background(), k8sClient, io, tt.operation, testNamespace, tt.force)
 
 			if tt.wantErr {
 				require.Error(t, err)

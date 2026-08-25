@@ -55,7 +55,7 @@ func runDecommission(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	err = pkg.PerformHostOperation(k8sClient, pkg.DefaultHostIO{}, pkg.OperationDecommission, namespace, decommissionForce)
+	err = pkg.PerformHostOperation(cmd.Context(), k8sClient, pkg.DefaultHostIO{}, pkg.OperationDecommission, namespace, decommissionForce)
 	if err != nil {
 		fmt.Println("Failed to decommission host. " + err.Error())
 		os.Exit(1)

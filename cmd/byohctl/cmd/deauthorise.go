@@ -55,7 +55,7 @@ func runDeauthorise(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	err = pkg.PerformHostOperation(k8sClient, pkg.DefaultHostIO{}, pkg.OperationDeauthorise, namespace, deauthoriseForce)
+	err = pkg.PerformHostOperation(cmd.Context(), k8sClient, pkg.DefaultHostIO{}, pkg.OperationDeauthorise, namespace, deauthoriseForce)
 	if err != nil {
 		fmt.Println("Failed to deauthorise host. " + err.Error())
 		os.Exit(1)

@@ -35,7 +35,7 @@ func (DefaultHostIO) Confirm(msg string) (bool, error) { return utils.AskBool(ms
 func (DefaultHostIO) Purge() error                     { return service.PurgeDebianPackage() }
 
 // PerformHostOperation performs the common steps for host deauthorisation or decommissioning.
-func PerformHostOperation(k8sClient *client.Client, io HostIO, operationType HostOperationType, namespace string, force bool) error {
+func PerformHostOperation(ctx context.Context, k8sClient *client.Client, io HostIO, operationType HostOperationType, namespace string, force bool) error {
 
 	// Deauthorise and decommission host steps -
 	// 1. Check if the host is already onboarded ( by checking the respective byohost object in the management cluster)
@@ -95,7 +95,7 @@ func PerformHostOperation(k8sClient *client.Client, io HostIO, operationType Hos
 		// If deauthorise, just return
 		if operationType == OperationDecommission {
 			utils.LogInfo("MachineRef is not set to the byohost object. Host is not part of any cluster. Deleting the byohost object and running dpkg purge.")
-			return performHostDecommissionWithNoMachineRef(k8sClient, io, namespace)
+			return performHostDecommissionWithNoMachineRef(ctx, k8sClient, io, namespace)
 		}
 		return fmt.Errorf("machineRef is not set for the byohost object. This host is not part of the cluster. Cannot proceed ahead with de-auth")
 
@@ -105,7 +105,7 @@ func PerformHostOperation(k8sClient *client.Client, io HostIO, operationType Hos
 	machineName := byoHost.Status.MachineRef.Name
 
 	// Get the machine object ( unstructured )
-	unstructuredMachineObj, err := k8sClient.GetUnstructuredMachineObject(namespace, machineName)
+	unstructuredMachineObj, err := k8sClient.GetUnstructuredMachineObject(ctx, namespace, machineName)
 	if err != nil {
 		return fmt.Errorf("failed to get machine object: %v", err)
 	}
@@ -118,7 +118,7 @@ func PerformHostOperation(k8sClient *client.Client, io HostIO, operationType Hos
 	// So when doing de-auth, check if the node count in the workload cluster and stop the de-auth if that is last node.
 
 	// Check machine deployment replica count. If it is 1, then warn and ask the user to continue de-uth or not.
-	replicaCount, err := k8sClient.GetMachineDeploymentReplicaCount(unstructuredMachineObj, namespace)
+	replicaCount, err := k8sClient.GetMachineDeploymentReplicaCount(ctx, unstructuredMachineObj, namespace)
 	if err != nil {
 		return fmt.Errorf("failed to get machine deployment replica count: %v", err)
 	}
@@ -136,20 +136,20 @@ func PerformHostOperation(k8sClient *client.Client, io HostIO, operationType Hos
 		}
 
 		// Since this is the last machine in the cluster, annotate machine objects to exclude the node drain
-		err = k8sClient.AnnotateMachineObject(unstructuredMachineObj, namespace, "machine.cluster.x-k8s.io/exclude-node-draining", "")
+		err = k8sClient.AnnotateMachineObject(ctx, unstructuredMachineObj, namespace, "machine.cluster.x-k8s.io/exclude-node-draining", "")
 		if err != nil {
 			return fmt.Errorf("failed to annotate the last machine object to be deauth: %v", err)
 		}
 	}
 
 	// Get the fresh machine object from the server to get the updated machine object
-	unstructuredMachineObj, err = k8sClient.GetUnstructuredMachineObject(namespace, machineName)
+	unstructuredMachineObj, err = k8sClient.GetUnstructuredMachineObject(ctx, namespace, machineName)
 	if err != nil {
 		return fmt.Errorf("failed to get machine object: %v", err)
 	}
 
 	// 3. Annonate the respective machine object with "cluster.x-k8s.io/delete-machine"="yes"
-	err = k8sClient.AnnotateMachineObject(unstructuredMachineObj, namespace, "cluster.x-k8s.io/delete-machine", "yes")
+	err = k8sClient.AnnotateMachineObject(ctx, unstructuredMachineObj, namespace, "cluster.x-k8s.io/delete-machine", "yes")
 	if err != nil {
 		return fmt.Errorf("failed to annotate machine object: %v", err)
 	}
@@ -157,7 +157,7 @@ func PerformHostOperation(k8sClient *client.Client, io HostIO, operationType Hos
 	utils.LogSuccess("Successfully annotated machine object that needs to be removed from the cluster")
 
 	// 4. Scale down the machine deployment by 1
-	err = k8sClient.ScaleDownMachineDeployment(unstructuredMachineObj, namespace)
+	err = k8sClient.ScaleDownMachineDeployment(ctx, unstructuredMachineObj, namespace)
 	if err != nil {
 		return fmt.Errorf("failed to scale down machine deployment: %v", err)
 	}
@@ -165,7 +165,7 @@ func PerformHostOperation(k8sClient *client.Client, io HostIO, operationType Hos
 	utils.LogSuccess("Successfully scaled down machine deployment by 1")
 
 	// 5. Wait for machineRef to be unset from the byohost object status field
-	err = k8sClient.WaitForMachineRefToBeUnset(byoHost, namespace)
+	err = k8sClient.WaitForMachineRefToBeUnset(ctx, byoHost, namespace)
 	if err != nil {
 		return fmt.Errorf("failed to wait for machineRef to be unset: %v", err)
 	}
@@ -174,14 +174,14 @@ func PerformHostOperation(k8sClient *client.Client, io HostIO, operationType Hos
 
 	// If operation is decommission, delete the byohost object and run dpkg purge
 	if operationType == OperationDecommission {
-		return performHostDecommissionWithNoMachineRef(k8sClient, io, namespace)
+		return performHostDecommissionWithNoMachineRef(ctx, k8sClient, io, namespace)
 	}
 
 	return nil
 }
 
 // Helper function to consolidate decommissioning logic when no machineRef is set
-func performHostDecommissionWithNoMachineRef(k8sClient *client.Client, io HostIO, namespace string) error {
+func performHostDecommissionWithNoMachineRef(ctx context.Context, k8sClient *client.Client, io HostIO, namespace string) error {
 	utils.LogInfo("Deleting ByoHosts object and running dpkg purge")
 
 	if err := k8sClient.DeleteByoHostObject(namespace); err != nil {
