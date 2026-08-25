@@ -8,7 +8,7 @@ import (
 
 // AskBool function asks for the user input
 // for a boolean input
-var AskBool = func(msg string, args ...interface{}) (bool, error) {
+func AskBool(msg string, args ...interface{}) (bool, error) {
 	_, err := fmt.Fprintf(os.Stdout, fmt.Sprintf("%s: ", msg), args...)
 	if err != nil {
 		return false, fmt.Errorf("Unable to show options to user: %s", err.Error())

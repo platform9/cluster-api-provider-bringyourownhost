@@ -2,7 +2,6 @@ package pkg
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,23 +9,14 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	capiv1beta1 "sigs.k8s.io/cluster-api/api/v1beta1"
 
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/client"
-	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/service"
-	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils"
 	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 )
 
 const testNamespace = "byoh-ns"
-
-var byoHostGVR = schema.GroupVersionResource{
-	Group:    "infrastructure.cluster.x-k8s.io",
-	Version:  "v1beta1",
-	Resource: "byohosts",
-}
 
 func testHostname(t *testing.T) string {
 	t.Helper()
@@ -54,90 +44,45 @@ func newByoHost(t *testing.T, machineRef *corev1.ObjectReference) *infrastructur
 	}
 }
 
-type testSeams struct {
-	purgeCalls int
-	askResp    bool
-	askErr     error
-	askCalls   int
-}
-
-// installSeams wires a fake dynamic client, a temp kubeconfig, and stubs for
-// PurgeDebianPackage / AskBool. All originals are restored via t.Cleanup.
-func installSeams(t *testing.T, objs ...runtime.Object) (*client.Client, *testSeams) {
+func fakeClient(t *testing.T, objs ...runtime.Object) *client.Client {
 	t.Helper()
-
 	dyn := dynamicfake.NewSimpleDynamicClient(testScheme(t), objs...)
-	fakeClient := &client.Client{DynamicClient: dyn}
-
-	kubeconfigPath := filepath.Join(t.TempDir(), "config")
-	require.NoError(t, os.WriteFile(kubeconfigPath, []byte("apiVersion: v1\nkind: Config\n"), 0o600))
-	origPath := service.KubeconfigFilePath
-	service.KubeconfigFilePath = kubeconfigPath
-	t.Cleanup(func() { service.KubeconfigFilePath = origPath })
-
-	origGet := client.GetK8sClient
-	client.GetK8sClient = func(_ string) (*client.Client, error) { return fakeClient, nil }
-	t.Cleanup(func() { client.GetK8sClient = origGet })
-
-	seams := &testSeams{}
-	origAsk := utils.AskBool
-	utils.AskBool = func(_ string, _ ...interface{}) (bool, error) {
-		seams.askCalls++
-		return seams.askResp, seams.askErr
-	}
-	t.Cleanup(func() { utils.AskBool = origAsk })
-
-	origPurge := service.PurgeDebianPackage
-	service.PurgeDebianPackage = func() error {
-		seams.purgeCalls++
-		return nil
-	}
-	t.Cleanup(func() { service.PurgeDebianPackage = origPurge })
-
-	return fakeClient, seams
+	return &client.Client{DynamicClient: dyn}
 }
 
-// pointKubeconfigAtMissingFile sets KubeconfigFilePath at a non-existent path
-// so the kubeconfig existence check fails before any seam is exercised.
-func pointKubeconfigAtMissingFile(t *testing.T) {
-	t.Helper()
-	origPath := service.KubeconfigFilePath
-	service.KubeconfigFilePath = filepath.Join(t.TempDir(), "does-not-exist")
-	t.Cleanup(func() { service.KubeconfigFilePath = origPath })
+// stubIO is a HostIO stub with canned answers and call counters.
+type stubIO struct {
+	confirmResp bool
+	confirmErr  error
+	confirmN    int
+	purgeErr    error
+	purgeN      int
+}
+
+func (s *stubIO) Confirm(string) (bool, error) {
+	s.confirmN++
+	return s.confirmResp, s.confirmErr
+}
+
+func (s *stubIO) Purge() error {
+	s.purgeN++
+	return s.purgeErr
 }
 
 func TestPerformHostOperation(t *testing.T) {
 	tests := []struct {
-		name string
-		// setup prepares the environment for the call. It returns the seams
-		// struct when installSeams was used, or nil when the case exercises a
-		// path that runs before the seams are consulted (e.g. missing kubeconfig).
-		setup           func(t *testing.T) *testSeams
+		name            string
+		objs            []runtime.Object
 		operation       HostOperationType
 		force           bool
-		askResp         bool
+		confirmResp     bool
 		wantErr         bool
 		wantErrContains string
 		wantPurgeCalls  int
 		wantAskCalls    int
 	}{
 		{
-			name:            "kubeconfig missing / deauthorise",
-			setup:           func(t *testing.T) *testSeams { pointKubeconfigAtMissingFile(t); return nil },
-			operation:       OperationDeauthorise,
-			wantErr:         true,
-			wantErrContains: "kubeconfig file not found",
-		},
-		{
-			name:            "kubeconfig missing / decommission",
-			setup:           func(t *testing.T) *testSeams { pointKubeconfigAtMissingFile(t); return nil },
-			operation:       OperationDecommission,
-			wantErr:         true,
-			wantErrContains: "kubeconfig file not found",
-		},
-		{
 			name:            "deauthorise / ByoHost missing / no force returns error",
-			setup:           func(t *testing.T) *testSeams { _, s := installSeams(t); return s },
 			operation:       OperationDeauthorise,
 			force:           false,
 			wantErr:         true,
@@ -145,31 +90,27 @@ func TestPerformHostOperation(t *testing.T) {
 		},
 		{
 			name:      "deauthorise / ByoHost missing / force treats as no-op",
-			setup:     func(t *testing.T) *testSeams { _, s := installSeams(t); return s },
 			operation: OperationDeauthorise,
 			force:     true,
 		},
 		{
 			name:           "decommission / ByoHost missing / force purges without prompt",
-			setup:          func(t *testing.T) *testSeams { _, s := installSeams(t); return s },
 			operation:      OperationDecommission,
 			force:          true,
 			wantPurgeCalls: 1,
 		},
 		{
 			name:         "decommission / ByoHost missing / no force + user declines skips purge",
-			setup:        func(t *testing.T) *testSeams { _, s := installSeams(t); return s },
 			operation:    OperationDecommission,
 			force:        false,
-			askResp:      false,
+			confirmResp:  false,
 			wantAskCalls: 1,
 		},
 		{
 			name:           "decommission / ByoHost missing / no force + user confirms runs purge",
-			setup:          func(t *testing.T) *testSeams { _, s := installSeams(t); return s },
 			operation:      OperationDecommission,
 			force:          false,
-			askResp:        true,
+			confirmResp:    true,
 			wantPurgeCalls: 1,
 			wantAskCalls:   1,
 		},
@@ -177,12 +118,10 @@ func TestPerformHostOperation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			seams := tt.setup(t)
-			if seams != nil {
-				seams.askResp = tt.askResp
-			}
+			k8sClient := fakeClient(t, tt.objs...)
+			io := &stubIO{confirmResp: tt.confirmResp}
 
-			err := PerformHostOperation(tt.operation, testNamespace, tt.force)
+			err := PerformHostOperation(k8sClient, io, tt.operation, testNamespace, tt.force)
 
 			if tt.wantErr {
 				require.Error(t, err)
@@ -190,11 +129,8 @@ func TestPerformHostOperation(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
-
-			if seams != nil {
-				assert.Equal(t, tt.wantPurgeCalls, seams.purgeCalls, "purgeCalls mismatch")
-				assert.Equal(t, tt.wantAskCalls, seams.askCalls, "askCalls mismatch")
-			}
+			assert.Equal(t, tt.wantPurgeCalls, io.purgeN, "purge calls mismatch")
+			assert.Equal(t, tt.wantAskCalls, io.confirmN, "confirm calls mismatch")
 		})
 	}
 }

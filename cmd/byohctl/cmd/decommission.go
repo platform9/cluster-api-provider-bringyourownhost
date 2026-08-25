@@ -35,13 +35,24 @@ func runDecommission(cmd *cobra.Command, args []string) {
 
 	utils.SetConsoleOutputLevel(verbosity)
 
+	if _, err := os.Stat(service.KubeconfigFilePath); os.IsNotExist(err) {
+		fmt.Printf("kubeconfig file not found at %s. Please onboard the host first.\n", service.KubeconfigFilePath)
+		os.Exit(1)
+	}
+
 	namespace, err := client.GetNamespaceFromConfig(service.KubeconfigFilePath)
 	if err != nil {
 		fmt.Println("Failed to get namespace from kubeconfig: " + err.Error())
 		os.Exit(1)
 	}
 
-	err = pkg.PerformHostOperation(pkg.OperationDecommission, namespace, decommissionForce)
+	k8sClient, err := client.GetK8sClient(service.KubeconfigFilePath)
+	if err != nil {
+		fmt.Println("Failed to get Kubernetes client: " + err.Error())
+		os.Exit(1)
+	}
+
+	err = pkg.PerformHostOperation(k8sClient, pkg.DefaultHostIO{}, pkg.OperationDecommission, namespace, decommissionForce)
 	if err != nil {
 		fmt.Println("Failed to decommission host. " + err.Error())
 		os.Exit(1)

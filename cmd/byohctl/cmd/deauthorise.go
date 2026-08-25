@@ -35,13 +35,24 @@ func runDeauthorise(cmd *cobra.Command, args []string) {
 
 	utils.SetConsoleOutputLevel(verbosity)
 
+	if _, err := os.Stat(service.KubeconfigFilePath); os.IsNotExist(err) {
+		fmt.Printf("kubeconfig file not found at %s. Please onboard the host first.\n", service.KubeconfigFilePath)
+		os.Exit(1)
+	}
+
 	namespace, err := client.GetNamespaceFromConfig(service.KubeconfigFilePath)
 	if err != nil {
 		fmt.Println("Failed to get namespace from kubeconfig: " + err.Error())
 		os.Exit(1)
 	}
 
-	err = pkg.PerformHostOperation(pkg.OperationDeauthorise, namespace, deauthoriseForce)
+	k8sClient, err := client.GetK8sClient(service.KubeconfigFilePath)
+	if err != nil {
+		fmt.Println("Failed to get Kubernetes client: " + err.Error())
+		os.Exit(1)
+	}
+
+	err = pkg.PerformHostOperation(k8sClient, pkg.DefaultHostIO{}, pkg.OperationDeauthorise, namespace, deauthoriseForce)
 	if err != nil {
 		fmt.Println("Failed to deauthorise host. " + err.Error())
 		os.Exit(1)
