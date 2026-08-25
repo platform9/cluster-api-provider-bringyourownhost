@@ -57,6 +57,7 @@ rules:
   - '*'
   - bootstrapkubeconfigs
   - byoclusters
+  - byohostagentupgrades
   - byohosts
   - byomachines
   - byomachinetemplates
@@ -74,6 +75,7 @@ rules:
   resources:
   - bootstrapkubeconfigs/finalizers
   - byoclusters/finalizers
+  - byohostagentupgrades/finalizers
   - byohosts/finalizers
   - byomachines/finalizers
   - byomachinetemplates/finalizers
@@ -85,6 +87,7 @@ rules:
   resources:
   - bootstrapkubeconfigs/status
   - byoclusters/status
+  - byohostagentupgrades/status
   - byohosts/status
   - byomachines/status
   - byomachinetemplates/status

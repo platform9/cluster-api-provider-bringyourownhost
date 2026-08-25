@@ -10,6 +10,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 )
 
 func getMockFile(targetOs string) ([]byte, error) {
@@ -102,6 +104,38 @@ var _ = Describe("Host Registrar Tests", func() {
 				return nil, os.ErrNotExist
 			})
 			Expect(err.Error()).To(Equal("error opening file : file does not exist"))
+		})
+	})
+
+	Context("When the OS family is detected", func() {
+		It("Should return debian when dpkg is on PATH", func() {
+			family := GetOSFamily(func(file string) (string, error) {
+				if file == "dpkg" {
+					return "/usr/bin/dpkg", nil
+				}
+				return "", fmt.Errorf("not found")
+			})
+			Expect(family).To(Equal(infrastructurev1beta1.HostOSFamilyDebian))
+		})
+
+		It("Should return rhel when dpkg is absent but rpm is on PATH", func() {
+			family := GetOSFamily(func(file string) (string, error) {
+				if file == "rpm" {
+					return "/usr/bin/rpm", nil
+				}
+				return "", fmt.Errorf("not found")
+			})
+			Expect(family).To(Equal(infrastructurev1beta1.HostOSFamilyRHEL))
+		})
+
+		It("Should prefer debian when both dpkg and rpm are present", func() {
+			family := GetOSFamily(func(string) (string, error) { return "/usr/bin/whatever", nil })
+			Expect(family).To(Equal(infrastructurev1beta1.HostOSFamilyDebian))
+		})
+
+		It("Should return empty when neither is on PATH", func() {
+			family := GetOSFamily(func(string) (string, error) { return "", fmt.Errorf("not found") })
+			Expect(family).To(BeEmpty())
 		})
 	})
 })

@@ -6,8 +6,10 @@ package reconciler
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/pkg/errors"
@@ -16,7 +18,6 @@ import (
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/version"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/common"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
@@ -39,10 +40,28 @@ type HostReconciler struct {
 	Recorder            record.EventRecorder
 	SkipK8sInstallation bool
 	DownloadPath        string
+	// LookPath resolves a binary on PATH, used to detect this host's
+	// package manager for agent upgrades (see registration.GetOSFamily).
+	// Defaults to exec.LookPath in agent/main.go; overridden in tests so
+	// package-family detection doesn't depend on what's actually installed
+	// on the machine running the test suite.
+	LookPath func(string) (string, error)
+	// PackagePull fetches an OCI-packaged artifact for an agent upgrade.
+	// Defaults to cloudinit.Pull in agent/main.go; overridden in tests.
+	PackagePull func(ctx context.Context, ref, destDir string) error
+	// Exit terminates the process after a successful agent upgrade install.
+	// Defaults to os.Exit(0) in agent/main.go; overridden in tests so a
+	// successful upgrade doesn't kill the test binary.
+	Exit func()
 	// HeartbeatInterval is the minimum time between LastHeartbeatTime writes,
 	// and the interval this reconciler self-requeues on. Wired from the
 	// --heartbeat-interval flag in agent/main.go.
 	HeartbeatInterval time.Duration
+	// MaxBlockingDuration bounds a heartbeat pulse (heartbeat.go) during one
+	// kubeadm install/join call; past it, a wedged call reads the same as
+	// a dead agent. Wired from --max-blocking-duration in agent/main.go.
+	// <= 0 disables pulsing.
+	MaxBlockingDuration time.Duration
 }
 
 const (
@@ -90,7 +109,10 @@ func (r *HostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctr
 	}
 
 	result, err := r.reconcileNormal(ctx, byoHost)
-	if err == nil {
+	// Only apply the default heartbeat-driven requeue cadence if reconcileNormal
+	// didn't already ask for something more specific (e.g. an immediate
+	// requeue to continue a multi-step reconcile without waiting on it).
+	if err == nil && result.RequeueAfter == 0 && !result.Requeue {
 		result.RequeueAfter = r.HeartbeatInterval
 	}
 	return result, err
@@ -101,19 +123,22 @@ func (r *HostReconciler) reconcileNormal(ctx context.Context, byoHost *infrastru
 	logger = logger.WithValues("ByoHost", byoHost.Name)
 	logger.Info("reconcile normal")
 
-	// NOTE: LastHeartbeatTime is written by the agent (host clock) and evaluated
-	// by the management controller (manager clock). Clock skew between the two
-	// will affect perceived liveness. NTP (or equivalent) synchronization is
-	// assumed on both the host and management nodes.
-	now := metav1.Now()
-	if byoHost.Status.LastHeartbeatTime == nil || now.Sub(byoHost.Status.LastHeartbeatTime.Time) >= r.HeartbeatInterval {
-		byoHost.Status.LastHeartbeatTime = &now
-		byoHost.Status.AgentVersion = version.Get().GitVersion
-		if machineID, err := registration.GetMachineID(os.ReadFile); err != nil {
-			logger.Error(err, "failed to read /etc/machine-id")
-		} else {
-			byoHost.Status.MachineID = machineID
-		}
+	// NOTE: written using the agent's own (host) clock. The management
+	// controller no longer compares this directly against its own clock for
+	// liveness -- unsafe under host/management clock skew, see ADR 0001
+	// (docs/proposals/0001-clock-skew-resistant-heartbeat-liveness.md).
+	//
+	// This patches the API server directly (heartbeat.go) rather than
+	// stamping byoHost in memory for the deferred Patch above to pick up:
+	// that would tie the write to however long the rest of this reconcile
+	// takes, which is exactly what startHeartbeatPulse below exists to
+	// avoid during a long kubeadm install/join.
+	if err := r.patchHeartbeat(ctx, byoHost.Name, byoHost.Namespace); err != nil {
+		logger.Error(err, "failed to patch heartbeat")
+	}
+
+	if err := r.executeAgentUpgrade(ctx, byoHost); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	if byoHost.Status.MachineRef == nil {
@@ -129,13 +154,7 @@ func (r *HostReconciler) reconcileNormal(ctx context.Context, byoHost *infrastru
 	}
 
 	if !conditions.IsTrue(byoHost, infrastructurev1beta1.K8sNodeBootstrapSucceeded) {
-		bootstrapScript, err := r.getBootstrapScript(ctx, byoHost.Spec.BootstrapSecret.Name, byoHost.Spec.BootstrapSecret.Namespace)
-		if err != nil {
-			logger.Error(err, "error getting bootstrap script")
-			r.Recorder.Eventf(byoHost, corev1.EventTypeWarning, "ReadBootstrapSecretFailed", "bootstrap secret %s not found", byoHost.Spec.BootstrapSecret.Name)
-			return ctrl.Result{}, err
-		}
-
+		// Both branches below fall through to the BootstrapSecret read further down within this same call: neither one runs anything slow first, so there's nothing that could go stale by the time they get there.
 		if r.SkipK8sInstallation {
 			logger.Info("Skipping installation of k8s components")
 		} else if !conditions.IsTrue(byoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded) {
@@ -144,14 +163,24 @@ func (r *HostReconciler) reconcileNormal(ctx context.Context, byoHost *infrastru
 				conditions.MarkFalse(byoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded, infrastructurev1beta1.K8sInstallationSecretUnavailableReason, clusterv1.ConditionSeverityInfo, "")
 				return ctrl.Result{}, nil
 			}
-			err = r.executeInstallerController(ctx, byoHost)
+			err := r.executeInstallerController(ctx, byoHost)
 			if err != nil {
 				return ctrl.Result{}, err
 			}
 			r.Recorder.Event(byoHost, corev1.EventTypeNormal, "InstallScriptExecutionSucceeded", "install script executed")
 			conditions.MarkTrue(byoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded)
+
+			// Stop here instead of reading BootstrapSecret and joining right away: install has no time bound, so the kubeadm join token it contains could be rotated while we wait. Requeue immediately (not tied to HeartbeatInterval) so the next reconcile reads it fresh right before joining, with nothing slow in between.
+			return ctrl.Result{Requeue: true}, nil
 		} else {
 			logger.Info("install script already executed")
+		}
+
+		bootstrapScript, err := r.getBootstrapScript(ctx, byoHost.Spec.BootstrapSecret.Name, byoHost.Spec.BootstrapSecret.Namespace)
+		if err != nil {
+			logger.Error(err, "error getting bootstrap script")
+			r.Recorder.Eventf(byoHost, corev1.EventTypeWarning, "ReadBootstrapSecretFailed", "bootstrap secret %s not found", byoHost.Spec.BootstrapSecret.Name)
+			return ctrl.Result{}, err
 		}
 
 		err = r.cleank8sdirectories(ctx)
@@ -203,6 +232,8 @@ func (r *HostReconciler) executeInstallerController(ctx context.Context, byoHost
 		return err
 	}
 	logger.Info("executing install script")
+	stopPulse := r.startHeartbeatPulse(ctx, byoHost)
+	defer stopPulse()
 	err = r.CmdRunner.RunCmd(ctx, installScript)
 	if err != nil {
 		logger.Error(err, "error executing installation script")
@@ -211,6 +242,144 @@ func (r *HostReconciler) executeInstallerController(ctx context.Context, byoHost
 		return err
 	}
 	return nil
+}
+
+// executeAgentUpgrade compares the host's running agent version against
+// Spec.DesiredAgent.Version and, on a mismatch, pulls, verifies, and installs
+// the package at Spec.DesiredAgent.PackageURL, then re-execs into the newly
+// installed binary. See docs/proposals/agent-self-upgrade-adr.md §2.2.
+func (r *HostReconciler) executeAgentUpgrade(ctx context.Context, byoHost *infrastructurev1beta1.ByoHost) error {
+	logger := ctrl.LoggerFrom(ctx)
+
+	desiredAgent := byoHost.Spec.DesiredAgent
+	if desiredAgent == nil {
+		return nil
+	}
+	if desiredAgent.Version == version.Get().GitVersion {
+		// Converged - clear any stale failure from a prior attempt. A
+		// successful upgrade itself never reaches this line directly: it
+		// re-execs and never returns, so convergence is only ever observed
+		// on the tick after.
+		conditions.MarkTrue(byoHost, infrastructurev1beta1.AgentUpgradeSucceeded)
+		return nil
+	}
+	if desiredAgent.PackageURL == "" {
+		logger.Info("DesiredAgent.PackageURL not ready")
+		return nil
+	}
+
+	tempDir, err := os.MkdirTemp("", "byoh-agent-upgrade-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tempDir) //nolint:errcheck // best-effort cleanup of a temp dir
+
+	artifactPath, family, err := r.fetchAgentUpgradePackage(ctx, byoHost, tempDir)
+	if err != nil {
+		return err
+	}
+
+	installCmd, err := agentPackageInstallCommand(family, artifactPath)
+	if err != nil {
+		return r.failAgentUpgrade(ctx, byoHost, err, "invalid agent upgrade package bundle",
+			"PackageBundleInvalid", infrastructurev1beta1.PackageBundleInvalidReason)
+	}
+
+	logger.Info("installing agent upgrade package", "family", family)
+	if err = r.CmdRunner.RunCmd(ctx, installCmd); err != nil {
+		return r.failAgentUpgrade(ctx, byoHost, err, "error installing agent upgrade package",
+			"PackageInstallFailed", infrastructurev1beta1.PackageInstallFailedReason)
+	}
+
+	logger.Info("install succeeded, exiting for the process supervisor to relaunch the upgraded binary")
+	r.Exit()
+	// Unreachable on a real os.Exit(0): it terminates this process
+	// immediately and never returns. Only reachable with a stub Exit func in
+	// tests.
+	return nil
+}
+
+func (r *HostReconciler) fetchAgentUpgradePackage(ctx context.Context, byoHost *infrastructurev1beta1.ByoHost, destDir string) (artifactPath, family string, err error) {
+	logger := ctrl.LoggerFrom(ctx)
+
+	logger.Info("pulling agent upgrade package", "ref", byoHost.Spec.DesiredAgent.PackageURL)
+	if err = r.PackagePull(ctx, byoHost.Spec.DesiredAgent.PackageURL, destDir); err != nil {
+		return "", "", r.failAgentUpgrade(ctx, byoHost, err, "error pulling agent upgrade package",
+			"AgentPackagePullFailed", infrastructurev1beta1.AgentPackagePullFailedReason)
+	}
+
+	family = registration.GetOSFamily(r.LookPath)
+	artifactPath, err = findPackageArtifact(destDir, family)
+	if err != nil {
+		return "", "", r.failAgentUpgrade(ctx, byoHost, err, "invalid agent upgrade package bundle",
+			"PackageBundleInvalid", infrastructurev1beta1.PackageBundleInvalidReason)
+	}
+
+	if byoHost.Spec.DesiredAgent.PackageChecksum != "" {
+		if err = verifyChecksum(artifactPath, byoHost.Spec.DesiredAgent.PackageChecksum); err != nil {
+			return "", "", r.failAgentUpgrade(ctx, byoHost, err, "agent upgrade package checksum mismatch",
+				"PackageChecksumMismatch", infrastructurev1beta1.PackageChecksumMismatchReason)
+		}
+	}
+	return artifactPath, family, nil
+}
+
+// failAgentUpgrade is the shared failure tail for every executeAgentUpgrade
+// branch. Always returns err unchanged, so callers can `return
+// r.failAgentUpgrade(...)` directly.
+func (r *HostReconciler) failAgentUpgrade(ctx context.Context, byoHost *infrastructurev1beta1.ByoHost, err error, logMsg, eventReason, conditionReason string) error {
+	ctrl.LoggerFrom(ctx).Error(err, logMsg)
+	r.Recorder.Event(byoHost, corev1.EventTypeWarning, eventReason, logMsg)
+	conditions.MarkFalse(byoHost, infrastructurev1beta1.AgentUpgradeSucceeded, conditionReason, clusterv1.ConditionSeverityWarning, "")
+	return err
+}
+
+// findPackageArtifact returns the single *.deb (family ==
+// infrastructurev1beta1.HostOSFamilyDebian) or *.rpm (family ==
+// infrastructurev1beta1.HostOSFamilyRHEL) file in dir. Zero or more than one
+// match is an error — an ambiguous bundle, not something to guess at.
+func findPackageArtifact(dir, family string) (string, error) {
+	ext := ".rpm"
+	if family == infrastructurev1beta1.HostOSFamilyDebian {
+		ext = ".deb"
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, "*"+ext))
+	if err != nil {
+		return "", err
+	}
+	if len(matches) != 1 {
+		return "", fmt.Errorf("expected exactly one %s file in agent upgrade bundle, found %d", ext, len(matches))
+	}
+	return matches[0], nil
+}
+
+// verifyChecksum checks path's sha256 against expected, formatted
+// "sha256:<hex>".
+func verifyChecksum(path, expected string) error {
+	data, err := os.ReadFile(path) // #nosec G304 -- path comes from findPackageArtifact's filepath.Glob() with validated single match
+	if err != nil {
+		return err
+	}
+	actual := fmt.Sprintf("sha256:%x", sha256.Sum256(data))
+	if actual != expected {
+		return fmt.Errorf("checksum mismatch: expected %s, got %s", expected, actual)
+	}
+	return nil
+}
+
+// agentPackageInstallCommand returns the fixed install command for family —
+// never operator-supplied content, and never includes a force-downgrade
+// flag (see docs/proposals/agent-self-upgrade-adr.md §2.4: a downgrade
+// failing here is the intended backstop, not a bug to route around).
+func agentPackageInstallCommand(family, artifactPath string) (string, error) {
+	switch family {
+	case infrastructurev1beta1.HostOSFamilyDebian:
+		return fmt.Sprintf("dpkg -i %s", artifactPath), nil
+	case infrastructurev1beta1.HostOSFamilyRHEL:
+		return fmt.Sprintf("rpm -Uvh %s", artifactPath), nil
+	default:
+		return "", fmt.Errorf("unrecognized package family %q", family)
+	}
 }
 
 func (r *HostReconciler) reconcileDelete(ctx context.Context, byoHost *infrastructurev1beta1.ByoHost) (ctrl.Result, error) {
@@ -244,7 +413,7 @@ func (r *HostReconciler) parseScript(ctx context.Context, script string) (string
 func (r *HostReconciler) SetupWithManager(ctx context.Context, mgr manager.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&infrastructurev1beta1.ByoHost{}).
-		WithEventFilter(predicates.ResourceNotPaused(ctrl.LoggerFrom(ctx))).
+		WithEventFilter(predicates.ResourceNotPaused(mgr.GetScheme(), ctrl.LoggerFrom(ctx))).
 		Complete(r)
 }
 
@@ -362,10 +531,12 @@ func (r *HostReconciler) resetNode(ctx context.Context, byoHost *infrastructurev
 func (r *HostReconciler) bootstrapK8sNode(ctx context.Context, bootstrapScript string, byoHost *infrastructurev1beta1.ByoHost) error {
 	logger := ctrl.LoggerFrom(ctx)
 	logger.Info("Bootstraping k8s Node")
+	stopPulse := r.startHeartbeatPulse(ctx, byoHost)
+	defer stopPulse()
 	return cloudinit.ScriptExecutor{
 		WriteFilesExecutor:    r.FileWriter,
 		RunCmdExecutor:        r.CmdRunner,
-		ParseTemplateExecutor: r.TemplateParser}.Execute(bootstrapScript)
+		ParseTemplateExecutor: r.TemplateParser}.Execute(ctx, bootstrapScript)
 }
 
 func (r *HostReconciler) removeSentinelFile(ctx context.Context, byoHost *infrastructurev1beta1.ByoHost) error {

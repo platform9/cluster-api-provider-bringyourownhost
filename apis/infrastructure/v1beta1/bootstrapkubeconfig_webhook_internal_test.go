@@ -4,6 +4,7 @@
 package v1beta1
 
 import (
+	"context"
 	b64 "encoding/base64"
 	"errors"
 	"testing"
@@ -88,12 +89,38 @@ func TestValidateCreateUpdateDelete(t *testing.T) {
 	}}
 	invalid := &BootstrapKubeconfig{Spec: BootstrapKubeconfigSpec{APIServer: ""}}
 
-	require.NoError(t, valid.ValidateCreate())
-	require.Error(t, invalid.ValidateCreate())
+	ctx := context.Background()
 
-	require.NoError(t, valid.ValidateUpdate(invalid))
-	require.Error(t, invalid.ValidateUpdate(valid))
+	_, err := valid.ValidateCreate(ctx, valid)
+	require.NoError(t, err)
+	_, err = invalid.ValidateCreate(ctx, invalid)
+	require.Error(t, err)
 
-	require.NoError(t, valid.ValidateDelete())
-	require.NoError(t, invalid.ValidateDelete())
+	_, err = valid.ValidateUpdate(ctx, invalid, valid)
+	require.NoError(t, err)
+	_, err = invalid.ValidateUpdate(ctx, valid, invalid)
+	require.Error(t, err)
+
+	_, err = valid.ValidateDelete(ctx, valid)
+	require.NoError(t, err)
+	_, err = invalid.ValidateDelete(ctx, invalid)
+	require.NoError(t, err)
+}
+
+func TestValidateCreateUpdateDeleteRejectWrongType(t *testing.T) {
+	r := &BootstrapKubeconfig{}
+	wrongType := &BootstrapKubeconfigList{}
+	ctx := context.Background()
+
+	_, err := r.ValidateCreate(ctx, wrongType)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expected a BootstrapKubeconfig but got a")
+
+	_, err = r.ValidateUpdate(ctx, r, wrongType)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expected a BootstrapKubeconfig but got a")
+
+	_, err = r.ValidateDelete(ctx, wrongType)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expected a BootstrapKubeconfig but got a")
 }

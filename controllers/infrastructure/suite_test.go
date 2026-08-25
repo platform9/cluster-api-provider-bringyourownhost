@@ -35,6 +35,7 @@ import (
 	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1beta1"
 	"sigs.k8s.io/cluster-api/controllers/remote"
 	ctrl "sigs.k8s.io/controller-runtime"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to
@@ -58,6 +59,8 @@ var (
 	k8sInstallerConfigReconciler          *controllers.K8sInstallerConfigReconciler
 	bootstrapKubeconfigReconciler         *controllers.BootstrapKubeconfigReconciler
 	byoHostReconciler                     *controllers.ByoHostReconciler
+	byoHostAgentUpgradeReconciler         *controllers.ByoHostAgentUpgradeReconciler
+	directClient                          client.Client
 	recorder                              *record.FakeRecorder
 	byoCluster                            *infrastructurev1beta1.ByoCluster
 	capiCluster                           *clusterv1.Cluster
@@ -85,12 +88,12 @@ func setupReconcilers() {
 		WithBundleBaseRegistry("projects.registry.vmware.com/cluster_api_provider_bringyourownhost").
 		WithBundleTag("1.0").
 		Build()
-	if err := cl.Create(context.Background(), byoCluster); err != nil {
+	if err := cl.Create(ctx, byoCluster); err != nil {
 		panic(err)
 	}
 
 	capiCluster = builder.Cluster(defaultNamespace, defaultClusterName).WithInfrastructureRef(byoCluster).Build()
-	if err := cl.Create(context.Background(), capiCluster); err != nil {
+	if err := cl.Create(ctx, capiCluster); err != nil {
 		panic(err)
 	}
 
@@ -100,15 +103,15 @@ func setupReconcilers() {
 	recorder = record.NewFakeRecorder(32)
 	reconciler = &controllers.ByoMachineReconciler{
 		Client:   cl,
-		Tracker:  remote.NewTestClusterCacheTracker(logr.New(logf.NullLogSink{}), clientFake, scheme.Scheme, client.ObjectKey{Name: capiCluster.Name, Namespace: capiCluster.Namespace}),
+		Tracker:  remote.NewTestClusterCacheTracker(logr.New(logf.NullLogSink{}), cl, clientFake, scheme.Scheme, client.ObjectKey{Name: capiCluster.Name, Namespace: capiCluster.Namespace}), //nolint: staticcheck // mirrors the deprecated-but-supported remote.ClusterCacheTracker used by ByoMachineReconciler.Tracker
 		Recorder: recorder,
 	}
-	if err := reconciler.SetupWithManager(context.TODO(), k8sManager); err != nil {
+	if err := reconciler.SetupWithManager(ctx, k8sManager); err != nil {
 		panic(err)
 	}
 
 	byoClusterReconciler = &controllers.ByoClusterReconciler{Client: cl}
-	if err := byoClusterReconciler.SetupWithManager(context.TODO(), k8sManager); err != nil {
+	if err := byoClusterReconciler.SetupWithManager(ctx, k8sManager); err != nil {
 		panic(err)
 	}
 
@@ -129,7 +132,8 @@ func setupReconcilers() {
 
 	// byoHostReconciler uses a direct (non-cached) client so tests can patch
 	// objects and call Reconcile immediately without waiting for cache sync.
-	directClient, err := client.New(cfg, client.Options{Scheme: scheme.Scheme})
+	var err error
+	directClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
 	if err != nil {
 		panic(err)
 	}
@@ -147,13 +151,25 @@ func setupReconcilers() {
 		panic(err)
 	}
 
+	// byoHostAgentUpgradeReconciler also uses the direct client, for the same
+	// reason as byoHostReconciler above: tests call Reconcile directly and
+	// need to see their own just-written state without waiting on cache sync.
+	byoHostAgentUpgradeReconciler = &controllers.ByoHostAgentUpgradeReconciler{
+		Client:   directClient,
+		Scheme:   scheme.Scheme,
+		Recorder: record.NewFakeRecorder(32),
+	}
+	if err := byoHostAgentUpgradeReconciler.SetupWithManager(k8sManager); err != nil {
+		panic(err)
+	}
+
 	go func() {
 		if err := k8sManager.GetCache().Start(ctx); err != nil {
 			panic(err)
 		}
 	}()
 
-	if !k8sManager.GetCache().WaitForCacheSync(context.TODO()) {
+	if !k8sManager.GetCache().WaitForCacheSync(ctx) {
 		panic("cache never synced")
 	}
 }
@@ -163,13 +179,22 @@ func setupReconcilers() {
 // and Go-native TestXxx functions.
 func TestMain(m *testing.M) {
 	logf.SetLogger(zap.New(zap.UseDevMode(true)))
-	ctx, cancel = context.WithCancel(context.TODO())
+	// Gomega drops its default Eventually timeout once an assertion carries a
+	// context. WaitForObjectsToBePopulatedInCache passes the suite context to
+	// propagate it, not to bound the wait, and that context lives until m.Run()
+	// returns - so without this a never-populated cache would hang the suite
+	// instead of failing in a second.
+	EnforceDefaultTimeoutsWhenUsingContexts()
+
+	// TestMain owns the suite lifetime: this context is canceled below, after
+	// m.Run() returns, so it safely spans the manager cache and every spec.
+	ctx, cancel = context.WithCancel(context.Background())
 
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
 			filepath.Join("..", "..", "config", "crd", "bases"),
-			filepath.Join(build.Default.GOPATH, "pkg", "mod", "sigs.k8s.io", "cluster-api@v1.4.4", "config", "crd", "bases"),
-			filepath.Join(build.Default.GOPATH, "pkg", "mod", "sigs.k8s.io", "cluster-api@v1.4.4", "bootstrap", "kubeadm", "config", "crd", "bases"),
+			filepath.Join(build.Default.GOPATH, "pkg", "mod", "sigs.k8s.io", "cluster-api@v1.10.10", "config", "crd", "bases"),
+			filepath.Join(build.Default.GOPATH, "pkg", "mod", "sigs.k8s.io", "cluster-api@v1.10.10", "bootstrap", "kubeadm", "config", "crd", "bases"),
 		},
 		ErrorIfCRDPathMissing: true,
 	}
@@ -191,8 +216,8 @@ func TestMain(m *testing.M) {
 	}
 
 	k8sManager, err = ctrl.NewManager(cfg, ctrl.Options{
-		Scheme:             scheme.Scheme,
-		MetricsBindAddress: ":6080",
+		Scheme:  scheme.Scheme,
+		Metrics: metricsserver.Options{BindAddress: ":6080"},
 	})
 	if err != nil {
 		panic(err)
@@ -218,16 +243,16 @@ func TestAPIs(t *testing.T) {
 		[]Reporter{})
 }
 
-func WaitForObjectsToBePopulatedInCache(objects ...client.Object) {
+func WaitForObjectsToBePopulatedInCache(ctx context.Context, objects ...client.Object) {
 	for _, object := range objects {
 		objectCopy := object.DeepCopyObject().(client.Object)
 		key := client.ObjectKeyFromObject(object)
-		Eventually(func() (done bool) {
-			if err := reconciler.Client.Get(context.TODO(), key, objectCopy); err != nil {
+		Eventually(func(ctx context.Context) (done bool) {
+			if err := reconciler.Client.Get(ctx, key, objectCopy); err != nil {
 				return false
 			}
 			return true
-		}).Should(BeTrue())
+		}).WithContext(ctx).Should(BeTrue())
 	}
 }
 
@@ -235,12 +260,12 @@ func WaitForObjectsToBePopulatedInCache(objects ...client.Object) {
 // satisfies testObjectUpdatedFunc. It uses a plain polling loop so it works in
 // both Ginkgo tests and Go-native TestXxx functions (Gomega's Eventually
 // requires RegisterFailHandler which is only set up inside TestAPIs).
-func WaitForObjectToBeUpdatedInCache(object client.Object, testObjectUpdatedFunc func(client.Object) bool) {
+func WaitForObjectToBeUpdatedInCache(ctx context.Context, object client.Object, testObjectUpdatedFunc func(client.Object) bool) {
 	objectCopy := object.DeepCopyObject().(client.Object)
 	key := client.ObjectKeyFromObject(object)
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if err := reconciler.Get(context.TODO(), key, objectCopy); err == nil {
+		if err := reconciler.Get(ctx, key, objectCopy); err == nil {
 			if testObjectUpdatedFunc(objectCopy) {
 				return
 			}

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
@@ -38,7 +37,7 @@ var _ = Describe("When a host onboards via byohctl using a bootstrap kubeconfig,
 	)
 
 	BeforeEach(func() {
-		ctx = context.TODO()
+		ctx = suiteCtx
 
 		if byohAgentBundleURLForContainers == "" {
 			reason := fmt.Sprintf("no agent bundle available for byohctl's SetupAgent to install "+
@@ -72,6 +71,7 @@ var _ = Describe("When a host onboards via byohctl using a bootstrap kubeconfig,
 			Namespace:             namespace.Name,
 			DockerClient:          dockerClient,
 			NetworkInterface:      dockerNetworkInterfaceKind,
+			Env:                   byoHostRunnerEnv(),
 			bootstrapClusterProxy: bootstrapClusterProxy,
 			CommandArgs: map[string]string{
 				agentFlagBootstrapKubeconfig: byohctlBootstrapConfPath,
@@ -82,17 +82,17 @@ var _ = Describe("When a host onboards via byohctl using a bootstrap kubeconfig,
 		created, err := runner.createDockerContainer()
 		Expect(err).NotTo(HaveOccurred())
 		byohostContainer = &created
-		Expect(dockerClient.ContainerStart(ctx, byohostContainer.ID, types.ContainerStartOptions{})).To(Succeed())
+		Expect(dockerClient.ContainerStart(ctx, byohostContainer.ID, container.StartOptions{})).To(Succeed())
 		Expect(runner.raiseInotifyInstanceLimit(byohostContainer.ID)).To(Succeed())
 
 		By("Copying byohctl and a bootstrap kubeconfig into the host container")
 		binConfig := cpConfig{sourcePath: pathToByohctlBinary, destPath: byohctlContainerPath, container: byohostContainer.ID}
 		Expect(copyToContainer(ctx, dockerClient, binConfig)).To(Succeed())
-		listopt := types.ContainerListOptions{Filters: filters.NewArgs()}
+		listopt := container.ListOptions{Filters: filters.NewArgs()}
 		Expect(runner.copyKubeconfig(binConfig, listopt)).To(Succeed())
 
 		By("Running byohctl onboard --bootstrap-kubeconfig")
-		execResp, err := dockerClient.ContainerExecCreate(ctx, byohostContainer.ID, types.ExecConfig{
+		execResp, err := dockerClient.ContainerExecCreate(ctx, byohostContainer.ID, container.ExecOptions{
 			AttachStdout: true,
 			AttachStderr: true,
 			Env: []string{
@@ -107,10 +107,9 @@ var _ = Describe("When a host onboards via byohctl using a bootstrap kubeconfig,
 			},
 		})
 		Expect(err).NotTo(HaveOccurred())
-		output, err := dockerClient.ContainerExecAttach(ctx, execResp.ID, types.ExecStartCheck{})
+		output, err := dockerClient.ContainerExecAttach(ctx, execResp.ID, container.ExecAttachOptions{})
 		Expect(err).NotTo(HaveOccurred())
-		f := WriteDockerLog(output, agentLogFile)
-		defer closeLogFile(f, agentLogFile)
+		defer StreamDockerLog(output, agentLogFile)()
 
 		By("Checking the ByoHost comes up connected")
 		AssertByoHostConditionsTrue(ctx, bootstrapClusterProxy, namespace.Name, byoHostName, specName,
@@ -131,7 +130,7 @@ var _ = Describe("When a host onboards via byohctl using a bootstrap kubeconfig,
 			if err := dockerClient.ContainerStop(ctx, byohostContainer.ID, container.StopOptions{}); err != nil {
 				Showf("error stopping container %s: %v", byohostContainer.ID, err)
 			}
-			if err := dockerClient.ContainerRemove(ctx, byohostContainer.ID, types.ContainerRemoveOptions{}); err != nil {
+			if err := dockerClient.ContainerRemove(ctx, byohostContainer.ID, container.RemoveOptions{}); err != nil {
 				Showf("error removing container %s: %v", byohostContainer.ID, err)
 			}
 		}

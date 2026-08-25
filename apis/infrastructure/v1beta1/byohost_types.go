@@ -19,6 +19,20 @@ const (
 	K8sVersionAnnotation = "byoh.infrastructure.cluster.x-k8s.io/k8sversion"
 	// AttachedByoMachineLabel label used to mark a node name attached to a byo host
 	AttachedByoMachineLabel = "byoh.infrastructure.cluster.x-k8s.io/byomachine-name"
+	// HostArchitectureLabel mirrors Status.HostDetails.Architecture onto
+	// Labels so it is selectable — label selectors cannot match on status
+	// fields.
+	HostArchitectureLabel = "byoh.infrastructure.cluster.x-k8s.io/architecture"
+	// HostOSFamilyLabel reports which package manager this host uses, for
+	// selecting an agent-upgrade cohort by package format. Value is one of
+	// HostOSFamilyDebian / HostOSFamilyRHEL.
+	HostOSFamilyLabel = "byoh.infrastructure.cluster.x-k8s.io/os-family"
+	// HostOSFamilyDebian is the HostOSFamilyLabel value for hosts whose
+	// package manager is dpkg.
+	HostOSFamilyDebian = "debian"
+	// HostOSFamilyRHEL is the HostOSFamilyLabel value for hosts whose
+	// package manager is rpm.
+	HostOSFamilyRHEL = "rhel"
 	// BundleLookupBaseRegistryAnnotation annotation used to store the base registry for the bundle lookup
 	BundleLookupBaseRegistryAnnotation = "byoh.infrastructure.cluster.x-k8s.io/bundle-registry"
 	// ClusterLabel label is used to mark a cluster where it is attached to
@@ -50,6 +64,49 @@ type ByoHostSpec struct {
 	// +optional
 	// UninstallationScript *string `json:"uninstallationScript,omitempty"`
 	UninstallationSecret *corev1.ObjectReference `json:"uninstallationSecret,omitempty"`
+
+	// DesiredAgent, when set, drives a managed agent upgrade on this host.
+	// The three fields below are always set together by the
+	// ByoHostAgentUpgrade rollout controller; nil means no managed upgrade
+	// is in progress.
+	// +optional
+	DesiredAgent *DesiredAgentSpec `json:"desiredAgent,omitempty"`
+}
+
+// DesiredAgentSpec is the agent version/package a host should converge on.
+type DesiredAgentSpec struct {
+	// Version is the agent version this host should be running. The agent
+	// compares this against its own version.Get().GitVersion on every
+	// reconcile tick and only acts on a mismatch.
+	Version string `json:"version"`
+
+	// PackageURL is an OCI image reference — pulled via `imgpkg pull` — for
+	// a bundle containing the .deb/.rpm that installs Version. Not
+	// templated and does not reference a Secret — an image reference is
+	// not sensitive. The agent extracts the bundle, picks the single *.deb
+	// or *.rpm inside it matching its own already-known package manager,
+	// and installs it; nothing else is executed. Never used to install a
+	// version older than the one currently running — that always requires
+	// manual (SSH/Ansible) intervention outside this field. Pinning this
+	// reference by digest (@sha256:...) rather than a mutable tag is the
+	// primary integrity mechanism; see PackageChecksum for a secondary
+	// check.
+	// +optional
+	PackageURL string `json:"packageURL,omitempty"`
+
+	// PackageChecksum, if set, is the expected checksum ("sha256:<hex>") of
+	// the specific .deb/.rpm file extracted from the PackageURL bundle —
+	// not of the OCI image itself, which digest-pinning the reference
+	// above already covers. The agent refuses to install on mismatch.
+	// +optional
+	PackageChecksum string `json:"packageChecksum,omitempty"`
+
+	// AssignedAt is when the ByoHostAgentUpgrade rollout controller set
+	// this field, used to measure elapsed time against
+	// ByoHostAgentUpgradeSpec.PerHostTimeout. Only the controller reads or
+	// writes it; the agent ignores it.
+	// +optional
+	AssignedAt metav1.Time `json:"assignedAt,omitempty"`
 }
 
 // HostInfo is a set of details about the host platform.

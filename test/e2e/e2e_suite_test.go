@@ -14,10 +14,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
+	"strconv"
 	"strings"
 	"testing"
 
-	dockertypes "github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -29,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/test/framework"
 	"sigs.k8s.io/cluster-api/test/framework/bootstrap"
@@ -41,6 +43,13 @@ const (
 	CNIPath           = "CNI"
 	CNIResources      = "CNI_RESOURCES"
 	IPFamily          = "IP_FAMILY"
+
+	// kubernetesVersionUpgradeTo is the target version cluster_upgrade_test.go and
+	// clusterclass_upgrade_test.go both upgrade a cluster to. Kept as a single shared constant
+	// (rather than a literal duplicated in each spec file) so ensureLocalK8sBundleRegistry below
+	// knows to also build a bundle for it -- an upgrade needs an installable bundle for its target
+	// version, not just the one the cluster starts on.
+	kubernetesVersionUpgradeTo = "v1.31.2"
 )
 
 // Shared docker-host command-line flags used across this package's e2e specs.
@@ -51,6 +60,10 @@ const (
 	agentFlagVerbosity           = "--v"
 	bootstrapConfPath            = "/bootstrap.conf"
 )
+
+// suiteCtx spans the whole suite. Nothing else in this package builds a
+// context: helpers take one from their caller and the specs share this one.
+var suiteCtx context.Context
 
 // Test suite flags
 var (
@@ -94,6 +107,15 @@ var (
 
 	// Together with ensureLocalAgentBundleRegistry
 	byohAgentBundleURLForContainers string
+
+	// Together with ensureLocalK8sBundleRegistry -- the k8s installer bundle's registry address,
+	// used as K8sInstallerConfig's bundleRepo (${BUNDLE_REPO} in the e2e cluster templates).
+	bundleRepoForContainers string
+
+	// bundleRepoInsecureForContainers is ensureLocalK8sBundleRegistry's second return value --
+	// true unless BUNDLE_REPO_OVERRIDE pointed bundleRepoForContainers at a real (non-local)
+	// registry. Controls whether ByoHost containers get BYOH_BUNDLE_REGISTRY_INSECURE set.
+	bundleRepoInsecureForContainers bool
 )
 
 func init() {
@@ -105,8 +127,33 @@ func init() {
 }
 
 func TestE2E(t *testing.T) {
+	// The suite's resources outlive any single Ginkgo node: a kind cluster and
+	// docker hosts are built in BeforeSuite and torn down in AfterSuite, and a
+	// spec's namespace is created in BeforeEach and deleted in AfterEach. Only
+	// the test binary owns a lifetime that wide, so take the context from it
+	// rather than starting one per call site.
+	suiteCtx = t.Context()
+
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Controller Suite")
+}
+
+// bundleRepoClusterctlVariables returns the ClusterctlVariables override every spec's
+// ConfigClusterInput passes so the e2e cluster templates' ${BUNDLE_REPO} resolves to whatever
+// ensureLocalK8sBundleRegistry set bundleRepoForContainers to, rather than provider.yaml's
+// quay.io/platform9 default.
+func bundleRepoClusterctlVariables() map[string]string {
+	return map[string]string{"BUNDLE_REPO": bundleRepoForContainers}
+}
+
+// byoHostRunnerEnv returns the env ByoHostRunner should set on its ByoHost container -- see
+// install.sh.tmpl's BYOH_BUNDLE_REGISTRY_INSECURE check, needed only when
+// ensureLocalK8sBundleRegistry actually built a plaintext local registry.
+func byoHostRunnerEnv() []string {
+	if !bundleRepoInsecureForContainers {
+		return nil
+	}
+	return []string{"BYOH_BUNDLE_REGISTRY_INSECURE=1"}
 }
 
 // sharedSuiteData is the state the "run once" SynchronizedBeforeSuite closure hands to the
@@ -122,6 +169,8 @@ type sharedSuiteData struct {
 	pathToHostAgentBinary           string
 	pathToByohctlBinary             string
 	byohAgentBundleURLForContainers string
+	bundleRepoForContainers         string
+	bundleRepoInsecureForContainers bool
 }
 
 func formatSharedSuiteData(d *sharedSuiteData) []byte {
@@ -134,13 +183,19 @@ func formatSharedSuiteData(d *sharedSuiteData) []byte {
 		d.pathToHostAgentBinary,
 		d.pathToByohctlBinary,
 		d.byohAgentBundleURLForContainers,
+		d.bundleRepoForContainers,
+		strconv.FormatBool(d.bundleRepoInsecureForContainers),
 	}, ","))
 }
 
 func parseSharedSuiteData(data []byte) (sharedSuiteData, error) {
 	parts := strings.Split(string(data), ",")
-	if len(parts) != 8 {
-		return sharedSuiteData{}, fmt.Errorf("expected 8 comma-separated fields in shared suite data, got %d", len(parts))
+	if len(parts) != 10 {
+		return sharedSuiteData{}, fmt.Errorf("expected 10 comma-separated fields in shared suite data, got %d", len(parts))
+	}
+	bundleRepoInsecure, err := strconv.ParseBool(parts[9])
+	if err != nil {
+		return sharedSuiteData{}, fmt.Errorf("invalid bundleRepoInsecureForContainers field %q: %w", parts[9], err)
 	}
 
 	return sharedSuiteData{
@@ -152,6 +207,8 @@ func parseSharedSuiteData(data []byte) (sharedSuiteData, error) {
 		pathToHostAgentBinary:           parts[5],
 		pathToByohctlBinary:             parts[6],
 		byohAgentBundleURLForContainers: parts[7],
+		bundleRepoForContainers:         parts[8],
+		bundleRepoInsecureForContainers: bundleRepoInsecure,
 	}, nil
 }
 
@@ -160,11 +217,7 @@ func parseSharedSuiteData(data []byte) (sharedSuiteData, error) {
 // fixed default), via cmd/byohctl's own Makefile rather than a hand-rolled `go build`. byohctl is
 // its own Go module (see CLAUDE.md), so it can't be built with gexec.BuildWithEnvironment the way
 // the agent binary above is.
-func buildByohctlBinary() (string, error) {
-	// No caller passes a context through this build-setup helper; scope one locally, matching
-	// e2e_debug_helper.go's ExecuteShellScript.
-	ctx := context.Background()
-
+func buildByohctlBinary(ctx context.Context) (string, error) {
 	repoRootBytes, err := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel").Output() // #nosec G204 -- fixed args, no user input
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve repo root: %w", err)
@@ -191,16 +244,16 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	scheme := initScheme()
 
 	Byf("Loading the e2e test configuration from %q", configPath)
-	e2eConfig = loadE2EConfig(configPath)
+	e2eConfig = loadE2EConfig(suiteCtx, configPath)
 
 	Byf("Creating a clusterctl local repository into %q", artifactFolder)
-	clusterctlConfigPath = createClusterctlLocalRepository(e2eConfig, filepath.Join(artifactFolder, "repository"))
+	clusterctlConfigPath = createClusterctlLocalRepository(suiteCtx, e2eConfig, filepath.Join(artifactFolder, "repository"))
 
 	By("Setting up the bootstrap cluster")
-	bootstrapClusterProvider, bootstrapClusterProxy = setupBootstrapCluster(e2eConfig, scheme, useExistingCluster, existingClusterKubeConfig)
+	bootstrapClusterProvider, bootstrapClusterProxy = setupBootstrapCluster(suiteCtx, e2eConfig, scheme, useExistingCluster, existingClusterKubeConfig)
 
 	By("Initializing the bootstrap cluster")
-	initBootstrapCluster(bootstrapClusterProxy, e2eConfig, clusterctlConfigPath, artifactFolder)
+	initBootstrapCluster(suiteCtx, bootstrapClusterProxy, e2eConfig, clusterctlConfigPath, artifactFolder)
 
 	var err error
 	By("building host agent binary")
@@ -215,13 +268,17 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	Expect(err).NotTo(HaveOccurred())
 
 	By("building byohctl binary")
-	pathToByohctlBinary, err = buildByohctlBinary()
+	pathToByohctlBinary, err = buildByohctlBinary(suiteCtx)
 	Expect(err).NotTo(HaveOccurred())
 
 	By("making an agent bundle reachable for the byohctl e2e spec, without quay.io")
 	dockerClientForRegistry, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	Expect(err).NotTo(HaveOccurred())
-	byohAgentBundleURLForContainers, err = ensureLocalAgentBundleRegistry(context.Background(), dockerClientForRegistry, dockerNetworkInterfaceKind)
+	byohAgentBundleURLForContainers, err = ensureLocalAgentBundleRegistry(suiteCtx, dockerClientForRegistry, dockerNetworkInterfaceKind)
+	Expect(err).NotTo(HaveOccurred())
+
+	By("making a k8s installer bundle reachable, without quay.io")
+	bundleRepoForContainers, bundleRepoInsecureForContainers, err = ensureLocalK8sBundleRegistry(suiteCtx, dockerClientForRegistry, dockerNetworkInterfaceKind, e2eConfig.GetVariableOrEmpty(KubernetesVersion), kubernetesVersionUpgradeTo)
 	Expect(err).NotTo(HaveOccurred())
 
 	clusterConName = e2eConfig.ManagementClusterName
@@ -234,6 +291,8 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 		pathToHostAgentBinary:           pathToHostAgentBinary,
 		pathToByohctlBinary:             pathToByohctlBinary,
 		byohAgentBundleURLForContainers: byohAgentBundleURLForContainers,
+		bundleRepoForContainers:         bundleRepoForContainers,
+		bundleRepoInsecureForContainers: bundleRepoInsecureForContainers,
 	})
 }, func(data []byte) {
 	// Before each ParallelNode.
@@ -248,8 +307,10 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	pathToHostAgentBinary = shared.pathToHostAgentBinary
 	pathToByohctlBinary = shared.pathToByohctlBinary
 	byohAgentBundleURLForContainers = shared.byohAgentBundleURLForContainers
+	bundleRepoForContainers = shared.bundleRepoForContainers
+	bundleRepoInsecureForContainers = shared.bundleRepoInsecureForContainers
 
-	e2eConfig = loadE2EConfig(configPath)
+	e2eConfig = loadE2EConfig(suiteCtx, configPath)
 	bootstrapClusterProxy = framework.NewClusterProxy("bootstrap", shared.kubeconfigPath, initScheme(), framework.WithMachineLogCollector(framework.DockerLogCollector{}))
 })
 
@@ -263,12 +324,12 @@ var _ = SynchronizedAfterSuite(func() {
 
 	By("Tearing down the management cluster")
 	if !skipCleanup {
-		tearDown(bootstrapClusterProvider, bootstrapClusterProxy)
+		tearDown(suiteCtx, bootstrapClusterProvider, bootstrapClusterProxy)
 	}
 
-	if byohAgentBundleURLForContainers != "" {
+	if byohAgentBundleURLForContainers != "" || bundleRepoForContainers != "" {
 		if dockerClientForRegistry, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation()); err == nil {
-			_ = dockerClientForRegistry.ContainerRemove(context.Background(), agentBundleRegistryContainerName, dockertypes.ContainerRemoveOptions{Force: true})
+			_ = dockerClientForRegistry.ContainerRemove(suiteCtx, localBundleRegistryContainerName, container.RemoveOptions{Force: true})
 		}
 	}
 })
@@ -281,14 +342,14 @@ func initScheme() *runtime.Scheme {
 	return sc
 }
 
-func loadE2EConfig(configPath string) *clusterctl.E2EConfig {
-	config := clusterctl.LoadE2EConfig(context.TODO(), clusterctl.LoadE2EConfigInput{ConfigPath: configPath})
+func loadE2EConfig(ctx context.Context, configPath string) *clusterctl.E2EConfig {
+	config := clusterctl.LoadE2EConfig(ctx, clusterctl.LoadE2EConfigInput{ConfigPath: configPath})
 	Expect(config).NotTo(BeNil(), "Failed to load E2E config from %s", configPath)
 
 	return config
 }
 
-func createClusterctlLocalRepository(config *clusterctl.E2EConfig, repositoryFolder string) string {
+func createClusterctlLocalRepository(ctx context.Context, config *clusterctl.E2EConfig, repositoryFolder string) string {
 	createRepositoryInput := clusterctl.CreateRepositoryInput{
 		E2EConfig:        config,
 		RepositoryFolder: repositoryFolder,
@@ -296,26 +357,26 @@ func createClusterctlLocalRepository(config *clusterctl.E2EConfig, repositoryFol
 
 	// Ensuring a CNI file is defined in the config and register a FileTransformation to inject the referenced file in place of the CNI_RESOURCES envSubst variable.
 	Expect(config.Variables).To(HaveKey(CNIPath), "Missing %s variable in the config", CNIPath)
-	cniPath := config.GetVariable(CNIPath)
+	cniPath := config.GetVariableOrEmpty(CNIPath)
 	Expect(cniPath).To(BeAnExistingFile(), "The %s variable should resolve to an existing file", CNIPath)
 
 	createRepositoryInput.RegisterClusterResourceSetConfigMapTransformation(cniPath, CNIResources)
 
-	clusterctlConfig := clusterctl.CreateRepository(context.TODO(), createRepositoryInput)
+	clusterctlConfig := clusterctl.CreateRepository(ctx, createRepositoryInput)
 	Expect(clusterctlConfig).To(BeAnExistingFile(), "The clusterctl config file does not exists in the local repository %s", repositoryFolder)
 	return clusterctlConfig
 }
 
-func setupBootstrapCluster(config *clusterctl.E2EConfig, scheme *runtime.Scheme, useExistingCluster bool, existingClusterKubeConfig string) (bootstrap.ClusterProvider, framework.ClusterProxy) {
+func setupBootstrapCluster(ctx context.Context, config *clusterctl.E2EConfig, scheme *runtime.Scheme, useExistingCluster bool, existingClusterKubeConfig string) (bootstrap.ClusterProvider, framework.ClusterProxy) {
 	var clusterProvider bootstrap.ClusterProvider
 	kubeconfigPath := existingClusterKubeConfig
 	if !useExistingCluster {
-		clusterProvider = bootstrap.CreateKindBootstrapClusterAndLoadImages(context.TODO(), bootstrap.CreateKindBootstrapClusterAndLoadImagesInput{
+		clusterProvider = bootstrap.CreateKindBootstrapClusterAndLoadImages(ctx, bootstrap.CreateKindBootstrapClusterAndLoadImagesInput{
 			Name:               config.ManagementClusterName,
 			KubernetesVersion:  "v1.26.6",
 			RequiresDockerSock: config.HasDockerProvider(),
 			Images:             config.Images,
-			IPFamily:           config.GetVariable(IPFamily),
+			IPFamily:           config.GetVariableOrEmpty(IPFamily),
 		})
 		Expect(clusterProvider).NotTo(BeNil(), "Failed to create a bootstrap cluster")
 
@@ -329,8 +390,8 @@ func setupBootstrapCluster(config *clusterctl.E2EConfig, scheme *runtime.Scheme,
 	return clusterProvider, clusterProxy
 }
 
-func initBootstrapCluster(bootstrapClusterProxy framework.ClusterProxy, config *clusterctl.E2EConfig, clusterctlConfig, artifactFolder string) {
-	clusterctl.InitManagementClusterAndWatchControllerLogs(context.TODO(), clusterctl.InitManagementClusterAndWatchControllerLogsInput{
+func initBootstrapCluster(ctx context.Context, bootstrapClusterProxy framework.ClusterProxy, config *clusterctl.E2EConfig, clusterctlConfig, artifactFolder string) {
+	clusterctl.InitManagementClusterAndWatchControllerLogs(ctx, clusterctl.InitManagementClusterAndWatchControllerLogsInput{
 		ClusterProxy:            bootstrapClusterProxy,
 		ClusterctlConfigPath:    clusterctlConfig,
 		InfrastructureProviders: config.InfrastructureProviders(),
@@ -338,12 +399,12 @@ func initBootstrapCluster(bootstrapClusterProxy framework.ClusterProxy, config *
 	}, config.GetIntervals(bootstrapClusterProxy.GetName(), "wait-controllers")...)
 }
 
-func tearDown(bootstrapClusterProvider bootstrap.ClusterProvider, bootstrapClusterProxy framework.ClusterProxy) {
+func tearDown(ctx context.Context, bootstrapClusterProvider bootstrap.ClusterProvider, bootstrapClusterProxy framework.ClusterProxy) {
 	if bootstrapClusterProxy != nil {
-		bootstrapClusterProxy.Dispose(context.TODO())
+		bootstrapClusterProxy.Dispose(ctx)
 	}
 	if bootstrapClusterProvider != nil {
-		bootstrapClusterProvider.Dispose(context.TODO())
+		bootstrapClusterProvider.Dispose(ctx)
 	}
 }
 
@@ -357,6 +418,49 @@ func setupSpecNamespace(ctx context.Context, specName string, clusterProxy frame
 	})
 
 	return namespace, cancelWatches
+}
+
+// commonSpecSetup runs the BeforeEach argument validation and namespace setup shared by every
+// spec in this package -- pulled out so each spec's BeforeEach is a one-line call.
+func commonSpecSetup(specName string) (ctx context.Context, namespace *corev1.Namespace, cancelWatches context.CancelFunc, clusterResources *clusterctl.ApplyClusterTemplateAndWaitResult) {
+	ctx = suiteCtx
+
+	Expect(e2eConfig).NotTo(BeNil(), "Invalid argument. e2eConfig can't be nil when calling %s spec", specName)
+	Expect(clusterctlConfigPath).To(BeAnExistingFile(), "Invalid argument. clusterctlConfigPath must be an existing file when calling %s spec", specName)
+	Expect(bootstrapClusterProxy).NotTo(BeNil(), "Invalid argument. bootstrapClusterProxy can't be nil when calling %s spec", specName)
+	Expect(os.MkdirAll(artifactFolder, 0755)).To(Succeed(), "Invalid argument. artifactFolder can't be created for %s spec", specName)
+
+	Expect(e2eConfig.Variables).To(HaveKey(KubernetesVersion))
+
+	// set up a Namespace where to host objects for this spec and create a watcher for the namespace events.
+	namespace, cancelWatches = setupSpecNamespace(ctx, specName, bootstrapClusterProxy, artifactFolder)
+	clusterResources = new(clusterctl.ApplyClusterTemplateAndWaitResult)
+
+	return ctx, namespace, cancelWatches, clusterResources
+}
+
+// applyClusterAndWait applies a cluster template and waits for cluster readiness.
+// It takes flavor and machine count parameters to support different cluster configurations.
+func applyClusterAndWait(ctx context.Context, namespace, clusterName, specName, k8sVersion, flavor string, cpCount, workerCount int64, clusterResources *clusterctl.ApplyClusterTemplateAndWaitResult) {
+	clusterctl.ApplyClusterTemplateAndWait(ctx, clusterctl.ApplyClusterTemplateAndWaitInput{
+		ClusterProxy: bootstrapClusterProxy,
+		ConfigCluster: clusterctl.ConfigClusterInput{
+			LogFolder:                filepath.Join(artifactFolder, "clusters", bootstrapClusterProxy.GetName()),
+			ClusterctlConfigPath:     clusterctlConfigPath,
+			KubeconfigPath:           bootstrapClusterProxy.GetKubeconfigPath(),
+			InfrastructureProvider:   clusterctl.DefaultInfrastructureProvider,
+			Flavor:                   flavor,
+			Namespace:                namespace,
+			ClusterName:              clusterName,
+			KubernetesVersion:        k8sVersion,
+			ControlPlaneMachineCount: ptr.To(cpCount),
+			WorkerMachineCount:       ptr.To(workerCount),
+			ClusterctlVariables:      bundleRepoClusterctlVariables(),
+		},
+		WaitForClusterIntervals:      e2eConfig.GetIntervals(specName, "wait-cluster"),
+		WaitForControlPlaneIntervals: e2eConfig.GetIntervals(specName, "wait-control-plane"),
+		WaitForMachineDeployments:    e2eConfig.GetIntervals(specName, "wait-worker-nodes"),
+	}, clusterResources)
 }
 
 func dumpSpecResourcesAndCleanup(ctx context.Context, specName string, clusterProxy framework.ClusterProxy, artifactFolder string, namespace *corev1.Namespace, cancelWatches context.CancelFunc, cluster *clusterv1.Cluster, intervalsGetter func(spec, key string) []interface{}, skipCleanup bool) {
@@ -374,9 +478,11 @@ func dumpSpecResourcesAndCleanup(ctx context.Context, specName string, clusterPr
 
 	// Dump all Cluster API related resources to artifacts before deleting them.
 	framework.DumpAllResources(ctx, framework.DumpAllResourcesInput{
-		Lister:    clusterProxy.GetClient(),
-		Namespace: namespace.Name,
-		LogPath:   filepath.Join(artifactFolder, "clusters", clusterProxy.GetName(), "resources"),
+		Lister:               clusterProxy.GetClient(),
+		KubeConfigPath:       clusterProxy.GetKubeconfigPath(),
+		ClusterctlConfigPath: clusterctlConfigPath,
+		Namespace:            namespace.Name,
+		LogPath:              filepath.Join(artifactFolder, "clusters", clusterProxy.GetName(), "resources"),
 	})
 
 	if !skipCleanup {
@@ -385,8 +491,9 @@ func dumpSpecResourcesAndCleanup(ctx context.Context, specName string, clusterPr
 		// that cluster variable is not set even if the cluster exists, so we are calling DeleteAllClustersAndWait
 		// instead of DeleteClusterAndWait
 		framework.DeleteAllClustersAndWait(ctx, framework.DeleteAllClustersAndWaitInput{
-			Client:    clusterProxy.GetClient(),
-			Namespace: namespace.Name,
+			ClusterProxy:         clusterProxy,
+			ClusterctlConfigPath: clusterctlConfigPath,
+			Namespace:            namespace.Name,
 		}, intervalsGetter(specName, "wait-delete-cluster")...)
 
 		Byf("Deleting namespace used for hosting the %q test spec", specName)
@@ -414,7 +521,7 @@ func generateBootstrapKubeconfig(ctx context.Context, clusterProxy framework.Clu
 		WithSkipTLSVerify(skipTLS).
 		WithCAData(caData).
 		Build()
-	Expect(clusterProxy.GetClient().Create(context.TODO(), bootstrapKubeconfigCRD)).NotTo(HaveOccurred(), "failed to create test BootstrapKubeconfig CRD")
+	Expect(clusterProxy.GetClient().Create(ctx, bootstrapKubeconfigCRD)).NotTo(HaveOccurred(), "failed to create test BootstrapKubeconfig CRD")
 
 	bootstrapKubeconfigLookupKey := types.NamespacedName{
 		Name:      bootstrapKubeconfigCRD.Name,

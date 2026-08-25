@@ -15,19 +15,14 @@ import (
 	"testing"
 	"time"
 
-	dockertypes "github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	dClient "github.com/docker/docker/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gexec"
-	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/test/e2e"
-	certv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	clientset "k8s.io/client-go/kubernetes"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -57,6 +52,11 @@ var (
 	// hostNameSuffix is a per-run Unix timestamp appended to os.Hostname() to make
 	// container names unique across test runs, preventing conflicts from stale containers.
 	hostNameSuffix string
+	// suiteCtx spans the whole suite. A ByoHostRunner's context is created in a
+	// BeforeEach but its docker calls continue through the spec and into AfterEach,
+	// so it cannot be rooted on a per-node SpecContext, which Ginkgo cancels as
+	// soon as the node body returns.
+	suiteCtx context.Context
 )
 
 const (
@@ -65,7 +65,13 @@ const (
 )
 
 func TestHostAgent(t *testing.T) {
+	suiteCtx = t.Context()
 	RegisterFailHandler(Fail)
+	// Gomega drops its default Eventually timeout once an assertion carries a
+	// context, leaving a failing wait to block until the whole suite times out.
+	// The specs here pass a context to propagate it, not to bound the wait, so
+	// keep the default timeout in force.
+	EnforceDefaultTimeoutsWhenUsingContexts()
 	RunSpecs(t, "Agent Suite")
 }
 
@@ -83,8 +89,8 @@ var _ = BeforeSuite(func() {
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
 			filepath.Join("..", "config", "crd", "bases"),
-			filepath.Join(build.Default.GOPATH, "pkg", "mod", "sigs.k8s.io", "cluster-api@v1.4.4", "config", "crd", "bases"),
-			filepath.Join(build.Default.GOPATH, "pkg", "mod", "sigs.k8s.io", "cluster-api@v1.4.4", "bootstrap", "kubeadm", "config", "crd", "bases"),
+			filepath.Join(build.Default.GOPATH, "pkg", "mod", "sigs.k8s.io", "cluster-api@v1.10.10", "config", "crd", "bases"),
+			filepath.Join(build.Default.GOPATH, "pkg", "mod", "sigs.k8s.io", "cluster-api@v1.10.10", "bootstrap", "kubeadm", "config", "crd", "bases"),
 		},
 
 		ErrorIfCRDPathMissing: true,
@@ -94,21 +100,7 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
 
-	scheme := runtime.NewScheme()
-
-	err = infrastructurev1beta1.AddToScheme(scheme)
-	Expect(err).NotTo(HaveOccurred())
-
-	err = corev1.AddToScheme(scheme)
-	Expect(err).NotTo(HaveOccurred())
-
-	err = clusterv1.AddToScheme(scheme)
-	Expect(err).NotTo(HaveOccurred())
-
-	err = certv1.AddToScheme(scheme)
-	Expect(err).NotTo(HaveOccurred())
-
-	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme})
+	k8sClient, err = client.New(cfg, client.Options{Scheme: newScheme()})
 	Expect(err).NotTo(HaveOccurred())
 
 	clientSet = clientset.NewForConfigOrDie(cfg)
@@ -191,7 +183,7 @@ func cleanup(ctx context.Context, byoHostContainer *container.CreateResponse, na
 
 		// Force ensures removal succeeds even when a lingering exec attachment hasn't
 		// fully closed on the daemon side after ContainerStop.
-		err = dockerClient.ContainerRemove(ctx, byoHostContainer.ID, dockertypes.ContainerRemoveOptions{Force: true})
+		err = dockerClient.ContainerRemove(ctx, byoHostContainer.ID, container.RemoveOptions{Force: true})
 		Expect(err).NotTo(HaveOccurred())
 	}
 

@@ -23,5 +23,19 @@
       "Bash(gh run *)",
       "Bash(gh pr view *)"
     ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash(make test-e2e*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "podman system prune -a --volumes -f 2>/dev/null || docker system prune -a --volumes -f",
+            "statusMessage": "Reclaiming disk space"
+          }
+        ]
+      }
+    ]
   }
 }

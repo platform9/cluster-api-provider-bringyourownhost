@@ -1,0 +1,13 @@
+# No version bump clears these. v28.5.2 is the last release on the
+# github.com/docker/docker path and is still affected; the fixes ship only as
+# Docker Engine 29.x, under github.com/moby/moby/v2.
+#
+# The module also arrives indirectly through sigs.k8s.io/cluster-api/test, so
+# dropping it needs a Cluster API v1.12+ upgrade, which removes the v1beta1
+# APIs this provider is built on.
+#
+# Trivy scopes an ignore to go.mod, never to the code importing it, so this is
+# repo-wide. The docker-engine-modules depguard rule holds the line instead.
+CVE-2026-34040 exp:2026-11-30
+CVE-2026-41567 exp:2026-11-30
+CVE-2026-42306 exp:2026-11-30

@@ -8,16 +8,11 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/utils/pointer"
 	"sigs.k8s.io/cluster-api/test/framework"
 	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
 	"sigs.k8s.io/cluster-api/util"
@@ -32,104 +27,37 @@ var _ = Describe("Cluster upgrade test [K8s-Upgrade-Cluster]", func() {
 		cancelWatches                context.CancelFunc
 		clusterResources             *clusterctl.ApplyClusterTemplateAndWaitResult
 		byoHostCapacityPool          = 4
-		byoHostName                  string
 		dockerClient                 *client.Client
-		allbyohostContainerIDs       []string
+		hosts                        []byoHostHandle
 		allAgentLogFiles             []string
-		kubernetesVersionUpgradeFrom = "v1.31.0"
-		kubernetesVersionUpgradeTo   = "v1.31.2"
+		kubernetesVersionUpgradeFrom = getEnvOrDefault("E2E_K8S_VERSION_FROM", "v1.31.0")
+		kubernetesVersionUpgradeTo   = getEnvOrDefault("E2E_K8S_VERSION_TO", "v1.31.2")
 		etcdUpgradeVersion           = "3.5.15-0"
 		coreDNSUpgradeVersion        = "v1.11.3"
 	)
 
 	BeforeEach(func() {
-		ctx = context.TODO()
-		Expect(ctx).NotTo(BeNil(), "ctx is required for %s spec", specName)
-
-		Expect(e2eConfig).NotTo(BeNil(), "Invalid argument. e2eConfig can't be nil when calling %s spec", specName)
-		Expect(clusterctlConfigPath).To(BeAnExistingFile(), "Invalid argument. clusterctlConfigPath must be an existing file when calling %s spec", specName)
-		Expect(bootstrapClusterProxy).NotTo(BeNil(), "Invalid argument. bootstrapClusterProxy can't be nil when calling %s spec", specName)
-		Expect(os.MkdirAll(artifactFolder, 0755)).To(Succeed(), "Invalid argument. artifactFolder can't be created for %s spec", specName)
-		Expect(e2eConfig.Variables).To(HaveKey(KubernetesVersion))
-
-		// set up a Namespace where to host objects for this spec and create a watcher for the namespace events.
-		namespace, cancelWatches = setupSpecNamespace(ctx, specName, bootstrapClusterProxy, artifactFolder)
-		clusterResources = new(clusterctl.ApplyClusterTemplateAndWaitResult)
+		ctx, namespace, cancelWatches, clusterResources = commonSpecSetup(specName)
 	})
 
 	It("Should successfully upgrade cluster", func() {
-		// Skip fast: no Kubernetes version in this project's OCI bundle registry
-		// (quay.io/platform9, v1.31.0+ only) can complete a kubeadm upgrade against the vendored
-		// CAPI v1.4.4 — its kubeadm-config decoder predates the kubeadm.k8s.io/v1beta4 API that
-		// v1.31+ writes. Needs CAPI bumped past v1.4.4 before this can run.
-		Skip("blocked on CAPI v1.4.4 -> kubeadm v1beta4 incompatibility")
-
 		clusterName := fmt.Sprintf("%s-%s", specName, util.RandomString(6))
 		var err error
 		dockerClient, err = client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 		Expect(err).NotTo(HaveOccurred())
 
 		By("Creating byohost capacity pool containing 4 docker hosts")
-		for i := 0; i < byoHostCapacityPool; i++ {
-
-			byoHostName = fmt.Sprintf("byohost-%s", util.RandomString(6))
-
-			runner := ByoHostRunner{
-				Context:               ctx,
-				clusterConName:        clusterConName,
-				ByoHostName:           byoHostName,
-				Namespace:             namespace.Name,
-				PathToHostAgentBinary: pathToHostAgentBinary,
-				DockerClient:          dockerClient,
-				NetworkInterface:      dockerNetworkInterfaceKind,
-				bootstrapClusterProxy: bootstrapClusterProxy,
-				CommandArgs: map[string]string{
-					agentFlagBootstrapKubeconfig: bootstrapConfPath,
-					agentFlagNamespace:           namespace.Name,
-					agentFlagVerbosity:           "1",
-				},
-			}
-			runner.BootstrapKubeconfigData = generateBootstrapKubeconfig(runner.Context, bootstrapClusterProxy, clusterConName)
-			byohost, err := runner.SetupByoDockerHost()
-			Expect(err).NotTo(HaveOccurred())
-			output, byohostContainerID, err := runner.ExecByoDockerHost(byohost)
-			allbyohostContainerIDs = append(allbyohostContainerIDs, byohostContainerID)
-			Expect(err).NotTo(HaveOccurred())
-
-			// read the log of host agent container in backend, and write it
-			agentLogFile := fmt.Sprintf("/tmp/host-agent-%s.log", byoHostName)
-
-			f := WriteDockerLog(output, agentLogFile)
-			defer func() {
-				deferredErr := f.Close()
-				if deferredErr != nil {
-					Showf("error closing file %s:, %v", agentLogFile, deferredErr)
-				}
-			}()
-			allAgentLogFiles = append(allAgentLogFiles, agentLogFile)
+		hosts, err = spinUpByoHosts(ctx, dockerClient, namespace.Name, byoHostCapacityPool)
+		Expect(err).NotTo(HaveOccurred())
+		for _, host := range hosts {
+			defer host.StopLog()
+			allAgentLogFiles = append(allAgentLogFiles, host.LogFilePath)
 		}
 
 		By("creating a workload cluster with one control plane node and one worker node")
 
-		setControlPlaneIP(context.Background(), dockerClient)
-		clusterctl.ApplyClusterTemplateAndWait(ctx, clusterctl.ApplyClusterTemplateAndWaitInput{
-			ClusterProxy: bootstrapClusterProxy,
-			ConfigCluster: clusterctl.ConfigClusterInput{
-				LogFolder:                filepath.Join(artifactFolder, "clusters", bootstrapClusterProxy.GetName()),
-				ClusterctlConfigPath:     clusterctlConfigPath,
-				KubeconfigPath:           bootstrapClusterProxy.GetKubeconfigPath(),
-				InfrastructureProvider:   clusterctl.DefaultInfrastructureProvider,
-				Flavor:                   clusterctl.DefaultFlavor,
-				Namespace:                namespace.Name,
-				ClusterName:              clusterName,
-				KubernetesVersion:        kubernetesVersionUpgradeFrom,
-				ControlPlaneMachineCount: pointer.Int64(1),
-				WorkerMachineCount:       pointer.Int64(1),
-			},
-			WaitForClusterIntervals:      e2eConfig.GetIntervals(specName, "wait-cluster"),
-			WaitForControlPlaneIntervals: e2eConfig.GetIntervals(specName, "wait-control-plane"),
-			WaitForMachineDeployments:    e2eConfig.GetIntervals(specName, "wait-worker-nodes"),
-		}, clusterResources)
+		setControlPlaneIP(ctx, dockerClient)
+		applyClusterAndWait(ctx, namespace.Name, clusterName, specName, kubernetesVersionUpgradeFrom, clusterctl.DefaultFlavor, 1, 1, clusterResources)
 
 		By("Upgrading the control plane")
 		framework.UpgradeControlPlaneAndWaitForUpgrade(ctx, framework.UpgradeControlPlaneAndWaitForUpgradeInput{
@@ -174,30 +102,6 @@ var _ = Describe("Cluster upgrade test [K8s-Upgrade-Cluster]", func() {
 		// Dumps all the resources in the spec namespace, then cleanups the cluster object and the spec namespace itself.
 		dumpSpecResourcesAndCleanup(ctx, specName, bootstrapClusterProxy, artifactFolder, namespace, cancelWatches, clusterResources.Cluster, e2eConfig.GetIntervals, skipCleanup)
 
-		if dockerClient != nil {
-			for _, byohostContainerID := range allbyohostContainerIDs {
-				err := dockerClient.ContainerStop(ctx, byohostContainerID, container.StopOptions{})
-				Expect(err).NotTo(HaveOccurred())
-
-				err = dockerClient.ContainerRemove(ctx, byohostContainerID, types.ContainerRemoveOptions{})
-				Expect(err).NotTo(HaveOccurred())
-			}
-
-		}
-
-		for _, agentLogFile := range allAgentLogFiles {
-			err := os.Remove(agentLogFile)
-			if err != nil {
-				Showf("error removing file %s: %v", agentLogFile, err)
-			}
-		}
-		err := os.Remove(ReadByohControllerManagerLogShellFile)
-		if err != nil {
-			Showf("error removing file %s: %v", ReadByohControllerManagerLogShellFile, err)
-		}
-		err = os.Remove(ReadAllPodsShellFile)
-		if err != nil {
-			Showf("error removing file %s: %v", ReadAllPodsShellFile, err)
-		}
+		teardownByoHosts(ctx, dockerClient, hosts)
 	})
 })

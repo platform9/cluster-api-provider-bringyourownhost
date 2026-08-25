@@ -5,11 +5,51 @@
 package e2e
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestValidateOutputPathFileMode(t *testing.T) {
+	testCases := []struct {
+		name     string
+		fileMode os.FileMode
+		wantErr  string
+	}{
+		{
+			name:     "regular file is allowed",
+			fileMode: 0644,
+		},
+		{
+			name:     "directory is allowed",
+			fileMode: os.ModeDir | 0755,
+		},
+		{
+			name:     "device is rejected",
+			fileMode: os.ModeDevice | 0644,
+			wantErr:  "got a device",
+		},
+		{
+			name:     "irregular file is rejected",
+			fileMode: os.ModeIrregular | 0644,
+			wantErr:  "got an irregular file",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateOutputPathFileMode(tc.fileMode)
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Equal(t, tc.wantErr, err.Error())
+		})
+	}
+}
 
 func TestControlPlaneEndpointIP(t *testing.T) {
 	testCases := []struct {

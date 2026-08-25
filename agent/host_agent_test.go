@@ -1,11 +1,11 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 // nolint: nolintlint,testpackage
 package main
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"os"
@@ -41,22 +41,20 @@ var _ = Describe("Agent", func() {
 	Context("When the host is unable to register with the API server", func() {
 		var (
 			ns               *corev1.Namespace
-			ctx              context.Context
 			err              error
 			hostName         string
 			runner           *e2e.ByoHostRunner
 			byoHostContainer *container.CreateResponse
 		)
 
-		BeforeEach(func() {
+		BeforeEach(func(ctx SpecContext) {
 			ns = builder.Namespace("testns").Build()
-			ctx = context.TODO()
-			Expect(k8sClient.Create(context.TODO(), ns)).NotTo(HaveOccurred(), "failed to create test namespace")
+			Expect(k8sClient.Create(ctx, ns)).NotTo(HaveOccurred(), "failed to create test namespace")
 
 			hostName, err = os.Hostname()
 			Expect(err).NotTo(HaveOccurred())
 			hostName += "-" + hostNameSuffix
-			runner = setupTestInfra(ctx, hostName, getKubeConfig().Name(), ns)
+			runner = setupTestInfra(suiteCtx, hostName, getKubeConfig().Name(), ns)
 
 			byoHostContainer, err = runner.SetupByoDockerHost()
 			Expect(err).NotTo(HaveOccurred())
@@ -67,7 +65,7 @@ var _ = Describe("Agent", func() {
 			cleanup(runner.Context, byoHostContainer, ns, agentLogFile)
 		})
 
-		It("should not error out if the host already exists", func() {
+		It("should not error out if the host already exists", func(ctx SpecContext) {
 			// not using the builder method here
 			// because builder makes use of GenerateName that generates random names
 			// For the below byoHost we need the name to be deterministic
@@ -82,20 +80,13 @@ var _ = Describe("Agent", func() {
 				},
 				Spec: infrastructurev1beta1.ByoHostSpec{},
 			}
-			Expect(k8sClient.Create(context.TODO(), byoHost)).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, byoHost)).NotTo(HaveOccurred())
 
 			runner.CommandArgs["--downloadpath"] = fakeDownloadPath
 			output, _, err := runner.ExecByoDockerHost(byoHostContainer)
 			Expect(err).NotTo(HaveOccurred())
 
-			defer output.Close()
-			f := e2e.WriteDockerLog(output, agentLogFile)
-			defer func() {
-				deferredErr := f.Close()
-				if deferredErr != nil {
-					e2e.Showf("error closing file %s: %v", agentLogFile, deferredErr)
-				}
-			}()
+			defer e2e.StreamDockerLog(output, agentLogFile)()
 			Consistently(func() (done bool) {
 				_, err := os.Stat(agentLogFile)
 				if err == nil {
@@ -113,7 +104,6 @@ var _ = Describe("Agent", func() {
 
 		var (
 			ns               *corev1.Namespace
-			ctx              context.Context
 			hostName         string
 			fakeDownloadPath = "fake-download-path"
 			runner           *e2e.ByoHostRunner
@@ -121,16 +111,15 @@ var _ = Describe("Agent", func() {
 			output           dockertypes.HijackedResponse
 		)
 
-		BeforeEach(func() {
+		BeforeEach(func(ctx SpecContext) {
 			ns = builder.Namespace("testns").Build()
-			Expect(k8sClient.Create(context.TODO(), ns)).NotTo(HaveOccurred(), "failed to create test namespace")
-			ctx = context.TODO()
+			Expect(k8sClient.Create(ctx, ns)).NotTo(HaveOccurred(), "failed to create test namespace")
 			var err error
 			hostName, err = os.Hostname()
 			Expect(err).NotTo(HaveOccurred())
 			hostName += "-" + hostNameSuffix
 
-			runner = setupTestInfra(ctx, hostName, getKubeConfig().Name(), ns)
+			runner = setupTestInfra(suiteCtx, hostName, getKubeConfig().Name(), ns)
 			runner.CommandArgs["--label"] = "site=apac"
 			runner.CommandArgs["--downloadpath"] = fakeDownloadPath
 
@@ -141,7 +130,7 @@ var _ = Describe("Agent", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// wait until the agent process starts inside the byoh host container
-			Eventually(func() bool {
+			Eventually(func(ctx SpecContext) bool {
 				containerTop, _ := runner.DockerClient.ContainerTop(ctx, byoHostContainer.ID, []string{})
 				for _, proc := range containerTop.Processes {
 					if strings.Contains(proc[len(containerTop.Titles)-1], "agent") {
@@ -150,46 +139,54 @@ var _ = Describe("Agent", func() {
 
 				}
 				return false
-			}, 60).Should(BeTrue())
+			}, 60).WithContext(ctx).Should(BeTrue())
 		})
 
 		AfterEach(func() {
 			cleanup(runner.Context, byoHostContainer, ns, agentLogFile)
 		})
 
-		It("should register the BYOHost with the management cluster", func() {
+		It("should register the BYOHost with the management cluster", func(ctx SpecContext) {
 			byoHostLookupKey := types.NamespacedName{Name: hostName, Namespace: ns.Name}
 			createdByoHost := &infrastructurev1beta1.ByoHost{}
-			Eventually(func() *infrastructurev1beta1.ByoHost {
-				err := k8sClient.Get(context.TODO(), byoHostLookupKey, createdByoHost)
+			Eventually(func(ctx SpecContext) *infrastructurev1beta1.ByoHost {
+				err := k8sClient.Get(ctx, byoHostLookupKey, createdByoHost)
 				if err != nil {
 					return nil
 				}
 				return createdByoHost
-			}).ShouldNot(BeNil())
+			}).WithContext(ctx).ShouldNot(BeNil())
 		})
 
-		It("should register the BYOHost with the passed labels", func() {
+		It("should register the BYOHost with the passed labels", func(ctx SpecContext) {
 			byoHostLookupKey := types.NamespacedName{Name: hostName, Namespace: ns.Name}
 			createdByoHost := &infrastructurev1beta1.ByoHost{}
-			Eventually(func() map[string]string {
-				err := k8sClient.Get(context.TODO(), byoHostLookupKey, createdByoHost)
+			Eventually(func(ctx SpecContext) map[string]string {
+				err := k8sClient.Get(ctx, byoHostLookupKey, createdByoHost)
 				if err != nil {
 					return nil
 				}
 				return createdByoHost.ObjectMeta.Labels
-			}).Should(Equal(map[string]string{"site": "apac"}))
+			}).WithContext(ctx).Should(HaveKeyWithValue("site", "apac"))
+		})
+
+		It("should mirror HostInfo.Architecture and the detected package family onto labels", func(ctx SpecContext) {
+			byoHostLookupKey := types.NamespacedName{Name: hostName, Namespace: ns.Name}
+			createdByoHost := &infrastructurev1beta1.ByoHost{}
+			Eventually(func(ctx SpecContext) map[string]string {
+				err := k8sClient.Get(ctx, byoHostLookupKey, createdByoHost)
+				if err != nil {
+					return nil
+				}
+				return createdByoHost.ObjectMeta.Labels
+			}).WithContext(ctx).Should(And(
+				HaveKeyWithValue(infrastructurev1beta1.HostArchitectureLabel, runtime.GOARCH),
+				HaveKeyWithValue(infrastructurev1beta1.HostOSFamilyLabel, infrastructurev1beta1.HostOSFamilyDebian),
+			))
 		})
 
 		It("should skip bootstrap kubeconfig flow in default mode", func() {
-			defer output.Close()
-			f := e2e.WriteDockerLog(output, agentLogFile)
-			defer func() {
-				deferredErr := f.Close()
-				if deferredErr != nil {
-					e2e.Showf("error closing file %s: %v", agentLogFile, deferredErr)
-				}
-			}()
+			defer e2e.StreamDockerLog(output, agentLogFile)()
 
 			Consistently(func() (done bool) {
 				_, err := os.Stat(agentLogFile)
@@ -203,13 +200,13 @@ var _ = Describe("Agent", func() {
 			}, time.Second*2).Should(BeTrue())
 		})
 
-		It("should fetch networkstatus when register the BYOHost with the management cluster", func() {
+		It("should fetch networkstatus when register the BYOHost with the management cluster", func(ctx SpecContext) {
 			byoHostLookupKey := types.NamespacedName{Name: hostName, Namespace: ns.Name}
 			defaultIP, err := gateway.DiscoverInterface()
 			Expect(err).NotTo(HaveOccurred())
-			Eventually(func() bool {
+			Eventually(func(ctx SpecContext) bool {
 				createdByoHost := &infrastructurev1beta1.ByoHost{}
-				err := k8sClient.Get(context.TODO(), byoHostLookupKey, createdByoHost)
+				err := k8sClient.Get(ctx, byoHostLookupKey, createdByoHost)
 				if err != nil {
 					return false
 				}
@@ -241,23 +238,15 @@ var _ = Describe("Agent", func() {
 					}
 				}
 				return false
-			}).Should(BeTrue())
+			}).WithContext(ctx).Should(BeTrue())
 
 		})
 
-		It("should only reconcile ByoHost resource that the agent created", func() {
+		It("should only reconcile ByoHost resource that the agent created", func(ctx SpecContext) {
 			byoHost := builder.ByoHost(ns.Name, "random-second-host").Build()
-			Expect(k8sClient.Create(context.TODO(), byoHost)).NotTo(HaveOccurred(), "failed to create byohost")
+			Expect(k8sClient.Create(ctx, byoHost)).NotTo(HaveOccurred(), "failed to create byohost")
 
-			defer output.Close()
-
-			f := e2e.WriteDockerLog(output, agentLogFile)
-			defer func() {
-				deferredErr := f.Close()
-				if deferredErr != nil {
-					e2e.Showf("error closing file %s: %v", agentLogFile, deferredErr)
-				}
-			}()
+			defer e2e.StreamDockerLog(output, agentLogFile)()
 			Consistently(func() (done bool) {
 				_, err := os.Stat(agentLogFile)
 				if err == nil {
@@ -275,15 +264,15 @@ var _ = Describe("Agent", func() {
 				byoMachine *infrastructurev1beta1.ByoMachine
 				namespace  types.NamespacedName
 			)
-			BeforeEach(func() {
+			BeforeEach(func(ctx SpecContext) {
 				byoMachine = builder.ByoMachine(ns.Name, defaultByoMachineName).Build()
 				Expect(k8sClient.Create(ctx, byoMachine)).Should(Succeed())
 				byoHost := &infrastructurev1beta1.ByoHost{}
 				namespace = types.NamespacedName{Name: hostName, Namespace: ns.Name}
-				Eventually(func() (err error) {
+				Eventually(func(ctx SpecContext) (err error) {
 					err = k8sClient.Get(ctx, namespace, byoHost)
 					return err
-				}).Should(BeNil())
+				}).WithContext(ctx).Should(BeNil())
 
 				patchHelper, _ := patch.NewHelper(byoHost, k8sClient)
 				byoHost.Status.MachineRef = &corev1.ObjectReference{
@@ -321,17 +310,10 @@ var _ = Describe("Agent", func() {
 				Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
 			})
 
-			It("should run the script to install k8s components", func() {
-				defer output.Close()
-				f := e2e.WriteDockerLog(output, agentLogFile)
-				defer func() {
-					deferredErr := f.Close()
-					if deferredErr != nil {
-						e2e.Showf("error closing file %s: %v", agentLogFile, deferredErr)
-					}
-				}()
+			It("should run the script to install k8s components", func(ctx SpecContext) {
+				defer e2e.StreamDockerLog(output, agentLogFile)()
 				updatedByoHost := &infrastructurev1beta1.ByoHost{}
-				Eventually(func() (condition corev1.ConditionStatus) {
+				Eventually(func(ctx SpecContext) (condition corev1.ConditionStatus) {
 					err := k8sClient.Get(ctx, namespace, updatedByoHost)
 					if err == nil {
 						kubeInstallStatus := conditions.Get(updatedByoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded)
@@ -340,7 +322,7 @@ var _ = Describe("Agent", func() {
 						}
 					}
 					return corev1.ConditionFalse
-				}, 100).Should(Equal(corev1.ConditionTrue)) // installing K8s components is a lengthy operation, setting the timeout to 100s
+				}, 100).WithContext(ctx).Should(Equal(corev1.ConditionTrue)) // installing K8s components is a lengthy operation, setting the timeout to 100s
 			})
 		})
 	})
@@ -456,7 +438,6 @@ var _ = Describe("Agent", func() {
 	Context("When the host agent is executed with --skip-installation flag", func() {
 		var (
 			ns               *corev1.Namespace
-			ctx              context.Context
 			err              error
 			hostName         string
 			fakeDownloadPath = "fake-download-path"
@@ -464,15 +445,14 @@ var _ = Describe("Agent", func() {
 			byoHostContainer *container.CreateResponse
 		)
 
-		BeforeEach(func() {
+		BeforeEach(func(ctx SpecContext) {
 			ns = builder.Namespace("testns").Build()
-			ctx = context.TODO()
-			Expect(k8sClient.Create(context.TODO(), ns)).NotTo(HaveOccurred(), "failed to create test namespace")
+			Expect(k8sClient.Create(ctx, ns)).NotTo(HaveOccurred(), "failed to create test namespace")
 
 			hostName, err = os.Hostname()
 			Expect(err).NotTo(HaveOccurred())
 			hostName += "-" + hostNameSuffix
-			runner = setupTestInfra(ctx, hostName, getKubeConfig().Name(), ns)
+			runner = setupTestInfra(suiteCtx, hostName, getKubeConfig().Name(), ns)
 
 			byoHostContainer, err = runner.SetupByoDockerHost()
 			Expect(err).NotTo(HaveOccurred())
@@ -489,14 +469,7 @@ var _ = Describe("Agent", func() {
 			output, _, err := runner.ExecByoDockerHost(byoHostContainer)
 			Expect(err).NotTo(HaveOccurred())
 
-			defer output.Close()
-			f := e2e.WriteDockerLog(output, agentLogFile)
-			defer func() {
-				deferredErr := f.Close()
-				if deferredErr != nil {
-					e2e.Showf("error closing file %s: %v", agentLogFile, deferredErr)
-				}
-			}()
+			defer e2e.StreamDockerLog(output, agentLogFile)()
 			Eventually(func() (done bool) {
 				_, err := os.Stat(agentLogFile)
 				if err == nil {
@@ -514,16 +487,14 @@ var _ = Describe("Agent", func() {
 
 		var (
 			ns               *corev1.Namespace
-			ctx              context.Context
 			hostName         string
 			runner           *e2e.ByoHostRunner
 			byoHostContainer *container.CreateResponse
 			output           dockertypes.HijackedResponse
 		)
 
-		BeforeEach(func() {
+		BeforeEach(func(ctx SpecContext) {
 			ns = builder.Namespace("testns").Build()
-			ctx = context.TODO()
 			Expect(k8sClient.Create(ctx, ns)).NotTo(HaveOccurred(), "failed to create test namespace")
 
 			var err error
@@ -531,7 +502,7 @@ var _ = Describe("Agent", func() {
 			Expect(err).NotTo(HaveOccurred())
 			hostName += "-" + hostNameSuffix
 
-			runner = setupTestInfra(ctx, hostName, getKubeConfig().Name(), ns)
+			runner = setupTestInfra(suiteCtx, hostName, getKubeConfig().Name(), ns)
 			runner.CommandArgs["--bootstrap-kubeconfig"] = "/root/config"
 			byoHostContainer, err = runner.SetupByoDockerHost()
 			Expect(err).NotTo(HaveOccurred())
@@ -559,14 +530,7 @@ var _ = Describe("Agent", func() {
 			var err error
 			output, _, err = runner.ExecByoDockerHost(byoHostContainer)
 			Expect(err).NotTo(HaveOccurred())
-			defer output.Close()
-			f := e2e.WriteDockerLog(output, agentLogFile)
-			defer func() {
-				deferredErr := f.Close()
-				if deferredErr != nil {
-					e2e.Showf("error closing file %s: %v", agentLogFile, deferredErr)
-				}
-			}()
+			defer e2e.StreamDockerLog(output, agentLogFile)()
 			Eventually(func() (done bool) {
 				_, err := os.Stat(agentLogFile)
 				if err == nil {
@@ -578,42 +542,35 @@ var _ = Describe("Agent", func() {
 				return false
 			}, time.Second*2).Should(BeTrue())
 		})
-		It("should skip bootstrap kubeconfig flow if the ~/.byoh/config exists", func() {
+		It("should skip bootstrap kubeconfig flow if the ~/.byoh/config exists", func(ctx SpecContext) {
 			cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 			Expect(err).ShouldNot(HaveOccurred())
 			// create the directory to place the kubeconfig
-			execCommand, err := cli.ContainerExecCreate(ctx, byoHostContainer.ID, dockertypes.ExecConfig{
+			execCommand, err := cli.ContainerExecCreate(ctx, byoHostContainer.ID, container.ExecOptions{
 				AttachStdin:  false,
 				AttachStdout: true,
 				AttachStderr: true,
 				Cmd:          []string{"sh", "-c", "mkdir ${HOME}/.byoh"},
 			})
 			Expect(err).ShouldNot(HaveOccurred())
-			err = cli.ContainerExecStart(ctx, execCommand.ID, dockertypes.ExecStartCheck{})
+			err = cli.ContainerExecStart(ctx, execCommand.ID, container.ExecStartOptions{})
 			Expect(err).ShouldNot(HaveOccurred())
 			// copy the kubeconfig
-			execCommand, err = cli.ContainerExecCreate(ctx, byoHostContainer.ID, dockertypes.ExecConfig{
+			execCommand, err = cli.ContainerExecCreate(ctx, byoHostContainer.ID, container.ExecOptions{
 				AttachStdin:  false,
 				AttachStdout: true,
 				AttachStderr: true,
 				Cmd:          []string{"sh", "-c", "cp /root/config ${HOME}/.byoh/"},
 			})
 			Expect(err).ShouldNot(HaveOccurred())
-			err = cli.ContainerExecStart(ctx, execCommand.ID, dockertypes.ExecStartCheck{})
+			err = cli.ContainerExecStart(ctx, execCommand.ID, container.ExecStartOptions{})
 			Expect(err).ShouldNot(HaveOccurred())
 
 			// start agent
 			output, _, err = runner.ExecByoDockerHost(byoHostContainer)
 			Expect(err).NotTo(HaveOccurred())
 
-			defer output.Close()
-			f := e2e.WriteDockerLog(output, agentLogFile)
-			defer func() {
-				deferredErr := f.Close()
-				if deferredErr != nil {
-					e2e.Showf("error closing file %s: %v", agentLogFile, deferredErr)
-				}
-			}()
+			defer e2e.StreamDockerLog(output, agentLogFile)()
 			Consistently(func() (done bool) {
 				_, err := os.Stat(agentLogFile)
 				if err == nil {
@@ -625,76 +582,55 @@ var _ = Describe("Agent", func() {
 				return true
 			}, time.Second*2).Should(BeTrue())
 		})
-		It("should not register the BYOHost with the management cluster", func() {
+		It("should not register the BYOHost with the management cluster", func(ctx SpecContext) {
 			// start agent
 			_, _, err := runner.ExecByoDockerHost(byoHostContainer)
 			Expect(err).NotTo(HaveOccurred())
 			byoHostLookupKey := types.NamespacedName{Name: hostName, Namespace: ns.Name}
 			createdByoHost := &infrastructurev1beta1.ByoHost{}
-			Consistently(func() *infrastructurev1beta1.ByoHost {
-				err := k8sClient.Get(context.TODO(), byoHostLookupKey, createdByoHost)
+			Consistently(func(ctx SpecContext) *infrastructurev1beta1.ByoHost {
+				err := k8sClient.Get(ctx, byoHostLookupKey, createdByoHost)
 				if err != nil {
 					return nil
 				}
 				return createdByoHost
-			}).Should(BeNil())
+			}).WithContext(ctx).Should(BeNil())
 		})
-		It("should create ByoHost CSR in the management cluster", func() {
+		It("should create ByoHost CSR in the management cluster", func(ctx SpecContext) {
 			// start agent
 			output, _, err := runner.ExecByoDockerHost(byoHostContainer)
 			Expect(err).NotTo(HaveOccurred())
-			defer output.Close()
-			f := e2e.WriteDockerLog(output, agentLogFile)
-			defer func() {
-				deferredErr := f.Close()
-				if deferredErr != nil {
-					e2e.Showf("error closing file %s: %v", agentLogFile, deferredErr)
-				}
-			}()
+			defer e2e.StreamDockerLog(output, agentLogFile)()
 			byohCSRLookupKey := types.NamespacedName{Name: fmt.Sprintf(registration.ByohCSRNameFormat, hostName)}
 			byohCSR := &certv1.CertificateSigningRequest{}
 
-			Eventually(func() string {
-				err := k8sClient.Get(context.TODO(), byohCSRLookupKey, byohCSR)
+			Eventually(func(ctx SpecContext) string {
+				err := k8sClient.Get(ctx, byohCSRLookupKey, byohCSR)
 				if err != nil {
 					return err.Error()
 				}
 				return byohCSR.Name
-			}, 10, 1).Should(Equal(fmt.Sprintf(registration.ByohCSRNameFormat, hostName)))
+			}, 10, 1).WithContext(ctx).Should(Equal(fmt.Sprintf(registration.ByohCSRNameFormat, hostName)))
 		})
-		It("should persist private key", func() {
+		It("should persist private key", func(ctx SpecContext) {
 			// start agent
 			output, _, err := runner.ExecByoDockerHost(byoHostContainer)
 			Expect(err).NotTo(HaveOccurred())
-			defer output.Close()
-			fAgent := e2e.WriteDockerLog(output, agentLogFile)
-			defer func() {
-				deferredErr := fAgent.Close()
-				if deferredErr != nil {
-					e2e.Showf("error closing file %s: %v", agentLogFile, deferredErr)
-				}
-			}()
+			defer e2e.StreamDockerLog(output, agentLogFile)()
 			// exec in container to check the file
 			cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 			Expect(err).ShouldNot(HaveOccurred())
 			time.Sleep(4 * time.Second)
-			response, err := cli.ContainerExecCreate(ctx, byoHostContainer.ID, dockertypes.ExecConfig{
+			response, err := cli.ContainerExecCreate(ctx, byoHostContainer.ID, container.ExecOptions{
 				AttachStdin:  false,
 				AttachStdout: true,
 				AttachStderr: true,
 				Cmd:          []string{"cat", registration.TmpPrivateKey},
 			})
 			Expect(err).ShouldNot(HaveOccurred())
-			result, err := cli.ContainerExecAttach(ctx, response.ID, dockertypes.ExecStartCheck{})
+			result, err := cli.ContainerExecAttach(ctx, response.ID, container.ExecAttachOptions{})
 			Expect(err).ShouldNot(HaveOccurred())
-			defer result.Close()
-			fExec := e2e.WriteDockerLog(result, execLogFile)
-			defer func() {
-				deferredErr := fExec.Close()
-				if deferredErr != nil {
-					e2e.Showf("error closing file %s: %v", execLogFile, deferredErr)
-				}
-			}()
+			defer e2e.StreamDockerLog(result, execLogFile)()
 			Eventually(func() (done bool) {
 				_, err := os.Stat(execLogFile)
 				if err == nil {
@@ -711,14 +647,7 @@ var _ = Describe("Agent", func() {
 			// start agent
 			output, _, err := runner.ExecByoDockerHost(byoHostContainer)
 			Expect(err).NotTo(HaveOccurred())
-			defer output.Close()
-			f := e2e.WriteDockerLog(output, agentLogFile)
-			defer func() {
-				deferredErr := f.Close()
-				if deferredErr != nil {
-					e2e.Showf("error closing file %s: %v", agentLogFile, deferredErr)
-				}
-			}()
+			defer e2e.StreamDockerLog(output, agentLogFile)()
 			Eventually(func() (done bool) {
 				_, err := os.Stat(agentLogFile)
 				if err == nil {
@@ -730,18 +659,11 @@ var _ = Describe("Agent", func() {
 				return false
 			}, time.Second*4).Should(BeTrue())
 		})
-		It("should create kubeconfig if the csr is approved", func() {
+		It("should create kubeconfig if the csr is approved", func(ctx SpecContext) {
 			// start agent
 			output, _, err := runner.ExecByoDockerHost(byoHostContainer)
 			Expect(err).NotTo(HaveOccurred())
-			defer output.Close()
-			fAgent := e2e.WriteDockerLog(output, agentLogFile)
-			defer func() {
-				deferredErr := fAgent.Close()
-				if deferredErr != nil {
-					e2e.Showf("error closing file %s: %v", agentLogFile, deferredErr)
-				}
-			}()
+			defer e2e.StreamDockerLog(output, agentLogFile)()
 
 			// Approve CSR
 			Eventually(func() (done bool) {
@@ -782,23 +704,16 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 			cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 			Expect(err).ShouldNot(HaveOccurred())
 			time.Sleep(2 * time.Second)
-			response, err := cli.ContainerExecCreate(ctx, byoHostContainer.ID, dockertypes.ExecConfig{
+			response, err := cli.ContainerExecCreate(ctx, byoHostContainer.ID, container.ExecOptions{
 				AttachStdin:  false,
 				AttachStdout: true,
 				AttachStderr: true,
 				Cmd:          []string{"cat", "/root/.byoh/config"},
 			})
 			Expect(err).ShouldNot(HaveOccurred())
-			result, err := cli.ContainerExecAttach(ctx, response.ID, dockertypes.ExecStartCheck{})
+			result, err := cli.ContainerExecAttach(ctx, response.ID, container.ExecAttachOptions{})
 			Expect(err).ShouldNot(HaveOccurred())
-			defer result.Close()
-			fExec := e2e.WriteDockerLog(result, execLogFile)
-			defer func() {
-				deferredErr := fExec.Close()
-				if deferredErr != nil {
-					e2e.Showf("error closing file %s: %v", execLogFile, deferredErr)
-				}
-			}()
+			defer e2e.StreamDockerLog(result, execLogFile)()
 			Eventually(func() (done bool) {
 				_, err := os.Stat(execLogFile)
 				if err == nil {
@@ -828,16 +743,16 @@ var _ = Describe("Agent Unit Tests", func() {
 		AfterEach(func() {
 			Expect(os.Remove(bootstrapKubeConf.Name())).ShouldNot(HaveOccurred())
 		})
-		It("should return if bootstrap kubeconfig is not valid", func() {
+		It("should return if bootstrap kubeconfig is not valid", func(ctx SpecContext) {
 			testbootstrapKubeconfigInvalid := []byte(`abc`)
 
 			_, err = bootstrapKubeConf.Write(testbootstrapKubeconfigInvalid)
 			Expect(err).NotTo(HaveOccurred())
-			err = handleBootstrapFlow(klogr.New(), "test-host")
+			err = handleBootstrapFlow(ctx, klogr.New(), "test-host") //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).Should(HaveOccurred())
 			Expect(err.Error()).Should(ContainSubstring("client config load failed"))
 		})
-		It("should return if hostName is not valid", func() {
+		It("should return if hostName is not valid", func(ctx SpecContext) {
 			testbootstrapKubeconfigValid := []byte(`
 apiVersion: v1
 kind: Config
@@ -860,7 +775,7 @@ users:
 `)
 			_, err = bootstrapKubeConf.Write(testbootstrapKubeconfigValid)
 			Expect(err).NotTo(HaveOccurred())
-			err = handleBootstrapFlow(klogr.New(), "")
+			err = handleBootstrapFlow(ctx, klogr.New(), "") //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).Should(HaveOccurred())
 			Expect(err.Error()).Should(ContainSubstring("kubeconfig generation failed: hostname is not valid"))
 		})
@@ -878,7 +793,7 @@ users:
 		AfterEach(func() {
 			Expect(os.Remove(bootstrapKubeConfig)).ShouldNot(HaveOccurred())
 		})
-		It("should return if certificate data is not valid", func() {
+		It("should return if certificate data is not valid", func(ctx SpecContext) {
 			testKubeconfigInvalid := []byte(`
 apiVersion: v1
 clusters:
@@ -906,10 +821,10 @@ users:
 			var config *restclient.Config
 			config, err = registration.LoadRESTClientConfig(bootstrapKubeConfig)
 			Expect(err).NotTo(HaveOccurred())
-			err = certRotation(klogr.New(), "test-host", config)
+			err = certRotation(ctx, klogr.New(), "test-host", config) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
 		})
-		It("should return if certificate needs rotation", func() {
+		It("should return if certificate needs rotation", func(ctx SpecContext) {
 			testKubeconfig := []byte(`
 apiVersion: v1
 clusters:
@@ -937,7 +852,7 @@ users:
 			var config *restclient.Config
 			config, err = registration.LoadRESTClientConfig(bootstrapKubeConfig)
 			Expect(err).NotTo(HaveOccurred())
-			err = certRotation(klogr.New(), "test-host", config)
+			err = certRotation(ctx, klogr.New(), "test-host", config) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
 		})
 	})

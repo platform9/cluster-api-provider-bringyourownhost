@@ -84,7 +84,7 @@ func TestGetUnstructuredMachineObject(t *testing.T) {
 			dynamicClient := dynamicfake.NewSimpleDynamicClient(scheme, objs...)
 			c := &Client{DynamicClient: dynamicClient}
 
-			obj, err := c.GetUnstructuredMachineObject("ns1", "m1")
+			obj, err := c.GetUnstructuredMachineObject(t.Context(), "ns1", "m1")
 			if tt.wantErr {
 				assert.Error(t, err)
 				return
@@ -103,10 +103,10 @@ func TestAnnotateMachineObject(t *testing.T) {
 	dynamicClient := dynamicfake.NewSimpleDynamicClient(scheme, machine)
 	c := &Client{DynamicClient: dynamicClient}
 
-	obj, err := c.GetUnstructuredMachineObject("ns1", "m1")
+	obj, err := c.GetUnstructuredMachineObject(t.Context(), "ns1", "m1")
 	require.NoError(t, err)
 
-	err = c.AnnotateMachineObject(obj, "ns1", "byoh.platform9.io/decommissioned", "true")
+	err = c.AnnotateMachineObject(t.Context(), obj, "ns1", "byoh.platform9.io/decommissioned", "true")
 	require.NoError(t, err)
 
 	updated, err := dynamicClient.Resource(machineGVR).Namespace("ns1").Get(t.Context(), "m1", metav1.GetOptions{})
@@ -121,10 +121,10 @@ func TestGetMachineDeploymentReplicaCount(t *testing.T) {
 	dynamicClient := dynamicfake.NewSimpleDynamicClient(scheme, machine, deployment)
 	c := &Client{DynamicClient: dynamicClient}
 
-	obj, err := c.GetUnstructuredMachineObject("ns1", "m1")
+	obj, err := c.GetUnstructuredMachineObject(t.Context(), "ns1", "m1")
 	require.NoError(t, err)
 
-	count, err := c.GetMachineDeploymentReplicaCount(obj, "ns1")
+	count, err := c.GetMachineDeploymentReplicaCount(t.Context(), obj, "ns1")
 	require.NoError(t, err)
 	assert.Equal(t, int32(3), count)
 }
@@ -135,10 +135,10 @@ func TestGetMachineDeploymentReplicaCount_MissingLabel(t *testing.T) {
 	dynamicClient := dynamicfake.NewSimpleDynamicClient(scheme, machine)
 	c := &Client{DynamicClient: dynamicClient}
 
-	obj, err := c.GetUnstructuredMachineObject("ns1", "m1")
+	obj, err := c.GetUnstructuredMachineObject(t.Context(), "ns1", "m1")
 	require.NoError(t, err)
 
-	_, err = c.GetMachineDeploymentReplicaCount(obj, "ns1")
+	_, err = c.GetMachineDeploymentReplicaCount(t.Context(), obj, "ns1")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "does not have a machine deployment name")
 }
@@ -150,10 +150,10 @@ func TestScaleDownMachineDeployment(t *testing.T) {
 	dynamicClient := dynamicfake.NewSimpleDynamicClient(scheme, machine, deployment)
 	c := &Client{DynamicClient: dynamicClient}
 
-	obj, err := c.GetUnstructuredMachineObject("ns1", "m1")
+	obj, err := c.GetUnstructuredMachineObject(t.Context(), "ns1", "m1")
 	require.NoError(t, err)
 
-	err = c.ScaleDownMachineDeployment(obj, "ns1")
+	err = c.ScaleDownMachineDeployment(t.Context(), obj, "ns1")
 	require.NoError(t, err)
 
 	updatedUnstructured, err := dynamicClient.Resource(machineDeploymentGVR).Namespace("ns1").Get(t.Context(), "md1", metav1.GetOptions{})
@@ -170,10 +170,10 @@ func TestScaleDownMachineDeployment_MissingLabel(t *testing.T) {
 	dynamicClient := dynamicfake.NewSimpleDynamicClient(scheme, machine)
 	c := &Client{DynamicClient: dynamicClient}
 
-	obj, err := c.GetUnstructuredMachineObject("ns1", "m1")
+	obj, err := c.GetUnstructuredMachineObject(t.Context(), "ns1", "m1")
 	require.NoError(t, err)
 
-	err = c.ScaleDownMachineDeployment(obj, "ns1")
+	err = c.ScaleDownMachineDeployment(t.Context(), obj, "ns1")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "does not have a machine deployment name")
 }

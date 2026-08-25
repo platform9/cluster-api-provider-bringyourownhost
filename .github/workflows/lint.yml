@@ -1,8 +1,9 @@
 name: golangci-lint
 
 on:
+  # A stacked pull request targets the branch below it, not main. Filtering on
+  # the base left those unlinted while every other workflow ran on them.
   pull_request:
-    branches: [ main ]
     paths-ignore:
       - '*.md'
       - 'docs/**'
@@ -12,6 +13,9 @@ on:
       - 'SECURITY_CONTACTS'
   push:
     branches: [ main ]
+    # `make ci` pushes a ci-* tag to force every check onto a commit. Lint was
+    # the one check that ignored it.
+    tags: [ 'ci-*' ]
 
 permissions:
   contents: read

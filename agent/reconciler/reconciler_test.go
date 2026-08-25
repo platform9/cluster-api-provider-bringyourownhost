@@ -47,7 +47,6 @@ const (
 var _ = Describe("Byohost Agent Tests", func() {
 
 	var (
-		ctx                = context.TODO()
 		ns                 = "default"
 		hostName           = "test-host"
 		byoHost            *infrastructurev1beta1.ByoHost
@@ -69,12 +68,14 @@ var _ = Describe("Byohost Agent Tests", func() {
 			CmdRunner:           fakeCommandRunner,
 			FileWriter:          fakeFileWriter,
 			TemplateParser:      fakeTemplateParser,
+			PackagePull:         func(context.Context, string, string) error { return nil },
+			Exit:                func() {},
 			Recorder:            recorder,
 			SkipK8sInstallation: false,
 		}
 	})
 
-	It("should return an error if ByoHost is not found", func() {
+	It("should return an error if ByoHost is not found", func(ctx SpecContext) {
 		_, err := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 			NamespacedName: types.NamespacedName{
 				Name:      "non-existent-host",
@@ -84,7 +85,7 @@ var _ = Describe("Byohost Agent Tests", func() {
 	})
 
 	Context("When ByoHost exists", func() {
-		BeforeEach(func() {
+		BeforeEach(func(ctx SpecContext) {
 			byoHost = builder.ByoHost(ns, hostName).Build()
 			Expect(k8sClient.Create(ctx, byoHost)).NotTo(HaveOccurred(), "failed to create byohost")
 			var err error
@@ -94,7 +95,7 @@ var _ = Describe("Byohost Agent Tests", func() {
 			byoHostLookupKey = types.NamespacedName{Name: byoHost.Name, Namespace: ns}
 		})
 
-		It("should set the Reason to WaitingForMachineRefReason if MachineRef isn't found", func() {
+		It("should set the Reason to WaitingForMachineRefReason if MachineRef isn't found", func(ctx SpecContext) {
 			result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 				NamespacedName: byoHostLookupKey,
 			})
@@ -115,7 +116,7 @@ var _ = Describe("Byohost Agent Tests", func() {
 		})
 
 		Context("When MachineRef is set", func() {
-			BeforeEach(func() {
+			BeforeEach(func(ctx SpecContext) {
 				byoMachine = builder.ByoMachine(ns, "test-byomachine").Build()
 				Expect(k8sClient.Create(ctx, byoMachine)).NotTo(HaveOccurred(), "failed to create byomachine")
 				byoHost.Status.MachineRef = &corev1.ObjectReference{
@@ -128,7 +129,7 @@ var _ = Describe("Byohost Agent Tests", func() {
 				Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
 			})
 
-			It("should set the Reason to BootstrapDataSecretUnavailableReason", func() {
+			It("should set the Reason to BootstrapDataSecretUnavailableReason", func(ctx SpecContext) {
 				result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 					NamespacedName: byoHostLookupKey,
 				})
@@ -148,7 +149,9 @@ var _ = Describe("Byohost Agent Tests", func() {
 				}))
 			})
 
-			It("should return an error if we fail to load the bootstrap secret", func() {
+			It("should return an error if we fail to load the bootstrap secret", func(ctx SpecContext) {
+				// host_reconciler.go returns before reading BootstrapSecret unless install is already marked done; mark it here since this test isn't exercising install.
+				conditions.MarkTrue(byoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded)
 				byoHost.Spec.BootstrapSecret = &corev1.ObjectReference{
 					Kind:      kindSecret,
 					Namespace: nonExistentName,
@@ -170,7 +173,7 @@ var _ = Describe("Byohost Agent Tests", func() {
 			})
 
 			Context("When bootstrap secret is ready", func() {
-				BeforeEach(func() {
+				BeforeEach(func(ctx SpecContext) {
 					secretData := `write_files:
 - path: fake/path
   content: blah
@@ -196,13 +199,17 @@ runCmd:
 					Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
 				})
 
-				It("should skip k8s installation if skip-installation is set", func() {
+				It("should skip k8s installation if skip-installation is set", func(ctx SpecContext) {
 					hostReconciler.SkipK8sInstallation = true
 					result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 						NamespacedName: byoHostLookupKey,
 					})
 					Expect(result).To(Equal(controllerruntime.Result{}))
 					Expect(reconcilerErr).ToNot(HaveOccurred())
+
+					// only the join step's runCmd/write_files ran -- no install call, and no second reconcile was needed to reach it
+					Expect(fakeCommandRunner.RunCmdCallCount()).To(Equal(1))
+					Expect(fakeFileWriter.WriteToFileCallCount()).To(Equal(1))
 
 					updatedByoHost := &infrastructurev1beta1.ByoHost{}
 					err := k8sClient.Get(ctx, byoHostLookupKey, updatedByoHost)
@@ -221,7 +228,7 @@ runCmd:
 					))
 				})
 
-				It("should set the Reason to InstallationSecretUnavailableReason", func() {
+				It("should set the Reason to InstallationSecretUnavailableReason", func(ctx SpecContext) {
 					result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 						NamespacedName: byoHostLookupKey,
 					})
@@ -241,7 +248,7 @@ runCmd:
 					}))
 				})
 
-				It("should return an error if we fail to load the installation secret", func() {
+				It("should return an error if we fail to load the installation secret", func(ctx SpecContext) {
 					byoHost.Spec.InstallationSecret = &corev1.ObjectReference{
 						Kind:      kindSecret,
 						Namespace: nonExistentName,
@@ -263,7 +270,7 @@ runCmd:
 				})
 
 				Context("When installation secret is ready", func() {
-					BeforeEach(func() {
+					BeforeEach(func(ctx SpecContext) {
 						installScript := `echo "install"`
 						uninstallScript = `echo "uninstall"`
 
@@ -287,7 +294,7 @@ runCmd:
 						Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
 					})
 
-					It("should execute bootstrap secret only once ", func() {
+					It("should execute bootstrap secret only once ", func(ctx SpecContext) {
 
 						_, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 							NamespacedName: byoHostLookupKey,
@@ -303,7 +310,12 @@ runCmd:
 						Expect(fakeFileWriter.WriteToFileCallCount()).To(Equal(1))
 					})
 
-					It("should set K8sNodeBootstrapSucceeded to True if the boostrap execution succeeds", func() {
+					It("should set K8sNodeBootstrapSucceeded to True if the boostrap execution succeeds", func(ctx SpecContext) {
+						// install lands on the first reconcile, join on the next (see host_reconciler.go)
+						_, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
+							NamespacedName: byoHostLookupKey,
+						})
+						Expect(reconcilerErr).ToNot(HaveOccurred())
 
 						result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 							NamespacedName: byoHostLookupKey,
@@ -332,7 +344,77 @@ runCmd:
 						}))
 					})
 
-					It("should set K8sNodeBootstrapSucceeded to false with Reason CloudInitExecutionFailedReason if the bootstrap execution fails", func() {
+					// KAAP-2331: once install has succeeded, a later reconcile reads BootstrapSecret fresh with no slow step in between, so it already recovers once the secret is fixed -- no fix needed for this path.
+					It("should recover on the next reconcile once the bootstrap secret has been fixed, even without any fix (KAAP-2331)", func(ctx SpecContext) {
+						staleSecretData := `write_files:
+- path: fake/path
+  content: blah
+runCmd:
+- echo 'stale-join'`
+						freshSecretData := `write_files:
+- path: fake/path
+  content: blah2
+runCmd:
+- echo 'fresh-join'`
+
+						latest := &corev1.Secret{}
+						Expect(k8sClient.Get(ctx, types.NamespacedName{Name: bootstrapSecret.Name, Namespace: bootstrapSecret.Namespace}, latest)).To(Succeed())
+						latest.Data["value"] = []byte(staleSecretData)
+						Expect(k8sClient.Update(ctx, latest)).To(Succeed())
+
+						fakeCommandRunner.RunCmdStub = func(runCtx context.Context, cmd string) error {
+							if cmd == "echo 'stale-join'" {
+								return errors.New("token expired")
+							}
+							return nil
+						}
+
+						// first reconcile: install only (see host_reconciler.go -- join lands on the next reconcile)
+						_, installErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
+							NamespacedName: byoHostLookupKey,
+						})
+						Expect(installErr).ToNot(HaveOccurred())
+
+						// second reconcile: join fails on the stale/expired token
+						_, firstErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
+							NamespacedName: byoHostLookupKey,
+						})
+						Expect(firstErr).To(HaveOccurred())
+
+						afterFirst := &infrastructurev1beta1.ByoHost{}
+						Expect(k8sClient.Get(ctx, byoHostLookupKey, afterFirst)).To(Succeed())
+						Expect(conditions.IsTrue(afterFirst, infrastructurev1beta1.K8sComponentsInstallationSucceeded)).To(BeTrue(),
+							"install must not be re-run on retry")
+						k8sNodeBootstrapSucceeded := conditions.Get(afterFirst, infrastructurev1beta1.K8sNodeBootstrapSucceeded)
+						Expect(*k8sNodeBootstrapSucceeded).To(conditions.MatchCondition(clusterv1.Condition{
+							Type:     infrastructurev1beta1.K8sNodeBootstrapSucceeded,
+							Status:   corev1.ConditionFalse,
+							Reason:   infrastructurev1beta1.CloudInitExecutionFailedReason,
+							Severity: clusterv1.ConditionSeverityError,
+						}))
+
+						// simulate the secret getting fixed (e.g. CABPK recreating the token) before the next reconcile
+						latest = &corev1.Secret{}
+						Expect(k8sClient.Get(ctx, types.NamespacedName{Name: bootstrapSecret.Name, Namespace: bootstrapSecret.Namespace}, latest)).To(Succeed())
+						latest.Data["value"] = []byte(freshSecretData)
+						Expect(k8sClient.Update(ctx, latest)).To(Succeed())
+
+						// third reconcile: install is already done, so this attempt reads the secret fresh with no gap
+						_, secondErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
+							NamespacedName: byoHostLookupKey,
+						})
+						Expect(secondErr).ToNot(HaveOccurred())
+
+						afterSecond := &infrastructurev1beta1.ByoHost{}
+						Expect(k8sClient.Get(ctx, byoHostLookupKey, afterSecond)).To(Succeed())
+						k8sNodeBootstrapSucceeded = conditions.Get(afterSecond, infrastructurev1beta1.K8sNodeBootstrapSucceeded)
+						Expect(*k8sNodeBootstrapSucceeded).To(conditions.MatchCondition(clusterv1.Condition{
+							Type:   infrastructurev1beta1.K8sNodeBootstrapSucceeded,
+							Status: corev1.ConditionTrue,
+						}))
+					})
+
+					It("should set K8sNodeBootstrapSucceeded to false with Reason CloudInitExecutionFailedReason if the bootstrap execution fails", func(ctx SpecContext) {
 						conditions.MarkTrue(byoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded)
 						Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
 
@@ -366,7 +448,7 @@ runCmd:
 						}))
 					})
 
-					It("should return error if install script execution failed", func() {
+					It("should return error if install script execution failed", func(ctx SpecContext) {
 						fakeCommandRunner.RunCmdReturns(errors.New("failed to execute install script"))
 						invalidInstallationSecret := builder.Secret(ns, "invalid-test-secret").
 							WithKeyData("install", "test").
@@ -392,7 +474,7 @@ runCmd:
 						}))
 					})
 
-					It("should return error if installation secrent does not exists", func() {
+					It("should return error if installation secrent does not exists", func(ctx SpecContext) {
 						fakeCommandRunner.RunCmdReturns(errors.New("failed to execute install script"))
 						byoHost.Spec.InstallationSecret = &corev1.ObjectReference{
 							Kind:      kindSecret,
@@ -415,7 +497,7 @@ runCmd:
 
 					})
 
-					It("should set uninstall script in byohost spec", func() {
+					It("should set uninstall script in byohost spec", func(ctx SpecContext) {
 						uninstallSecretName := "byoh-uninstall-" + byoHost.Name
 						uninstallSecret := &corev1.Secret{
 							ObjectMeta: metav1.ObjectMeta{
@@ -438,7 +520,8 @@ runCmd:
 						result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 							NamespacedName: byoHostLookupKey,
 						})
-						Expect(result).To(Equal(controllerruntime.Result{}))
+						// requeues immediately after install rather than waiting on HeartbeatInterval -- see the Reconcile wrapper
+						Expect(result).To(Equal(controllerruntime.Result{Requeue: true}))
 						Expect(reconcilerErr).NotTo(HaveOccurred())
 
 						updatedByoHost := &infrastructurev1beta1.ByoHost{}
@@ -448,11 +531,12 @@ runCmd:
 						Expect(updatedByoHost.Spec.UninstallationSecret.Name).To(Equal(uninstallSecretName))
 					})
 
-					It("should set K8sComponentsInstallationSucceeded to true if Install succeeds", func() {
+					It("should set K8sComponentsInstallationSucceeded to true if Install succeeds", func(ctx SpecContext) {
 						result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 							NamespacedName: byoHostLookupKey,
 						})
-						Expect(result).To(Equal(controllerruntime.Result{}))
+						// requeues immediately rather than waiting on HeartbeatInterval -- see the Reconcile wrapper
+						Expect(result).To(Equal(controllerruntime.Result{Requeue: true}))
 						Expect(reconcilerErr).ToNot(HaveOccurred())
 
 						updatedByoHost := &infrastructurev1beta1.ByoHost{}
@@ -464,16 +548,31 @@ runCmd:
 							Type:   infrastructurev1beta1.K8sComponentsInstallationSucceeded,
 							Status: corev1.ConditionTrue,
 						}))
+					})
 
-						// assert events
+					It("should requeue immediately after install regardless of HeartbeatInterval", func(ctx SpecContext) {
+						hostReconciler.HeartbeatInterval = time.Hour // deliberately huge -- the post-install requeue must not inherit this
+
+						result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
+							NamespacedName: byoHostLookupKey,
+						})
+						Expect(reconcilerErr).ToNot(HaveOccurred())
+						Expect(result).To(Equal(controllerruntime.Result{Requeue: true}))
+
+						// assert events -- join lands on the next reconcile (see host_reconciler.go), so only the install event has fired so far
 						events := eventutils.CollectEvents(recorder.Events)
 						Expect(events).Should(ConsistOf([]string{
 							eventInstallScriptExecutionSucceeded,
-							eventBootstrapK8sNodeSucceeded,
 						}))
 					})
 
-					It("should set K8sNodeBootstrapSucceeded to True if the boostrap execution succeeds", func() {
+					It("should set K8sNodeBootstrapSucceeded to True if the boostrap execution succeeds", func(ctx SpecContext) {
+						// install lands on the first reconcile, join on the next (see host_reconciler.go)
+						_, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
+							NamespacedName: byoHostLookupKey,
+						})
+						Expect(reconcilerErr).ToNot(HaveOccurred())
+
 						result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 							NamespacedName: byoHostLookupKey,
 						})
@@ -500,24 +599,68 @@ runCmd:
 							eventBootstrapK8sNodeSucceeded,
 						}))
 					})
-					AfterEach(func() {
+
+					It("keeps refreshing the heartbeat while the install script is still running (KAAP-2330)", func(ctx SpecContext) {
+						// See the second-precision comment on
+						// TestHostReconciler_Heartbeat's refresh case — here
+						// we additionally need to cross more than one
+						// whole-second boundary, since we're asserting on
+						// 2+ distinct timestamps.
+						hostReconciler.HeartbeatInterval = 1300 * time.Millisecond
+						hostReconciler.MaxBlockingDuration = 30 * time.Second
+						installCallCount := 0
+						fakeCommandRunner.RunCmdStub = func(_ context.Context, _ string) error {
+							installCallCount++
+							if installCallCount == 1 {
+								// Only the install call needs to be slow —
+								// the join call doesn't add anything this
+								// test needs, so let it return immediately.
+								time.Sleep(3 * time.Second)
+							}
+							return nil
+						}
+
+						done := make(chan error, 1)
+						go func() {
+							_, err := hostReconciler.Reconcile(ctx, controllerruntime.Request{
+								NamespacedName: byoHostLookupKey,
+							})
+							done <- err
+						}()
+
+						seen := map[time.Time]struct{}{}
+						for i := 0; i < 7; i++ {
+							time.Sleep(400 * time.Millisecond)
+							h := &infrastructurev1beta1.ByoHost{}
+							Expect(k8sClient.Get(ctx, byoHostLookupKey, h)).To(Succeed())
+							if h.Status.LastHeartbeatTime != nil {
+								seen[h.Status.LastHeartbeatTime.Time] = struct{}{}
+							}
+						}
+						Expect(len(seen)).To(BeNumerically(">=", 2),
+							"expected at least two distinct heartbeat timestamps while the install script was still running")
+
+						Eventually(done, 10*time.Second).Should(Receive(BeNil()))
+					})
+
+					AfterEach(func(ctx SpecContext) {
 						Expect(k8sClient.Delete(ctx, installationSecret)).NotTo(HaveOccurred())
 					})
 				})
 
-				AfterEach(func() {
+				AfterEach(func(ctx SpecContext) {
 					Expect(k8sClient.Delete(ctx, bootstrapSecret)).NotTo(HaveOccurred())
 					hostReconciler.SkipK8sInstallation = false
 				})
 			})
 
-			AfterEach(func() {
+			AfterEach(func(ctx SpecContext) {
 				Expect(k8sClient.Delete(ctx, byoMachine)).NotTo(HaveOccurred())
 			})
 		})
 
 		Context("When the ByoHost is marked for cleanup", func() {
-			BeforeEach(func() {
+			BeforeEach(func(ctx SpecContext) {
 				uninstallScript = `echo "uninstall success script"`
 				byoMachine = builder.ByoMachine(ns, "test-byomachine").Build()
 				Expect(k8sClient.Create(ctx, byoMachine)).NotTo(HaveOccurred(), "failed to create byomachine")
@@ -539,7 +682,7 @@ runCmd:
 				Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
 			})
 
-			It("should skip node reset if k8s component installation failed", func() {
+			It("should skip node reset if k8s component installation failed", func(ctx SpecContext) {
 				var err error
 				patchHelper, err = patch.NewHelper(byoHost, k8sClient)
 				Expect(err).ShouldNot(HaveOccurred())
@@ -557,7 +700,7 @@ runCmd:
 				Expect(fakeCommandRunner.RunCmdCallCount()).To(Equal(0))
 			})
 
-			It("should reset the node and set the Reason to K8sNodeAbsentReason", func() {
+			It("should reset the node and set the Reason to K8sNodeAbsentReason", func(ctx SpecContext) {
 				uninstallSecretName := "byoh-uninstall-" + byoHost.Name
 				uninstallSecret := &corev1.Secret{
 					ObjectMeta: metav1.ObjectMeta{
@@ -615,7 +758,7 @@ runCmd:
 				}))
 			})
 
-			It("should return an error if we fail to load the uninstallation secret", func() {
+			It("should return an error if we fail to load the uninstallation secret", func(ctx SpecContext) {
 				missingSecretName := "byoh-uninstall-missing-" + byoHost.Name
 				byoHost.Spec.UninstallationSecret = &corev1.ObjectReference{
 					Kind:      kindSecret,
@@ -633,7 +776,7 @@ runCmd:
 				Expect(events).To(ContainElement("Warning ReadUninstallationSecretFailed uninstallation secret " + missingSecretName + " not found"))
 			})
 
-			It("should not run kubeadm reset a second time when uninstall secret is absent", func() {
+			It("should not run kubeadm reset a second time when uninstall secret is absent", func(ctx SpecContext) {
 				// First reconcile: kubeadm reset runs, uninstall is skipped (nil secret ref), reconcile returns nil
 				byoHost.Spec.UninstallationSecret = nil
 				Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
@@ -662,7 +805,7 @@ runCmd:
 				Expect(fakeCommandRunner.RunCmdCallCount()).To(Equal(1), "kubeadm reset must NOT be called again on second reconcile")
 			})
 
-			It("should return error if uninstall script execution failed", func() {
+			It("should return error if uninstall script execution failed", func(ctx SpecContext) {
 				fakeCommandRunner.RunCmdReturnsOnCall(1, errors.New("failed to execute uninstall script"))
 				uninstallScript = `testcommand`
 				uninstallSecretName := "byoh-uninstall-" + byoHost.Name
@@ -697,7 +840,7 @@ runCmd:
 				}))
 			})
 
-			It("should set K8sComponentsInstallationSucceeded to false if uninstall succeeds", func() {
+			It("should set K8sComponentsInstallationSucceeded to false if uninstall succeeds", func(ctx SpecContext) {
 				uninstallSecretName := "byoh-uninstall-" + byoHost.Name
 				uninstallSecret := &corev1.Secret{
 					ObjectMeta: metav1.ObjectMeta{
@@ -735,7 +878,7 @@ runCmd:
 				}))
 			})
 
-			It("It should reset byoHost.Spec.InstallationSecret if uninstall succeeds", func() {
+			It("It should reset byoHost.Spec.InstallationSecret if uninstall succeeds", func(ctx SpecContext) {
 				uninstallSecretName := "byoh-uninstall-" + byoHost.Name
 				uninstallSecret := &corev1.Secret{
 					ObjectMeta: metav1.ObjectMeta{
@@ -765,7 +908,7 @@ runCmd:
 				Expect(updatedByoHost.Spec.InstallationSecret).To(BeNil())
 			})
 
-			It("It should reset byoHost.Spec.UninstallationSecret if uninstall succeeds", func() {
+			It("It should reset byoHost.Spec.UninstallationSecret if uninstall succeeds", func(ctx SpecContext) {
 				uninstallSecretName := "byoh-uninstall-" + byoHost.Name
 				uninstallSecret := &corev1.Secret{
 					ObjectMeta: metav1.ObjectMeta{
@@ -796,7 +939,7 @@ runCmd:
 				Expect(updatedByoHost.Spec.UninstallationSecret).ToNot(BeNil())
 			})
 
-			It("should skip uninstallation if skip-installation flag is set", func() {
+			It("should skip uninstallation if skip-installation flag is set", func(ctx SpecContext) {
 				hostReconciler.SkipK8sInstallation = true
 				result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 					NamespacedName: byoHostLookupKey,
@@ -817,7 +960,7 @@ runCmd:
 				}))
 			})
 
-			It("should return error if host cleanup failed", func() {
+			It("should return error if host cleanup failed", func(ctx SpecContext) {
 				fakeCommandRunner.RunCmdReturns(errors.New("failed to cleanup host"))
 
 				result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
@@ -845,12 +988,12 @@ runCmd:
 		})
 
 		Context("When the ByoHost has deletion timestamp set", func() {
-			BeforeEach(func() {
+			BeforeEach(func(ctx SpecContext) {
 				byoHost.SetFinalizers([]string{"test"})
 				Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
-				Expect(k8sClient.Delete(context.TODO(), byoHost)).NotTo(HaveOccurred())
+				Expect(k8sClient.Delete(ctx, byoHost)).NotTo(HaveOccurred())
 			})
-			It("should trigger reconcile delete", func() {
+			It("should trigger reconcile delete", func(ctx SpecContext) {
 				result, reconcilerErr := hostReconciler.Reconcile(ctx, controllerruntime.Request{
 					NamespacedName: byoHostLookupKey,
 				})
@@ -859,13 +1002,13 @@ runCmd:
 
 			})
 
-			AfterEach(func() {
+			AfterEach(func(ctx SpecContext) {
 				byoHost.SetFinalizers([]string{})
 				Expect(patchHelper.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).NotTo(HaveOccurred())
 			})
 		})
 
-		AfterEach(func() {
+		AfterEach(func(ctx SpecContext) {
 			Expect(k8sClient.Delete(ctx, byoHost)).NotTo(HaveOccurred())
 			hostReconciler.SkipK8sInstallation = false
 		})
@@ -882,6 +1025,8 @@ func newHostReconcilerForHeartbeatTest(t *testing.T, interval time.Duration) *re
 		CmdRunner:           &cloudinitfakes.FakeICmdRunner{},
 		FileWriter:          &cloudinitfakes.FakeIFileWriter{},
 		TemplateParser:      &cloudinitfakes.FakeITemplateParser{},
+		PackagePull:         func(context.Context, string, string) error { return nil },
+		Exit:                func() {},
 		Recorder:            record.NewFakeRecorder(32),
 		SkipK8sInstallation: true,
 		HeartbeatInterval:   interval,

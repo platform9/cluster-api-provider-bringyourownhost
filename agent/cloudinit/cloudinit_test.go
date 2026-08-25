@@ -1,4 +1,5 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package cloudinit_test
@@ -56,7 +57,7 @@ runCmd:
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("should write files successfully", func() {
+		It("should write files successfully", func(ctx SpecContext) {
 			fileDir1 := path.Join(workDir, "dir1")
 			fileName1 := path.Join(fileDir1, "file1.txt")
 			fileContent1 := "some-unique-content-1"
@@ -77,7 +78,7 @@ runCmd:
   append: true
   encoding: %s`, fileName1, fileContent1, fileName2, fileBase64Content, permissions, encoding)
 
-			err = scriptExecutor.Execute(bootstrapSecretUnencoded)
+			err = scriptExecutor.Execute(ctx, bootstrapSecretUnencoded)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fakeFileWriter.MkdirIfNotExistsCallCount()).To(Equal(2))
@@ -102,17 +103,17 @@ runCmd:
 
 		})
 
-		It("should error out when an invalid yaml is passed", func() {
-			err := scriptExecutor.Execute("invalid yaml")
+		It("should error out when an invalid yaml is passed", func(ctx SpecContext) {
+			err := scriptExecutor.Execute(ctx, "invalid yaml")
 
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("error parsing write_files action"))
 		})
 
-		It("should error out when there is not enough permission to mkdir", func() {
+		It("should error out when there is not enough permission to mkdir", func(ctx SpecContext) {
 			fakeFileWriter.MkdirIfNotExistsReturns(errors.New("not enough permissions"))
 
-			err := scriptExecutor.Execute(defaultBootstrapSecret)
+			err := scriptExecutor.Execute(ctx, defaultBootstrapSecret)
 
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("not enough permissions"))
@@ -120,17 +121,17 @@ runCmd:
 
 		})
 
-		It("should error out write to file failes", func() {
+		It("should error out write to file failes", func(ctx SpecContext) {
 			fakeFileWriter.WriteToFileReturns(errors.New("cannot write to file"))
 
-			err := scriptExecutor.Execute(defaultBootstrapSecret)
+			err := scriptExecutor.Execute(ctx, defaultBootstrapSecret)
 
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("cannot write to file"))
 		})
 
-		It("run the command given in the runCmd directive", func() {
-			err := scriptExecutor.Execute(defaultBootstrapSecret)
+		It("run the command given in the runCmd directive", func(ctx SpecContext) {
+			err := scriptExecutor.Execute(ctx, defaultBootstrapSecret)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fakeCmdExecutor.RunCmdCallCount()).To(Equal(1))
@@ -138,9 +139,9 @@ runCmd:
 			Expect(cmd).To(Equal("echo 'some run command'"))
 		})
 
-		It("should not invoke the runCmd or writeFiles directive when absent", func() {
+		It("should not invoke the runCmd or writeFiles directive when absent", func(ctx SpecContext) {
 
-			err := scriptExecutor.Execute("")
+			err := scriptExecutor.Execute(ctx, "")
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fakeCmdExecutor.RunCmdCallCount()).To(Equal(0))
@@ -148,9 +149,9 @@ runCmd:
 			Expect(fakeFileWriter.WriteToFileCallCount()).To(Equal(0))
 		})
 
-		It("should error out when command execution fails", func() {
+		It("should error out when command execution fails", func(ctx SpecContext) {
 			fakeCmdExecutor.RunCmdReturns(errors.New("command execution failed"))
-			err := scriptExecutor.Execute(defaultBootstrapSecret)
+			err := scriptExecutor.Execute(ctx, defaultBootstrapSecret)
 			Expect(err).To(HaveOccurred())
 
 			Expect(fakeCmdExecutor.RunCmdCallCount()).To(Equal(1))

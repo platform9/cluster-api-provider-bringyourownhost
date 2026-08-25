@@ -5,7 +5,6 @@
 package registration_test
 
 import (
-	"context"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
@@ -28,7 +27,6 @@ const csrApprovedMsg = "approved"
 
 var _ = Describe("CSR Registration", func() {
 	var (
-		ctx                = context.TODO()
 		hostName           = "test-host"
 		fileDir            string
 		certExpiryDuration = int64((time.Hour * 24).Seconds())
@@ -88,7 +86,7 @@ b3JL5+Q3zgwFrciwfdgtrKv8MudlA0nu6EDQO7eaJbwCIQDegFyC4tjGPp/5JKqQ
 kovW9X7Ook/tTW0HyX6D6HRciA==
 -----END CERTIFICATE-----
 						`
-		BeforeEach(func() {
+		BeforeEach(func(ctx SpecContext) {
 			csrList, err := k8sClientSet.CertificatesV1().CertificateSigningRequests().List(ctx, metav1.ListOptions{})
 			Expect(err).ShouldNot(HaveOccurred())
 			for _, csr := range csrList.Items {
@@ -131,7 +129,7 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 			Expect(err).Should(HaveOccurred())
 			Expect(restConfig).To(BeNil())
 		})
-		It("should create csr if bootstrap kubeconfig is valid", func() {
+		It("should create csr if bootstrap kubeconfig is valid", func(ctx SpecContext) {
 			CSRRegistrar, err := registration.NewByohCSR(cfg, logr.Discard(), certExpiryDuration)
 			Expect(err).ShouldNot(HaveOccurred())
 			_, _, err = CSRRegistrar.RequestBYOHClientCert(hostName)
@@ -152,7 +150,7 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 
 			Expect(os.Remove(registration.TmpPrivateKey)).ShouldNot(HaveOccurred())
 		})
-		It("should fail creating CSR if the private key got changed", func() {
+		It("should fail creating CSR if the private key got changed", func(ctx SpecContext) {
 			byohCSR, err := builder.CertificateSigningRequest(
 				fmt.Sprintf(registration.ByohCSRNameFormat, hostName),
 				fmt.Sprintf(registration.ByohCSRCNFormat, hostName),
@@ -160,7 +158,7 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 			Expect(err).NotTo(HaveOccurred())
 			_, err = k8sClientSet.CertificatesV1().CertificateSigningRequests().Create(ctx, byohCSR, metav1.CreateOptions{})
 			Expect(err).ShouldNot(HaveOccurred())
-			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration)
+			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
 			_, _, err = CSRRegistrar.RequestBYOHClientCert(hostName)
 			Expect(err).Should(HaveOccurred())
@@ -168,16 +166,16 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 
 			Expect(os.Remove(registration.TmpPrivateKey)).ShouldNot(HaveOccurred())
 		})
-		It("should timeout if the CSR is not approved", func() {
+		It("should timeout if the CSR is not approved", func(ctx SpecContext) {
 			registration.CSRApprovalTimeout = time.Second * 5
-			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration)
+			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
-			err = CSRRegistrar.BootstrapKubeconfig(hostName)
+			err = CSRRegistrar.BootstrapKubeconfig(ctx, hostName)
 			Expect(err).Should(HaveOccurred())
 			Expect(err).To(MatchError("timed out waiting for the condition"))
 			Expect(os.Remove(registration.TmpPrivateKey)).ShouldNot(HaveOccurred())
 		})
-		It("should return error if not able to write kubeconfig", func() {
+		It("should return error if not able to write kubeconfig", func(ctx SpecContext) {
 			// Simulate ByoAdmission Controller
 			go func() {
 				for {
@@ -217,14 +215,14 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 			}()
 
 			registration.ConfigPath = filepath.Join(blockingFile.Name(), "config")
-			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration)
+			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
-			err = CSRRegistrar.BootstrapKubeconfig(hostName)
+			err = CSRRegistrar.BootstrapKubeconfig(ctx, hostName)
 			Expect(err).Should(HaveOccurred())
 			Expect(err).To(MatchError(fmt.Sprintf("open %s: not a directory", registration.ConfigPath)))
 			Expect(os.Remove(registration.TmpPrivateKey)).ShouldNot(HaveOccurred())
 		})
-		It("should create kubeconfig if csr is approved", func() {
+		It("should create kubeconfig if csr is approved", func(ctx SpecContext) {
 			// Simulate ByoAdmission Controller
 			go func() {
 				for {
@@ -249,9 +247,9 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 					return
 				}
 			}()
-			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration)
+			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
-			err = CSRRegistrar.BootstrapKubeconfig(hostName)
+			err = CSRRegistrar.BootstrapKubeconfig(ctx, hostName)
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(registration.ConfigPath).To(BeARegularFile())
 			Expect(os.Remove(registration.ConfigPath)).ShouldNot(HaveOccurred())

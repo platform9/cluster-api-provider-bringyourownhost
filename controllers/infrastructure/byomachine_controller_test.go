@@ -6,6 +6,7 @@ package controllers_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -31,6 +32,7 @@ import (
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
@@ -74,7 +76,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 			Build()
 		Expect(k8sClientUncached.Create(ctx, byoMachine)).Should(Succeed())
 
-		WaitForObjectsToBePopulatedInCache(machine, byoMachine)
+		WaitForObjectsToBePopulatedInCache(ctx, machine, byoMachine)
 		byoMachineLookupKey = types.NamespacedName{Name: byoMachine.Name, Namespace: byoMachine.Namespace}
 
 		k8sInstallerConfigTemplate = builder.K8sInstallerConfigTemplate(defaultNamespace, defaultK8sInstallerConfigTemplateName).
@@ -82,7 +84,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 			WithBundleType("k8s").
 			Build()
 		Expect(k8sClientUncached.Create(ctx, k8sInstallerConfigTemplate)).Should(Succeed())
-		WaitForObjectsToBePopulatedInCache(k8sInstallerConfigTemplate)
+		WaitForObjectsToBePopulatedInCache(ctx, k8sInstallerConfigTemplate)
 	})
 
 	AfterEach(func() {
@@ -109,7 +111,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 			Build()
 		Expect(k8sClientUncached.Create(ctx, byoMachineWithNonExistingCluster)).Should(Succeed())
 
-		WaitForObjectsToBePopulatedInCache(machineForByoMachineWithoutCluster, byoMachineWithNonExistingCluster)
+		WaitForObjectsToBePopulatedInCache(ctx, machineForByoMachineWithoutCluster, byoMachineWithNonExistingCluster)
 
 		_, err := reconciler.Reconcile(ctx, reconcile.Request{
 			NamespacedName: types.NamespacedName{
@@ -125,7 +127,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 			capiCluster.Status.InfrastructureReady = true
 			Expect(ph.Patch(ctx, capiCluster, patch.WithStatusObservedGeneration{})).Should(Succeed())
 
-			WaitForObjectToBeUpdatedInCache(capiCluster, func(object client.Object) bool {
+			WaitForObjectToBeUpdatedInCache(ctx, capiCluster, func(object client.Object) bool {
 				return object.(*clusterv1.Cluster).Status.InfrastructureReady == true
 			})
 		})
@@ -134,7 +136,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 			byoHost = builder.ByoHost(defaultNamespace, "host-with-node-missing").Build()
 			Expect(k8sClientUncached.Create(ctx, byoHost)).Should(Succeed())
 
-			WaitForObjectsToBePopulatedInCache(byoHost)
+			WaitForObjectsToBePopulatedInCache(ctx, byoHost)
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: byoMachineLookupKey})
 			Expect(err).To(MatchError("nodes \"" + byoHost.Name + "\" not found"))
@@ -145,7 +147,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 			BeforeEach(func() {
 				byoHost = builder.ByoHost(defaultNamespace, "test-node-providerid-host").Build()
 				Expect(k8sClientUncached.Create(ctx, byoHost)).Should(Succeed())
-				WaitForObjectsToBePopulatedInCache(byoHost)
+				WaitForObjectsToBePopulatedInCache(ctx, byoHost)
 			})
 
 			AfterEach(func() {
@@ -212,7 +214,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 				Expect(ph.Patch(ctx, byoMachine, patch.WithStatusObservedGeneration{})).Should(Succeed())
 
 				Expect(k8sClientUncached.Delete(ctx, byoMachine)).Should(Succeed())
-				WaitForObjectToBeUpdatedInCache(byoMachine, func(object client.Object) bool {
+				WaitForObjectToBeUpdatedInCache(ctx, byoMachine, func(object client.Object) bool {
 					return !object.(*infrastructurev1beta1.ByoMachine).DeletionTimestamp.IsZero()
 				})
 				_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: byoMachineLookupKey})
@@ -237,7 +239,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 
 				node = builder.Node(defaultNamespace, byoHost.Name).Build()
 				Expect(clientFake.Create(ctx, node)).Should(Succeed())
-				WaitForObjectsToBePopulatedInCache(byoHost)
+				WaitForObjectsToBePopulatedInCache(ctx, byoHost)
 
 				byoHostLookupKey = types.NamespacedName{Name: byoHost.Name, Namespace: byoHost.Namespace}
 			})
@@ -308,7 +310,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 					byoHost.Labels[infrastructurev1beta1.AttachedByoMachineLabel] = byoMachine.Namespace + "." + byoMachine.Name
 					Expect(ph.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).Should(Succeed())
 
-					WaitForObjectToBeUpdatedInCache(byoHost, func(object client.Object) bool {
+					WaitForObjectToBeUpdatedInCache(ctx, byoHost, func(object client.Object) bool {
 						return object.(*infrastructurev1beta1.ByoHost).Status.MachineRef != nil
 					})
 				})
@@ -321,7 +323,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 					}
 					annotations.AddAnnotations(byoMachine, pauseAnnotations)
 					Expect(ph.Patch(ctx, byoMachine, patch.WithStatusObservedGeneration{})).Should(Succeed())
-					WaitForObjectToBeUpdatedInCache(byoMachine, func(object client.Object) bool {
+					WaitForObjectToBeUpdatedInCache(ctx, byoMachine, func(object client.Object) bool {
 						return annotations.HasPaused(object.(*infrastructurev1beta1.ByoMachine))
 					})
 
@@ -344,7 +346,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 
 					annotations.AddAnnotations(byoHost, pauseAnnotations)
 					Expect(ph.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).Should(Succeed())
-					WaitForObjectToBeUpdatedInCache(byoHost, func(object client.Object) bool {
+					WaitForObjectToBeUpdatedInCache(ctx, byoHost, func(object client.Object) bool {
 						return annotations.HasPaused(object.(*infrastructurev1beta1.ByoHost))
 					})
 					_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: byoMachineLookupKey})
@@ -370,14 +372,14 @@ var _ = Describe("Controllers/ByomachineController", func() {
 					byoHost.Labels[infrastructurev1beta1.AttachedByoMachineLabel] = byoMachine.Namespace + "." + byoMachine.Name
 					Expect(ph.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).Should(Succeed())
 
-					WaitForObjectToBeUpdatedInCache(byoHost, func(object client.Object) bool {
+					WaitForObjectToBeUpdatedInCache(ctx, byoHost, func(object client.Object) bool {
 						return object.(*infrastructurev1beta1.ByoHost).Status.HostDetails == infrastructurev1beta1.HostInfo{
 							OSName:       testOSNameLinux,
 							OSImage:      "Ubuntu 20.04.4 LTS",
 							Architecture: "arm64",
 						}
 					})
-					WaitForObjectToBeUpdatedInCache(byoHost, func(object client.Object) bool {
+					WaitForObjectToBeUpdatedInCache(ctx, byoHost, func(object client.Object) bool {
 						return object.(*infrastructurev1beta1.ByoHost).Status.MachineRef != nil
 					})
 
@@ -399,7 +401,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 
 						Expect(k8sClientUncached.Delete(ctx, byoMachine)).Should(Succeed())
 
-						WaitForObjectToBeUpdatedInCache(byoMachine, func(object client.Object) bool {
+						WaitForObjectToBeUpdatedInCache(ctx, byoMachine, func(object client.Object) bool {
 							return !object.(*infrastructurev1beta1.ByoMachine).DeletionTimestamp.IsZero()
 						})
 					})
@@ -442,7 +444,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 							WithBundleType("k8s").
 							Build()
 						Expect(k8sClientUncached.Create(ctx, k8sInstallerConfig)).Should(Succeed())
-						WaitForObjectsToBePopulatedInCache(k8sInstallerConfig)
+						WaitForObjectsToBePopulatedInCache(ctx, k8sInstallerConfig)
 
 						ph, err := patch.NewHelper(byoMachine, k8sClientUncached)
 						Expect(err).ShouldNot(HaveOccurred())
@@ -454,7 +456,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 						}
 						Expect(ph.Patch(ctx, byoMachine, patch.WithStatusObservedGeneration{})).Should(Succeed())
 
-						WaitForObjectToBeUpdatedInCache(byoMachine, func(object client.Object) bool {
+						WaitForObjectToBeUpdatedInCache(ctx, byoMachine, func(object client.Object) bool {
 							return object.(*infrastructurev1beta1.ByoMachine).Spec.InstallerRef != nil
 						})
 					})
@@ -485,7 +487,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 						}
 						Expect(ph.Patch(ctx, k8sInstallerConfig, patch.WithStatusObservedGeneration{})).Should(Succeed())
 
-						WaitForObjectToBeUpdatedInCache(k8sInstallerConfig, func(object client.Object) bool {
+						WaitForObjectToBeUpdatedInCache(ctx, k8sInstallerConfig, func(object client.Object) bool {
 							return object.(*infrastructurev1beta1.K8sInstallerConfig).Status.Ready == true
 						})
 
@@ -517,7 +519,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 
 				Expect(ph.Patch(ctx, byoMachine, patch.WithStatusObservedGeneration{})).Should(Succeed())
 
-				WaitForObjectToBeUpdatedInCache(byoMachine, func(object client.Object) bool {
+				WaitForObjectToBeUpdatedInCache(ctx, byoMachine, func(object client.Object) bool {
 					return annotations.HasPaused(object.(*infrastructurev1beta1.ByoMachine))
 				})
 
@@ -555,7 +557,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 					Build()
 				Expect(k8sClientUncached.Create(ctx, pausedByoMachine)).Should(Succeed())
 
-				WaitForObjectsToBePopulatedInCache(pausedCluster, pausedMachine, pausedByoMachine)
+				WaitForObjectsToBePopulatedInCache(ctx, pausedCluster, pausedMachine, pausedByoMachine)
 
 				pausedByoMachineLookupKey := types.NamespacedName{Name: pausedByoMachine.Name, Namespace: pausedByoMachine.Namespace}
 
@@ -586,7 +588,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 				machine.Spec.Bootstrap = clusterv1.Bootstrap{DataSecretName: nil}
 				Expect(ph.Patch(ctx, machine, patch.WithStatusObservedGeneration{})).Should(Succeed())
 
-				WaitForObjectToBeUpdatedInCache(machine, func(object client.Object) bool {
+				WaitForObjectToBeUpdatedInCache(ctx, machine, func(object client.Object) bool {
 					return object.(*clusterv1.Machine).Spec.Bootstrap.DataSecretName == nil
 				})
 
@@ -641,7 +643,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 					Build()
 				Expect(k8sClientUncached.Create(ctx, byoMachine)).Should(Succeed())
 
-				WaitForObjectsToBePopulatedInCache(byoHost, byoMachine)
+				WaitForObjectsToBePopulatedInCache(ctx, byoHost, byoMachine)
 				byoMachineLookupKey = types.NamespacedName{Name: byoMachine.Name, Namespace: byoMachine.Namespace}
 			})
 
@@ -680,7 +682,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 					Build()
 				Expect(k8sClientUncached.Create(ctx, byoHost)).Should(Succeed())
 
-				WaitForObjectsToBePopulatedInCache(byoHost)
+				WaitForObjectsToBePopulatedInCache(ctx, byoHost)
 			})
 
 			AfterEach(func() {
@@ -723,7 +725,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 				byoHost2 = builder.ByoHost(defaultNamespace, defaultByoHostName).Build()
 				Expect(k8sClientUncached.Create(ctx, byoHost2)).Should(Succeed())
 
-				WaitForObjectsToBePopulatedInCache(byoHost1, byoHost2)
+				WaitForObjectsToBePopulatedInCache(ctx, byoHost1, byoHost2)
 
 				Expect(clientFake.Create(ctx, builder.Node(defaultNamespace, byoHost1.Name).Build())).Should(Succeed())
 				Expect(clientFake.Create(ctx, builder.Node(defaultNamespace, byoHost2.Name).Build())).Should(Succeed())
@@ -770,7 +772,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 				byoHost2.Labels = map[string]string{clusterv1.ClusterNameLabel: capiCluster.Name}
 				Expect(ph.Patch(ctx, byoHost2, patch.WithStatusObservedGeneration{})).Should(Succeed())
 
-				WaitForObjectToBeUpdatedInCache(byoHost2, func(object client.Object) bool {
+				WaitForObjectToBeUpdatedInCache(ctx, byoHost2, func(object client.Object) bool {
 					return object.(*infrastructurev1beta1.ByoHost).Labels[clusterv1.ClusterNameLabel] == capiCluster.Name
 				})
 
@@ -824,7 +826,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 				}
 				Expect(ph.Patch(ctx, byoMachine, patch.WithStatusObservedGeneration{})).Should(Succeed())
 
-				WaitForObjectToBeUpdatedInCache(byoMachine, func(object client.Object) bool {
+				WaitForObjectToBeUpdatedInCache(ctx, byoMachine, func(object client.Object) bool {
 					return object.(*infrastructurev1beta1.ByoMachine).Spec.InstallerRef != nil
 				})
 
@@ -854,7 +856,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 					APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
 				}
 				Expect(ph.Patch(ctx, byoMachine, patch.WithStatusObservedGeneration{})).Should(Succeed())
-				WaitForObjectToBeUpdatedInCache(byoMachine, func(object client.Object) bool {
+				WaitForObjectToBeUpdatedInCache(ctx, byoMachine, func(object client.Object) bool {
 					return object.(*infrastructurev1beta1.ByoMachine).Spec.InstallerRef != nil
 				})
 			})
@@ -878,7 +880,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 			err = ph.Patch(ctx, capiCluster, patch.WithStatusObservedGeneration{})
 			Expect(err).ShouldNot(HaveOccurred())
 
-			WaitForObjectToBeUpdatedInCache(capiCluster, func(object client.Object) bool {
+			WaitForObjectToBeUpdatedInCache(ctx, capiCluster, func(object client.Object) bool {
 				return object.(*clusterv1.Cluster).Status.InfrastructureReady == false
 			})
 		})
@@ -938,7 +940,7 @@ func TestClusterToByoMachines(t *testing.T) {
 
 	t.Run("returns requests only for ByoMachines labeled with the cluster", func(t *testing.T) {
 		cluster := &clusterv1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: testMapFuncClusterName, Namespace: defaultNamespace}}
-		requests := mapFunc(cluster)
+		requests := mapFunc(t.Context(), cluster)
 		require.Len(t, requests, 1)
 		assert.Equal(t, "byomachine-in-cluster", requests[0].Name)
 		assert.Equal(t, defaultNamespace, requests[0].Namespace)
@@ -946,7 +948,7 @@ func TestClusterToByoMachines(t *testing.T) {
 
 	t.Run("returns nothing for a cluster with no matching ByoMachines", func(t *testing.T) {
 		cluster := &clusterv1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster-with-no-machines", Namespace: defaultNamespace}}
-		assert.Empty(t, mapFunc(cluster))
+		assert.Empty(t, mapFunc(t.Context(), cluster))
 	})
 
 	t.Run("skips clusters with a deletion timestamp", func(t *testing.T) {
@@ -959,11 +961,28 @@ func TestClusterToByoMachines(t *testing.T) {
 				Finalizers:        []string{"keep-for-test"},
 			},
 		}
-		assert.Empty(t, mapFunc(cluster))
+		assert.Empty(t, mapFunc(t.Context(), cluster))
 	})
 
 	t.Run("returns nil for a non-Cluster object", func(t *testing.T) {
-		assert.Nil(t, mapFunc(&corev1.Pod{}))
+		assert.Nil(t, mapFunc(t.Context(), &corev1.Pod{}))
+	})
+
+	t.Run("returns nil when listing ByoMachines fails", func(t *testing.T) {
+		listErr := errors.New("list failed")
+		erroringClient := fake.NewClientBuilder().
+			WithScheme(testScheme).
+			WithInterceptorFuncs(interceptor.Funcs{
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					return listErr
+				},
+			}).
+			Build()
+		erroringReconciler := &controllers.ByoMachineReconciler{Client: erroringClient}
+		erroringMapFunc := erroringReconciler.ClusterToByoMachines(logr.Discard())
+
+		cluster := &clusterv1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: testMapFuncClusterName, Namespace: defaultNamespace}}
+		assert.Nil(t, erroringMapFunc(t.Context(), cluster))
 	})
 }
 
@@ -982,14 +1001,14 @@ func TestByoHostToByoMachineMapFunc(t *testing.T) {
 				},
 			},
 		}
-		requests := mapFunc(host)
+		requests := mapFunc(t.Context(), host)
 		require.Len(t, requests, 1)
 		assert.Equal(t, client.ObjectKey{Namespace: defaultNamespace, Name: "referenced-byomachine"}, requests[0].NamespacedName)
 	})
 
 	t.Run("returns nil when MachineRef is not set", func(t *testing.T) {
 		host := &infrastructurev1beta1.ByoHost{}
-		assert.Nil(t, mapFunc(host))
+		assert.Nil(t, mapFunc(t.Context(), host))
 	})
 
 	t.Run("returns nil when MachineRef points at a different GroupKind", func(t *testing.T) {
@@ -1003,10 +1022,10 @@ func TestByoHostToByoMachineMapFunc(t *testing.T) {
 				},
 			},
 		}
-		assert.Nil(t, mapFunc(host))
+		assert.Nil(t, mapFunc(t.Context(), host))
 	})
 
 	t.Run("returns nil for a non-ByoHost object", func(t *testing.T) {
-		assert.Nil(t, mapFunc(&corev1.Pod{}))
+		assert.Nil(t, mapFunc(t.Context(), &corev1.Pod{}))
 	})
 }

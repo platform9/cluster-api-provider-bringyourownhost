@@ -8,17 +8,12 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/utils/pointer"
 	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
 	"sigs.k8s.io/cluster-api/util"
 )
@@ -28,36 +23,23 @@ import (
 var _ = Describe("When BYOH joins existing cluster [Cluster-Class]", func() {
 
 	var (
-		ctx                 context.Context
-		specName            = "quick-start"
-		namespace           *corev1.Namespace
-		clusterName         string
-		cancelWatches       context.CancelFunc
-		clusterResources    *clusterctl.ApplyClusterTemplateAndWaitResult
-		dockerClient        *client.Client
-		err                 error
-		byohostContainerIDs []string
-		agentLogFile1       = fmt.Sprintf("/tmp/host-agent1-%s.log", util.RandomString(6))
-		agentLogFile2       = fmt.Sprintf("/tmp/host-agent2-%s.log", util.RandomString(6))
-		byoHostName1        = fmt.Sprintf("byohost1-%s", util.RandomString(6))
-		byoHostName2        = fmt.Sprintf("byohost2-%s", util.RandomString(6))
+		ctx              context.Context
+		specName         = "quick-start"
+		namespace        *corev1.Namespace
+		clusterName      string
+		cancelWatches    context.CancelFunc
+		clusterResources *clusterctl.ApplyClusterTemplateAndWaitResult
+		dockerClient     *client.Client
+		err              error
+		hosts            []byoHostHandle
+		agentLogFile1    string
+		agentLogFile2    string
+		byoHostName1     string
+		byoHostName2     string
 	)
 
 	BeforeEach(func() {
-
-		ctx = context.TODO()
-		Expect(ctx).NotTo(BeNil(), "ctx is required for %s spec", specName)
-
-		Expect(e2eConfig).NotTo(BeNil(), "Invalid argument. e2eConfig can't be nil when calling %s spec", specName)
-		Expect(clusterctlConfigPath).To(BeAnExistingFile(), "Invalid argument. clusterctlConfigPath must be an existing file when calling %s spec", specName)
-		Expect(bootstrapClusterProxy).NotTo(BeNil(), "Invalid argument. bootstrapClusterProxy can't be nil when calling %s spec", specName)
-		Expect(os.MkdirAll(artifactFolder, 0755)).To(Succeed(), "Invalid argument. artifactFolder can't be created for %s spec", specName)
-
-		Expect(e2eConfig.Variables).To(HaveKey(KubernetesVersion))
-
-		// set up a Namespace where to host objects for this spec and create a watcher for the namespace events.
-		namespace, cancelWatches = setupSpecNamespace(ctx, specName, bootstrapClusterProxy, artifactFolder)
-		clusterResources = new(clusterctl.ApplyClusterTemplateAndWaitResult)
+		ctx, namespace, cancelWatches, clusterResources = commonSpecSetup(specName)
 	})
 
 	It("Should create a workload cluster with single BYOH host", func() {
@@ -66,65 +48,16 @@ var _ = Describe("When BYOH joins existing cluster [Cluster-Class]", func() {
 		dockerClient, err = client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 		Expect(err).NotTo(HaveOccurred())
 
-		runner := ByoHostRunner{
-			Context:               ctx,
-			clusterConName:        clusterConName,
-			Namespace:             namespace.Name,
-			PathToHostAgentBinary: pathToHostAgentBinary,
-			DockerClient:          dockerClient,
-			NetworkInterface:      dockerNetworkInterfaceKind,
-			bootstrapClusterProxy: bootstrapClusterProxy,
-			CommandArgs: map[string]string{
-				agentFlagBootstrapKubeconfig: bootstrapConfPath,
-				agentFlagNamespace:           namespace.Name,
-				agentFlagVerbosity:           "1",
-			},
+		hosts, err = spinUpByoHosts(ctx, dockerClient, namespace.Name, 2)
+		Expect(err).NotTo(HaveOccurred())
+		for _, host := range hosts {
+			defer host.StopLog()
 		}
+		byoHostName1, agentLogFile1 = hosts[0].Name, hosts[0].LogFilePath
+		byoHostName2, agentLogFile2 = hosts[1].Name, hosts[1].LogFilePath
 
-		var output types.HijackedResponse
-		runner.ByoHostName = byoHostName1
-		runner.BootstrapKubeconfigData = generateBootstrapKubeconfig(runner.Context, bootstrapClusterProxy, clusterConName)
-		byohost, err := runner.SetupByoDockerHost()
-		Expect(err).NotTo(HaveOccurred())
-		output, byohostContainerID, err := runner.ExecByoDockerHost(byohost)
-		Expect(err).NotTo(HaveOccurred())
-		defer output.Close()
-		byohostContainerIDs = append(byohostContainerIDs, byohostContainerID)
-		f := WriteDockerLog(output, agentLogFile1)
-		defer closeLogFile(f, agentLogFile1)
-
-		runner.ByoHostName = byoHostName2
-		runner.BootstrapKubeconfigData = generateBootstrapKubeconfig(runner.Context, bootstrapClusterProxy, clusterConName)
-		byohost, err = runner.SetupByoDockerHost()
-		Expect(err).NotTo(HaveOccurred())
-		output, byohostContainerID, err = runner.ExecByoDockerHost(byohost)
-		Expect(err).NotTo(HaveOccurred())
-		defer output.Close()
-		byohostContainerIDs = append(byohostContainerIDs, byohostContainerID)
-
-		// read the log of host agent container in backend, and write it
-		f = WriteDockerLog(output, agentLogFile2)
-		defer closeLogFile(f, agentLogFile2)
-
-		setControlPlaneIP(context.Background(), dockerClient)
-		clusterctl.ApplyClusterTemplateAndWait(ctx, clusterctl.ApplyClusterTemplateAndWaitInput{
-			ClusterProxy: bootstrapClusterProxy,
-			ConfigCluster: clusterctl.ConfigClusterInput{
-				LogFolder:                filepath.Join(artifactFolder, "clusters", bootstrapClusterProxy.GetName()),
-				ClusterctlConfigPath:     clusterctlConfigPath,
-				KubeconfigPath:           bootstrapClusterProxy.GetKubeconfigPath(),
-				InfrastructureProvider:   clusterctl.DefaultInfrastructureProvider,
-				Flavor:                   "topology",
-				Namespace:                namespace.Name,
-				ClusterName:              clusterName,
-				KubernetesVersion:        e2eConfig.GetVariable(KubernetesVersion),
-				ControlPlaneMachineCount: pointer.Int64(1),
-				WorkerMachineCount:       pointer.Int64(1),
-			},
-			WaitForClusterIntervals:      e2eConfig.GetIntervals(specName, "wait-cluster"),
-			WaitForControlPlaneIntervals: e2eConfig.GetIntervals(specName, "wait-control-plane"),
-			WaitForMachineDeployments:    e2eConfig.GetIntervals(specName, "wait-worker-nodes"),
-		}, clusterResources)
+		setControlPlaneIP(ctx, dockerClient)
+		applyClusterAndWait(ctx, namespace.Name, clusterName, specName, e2eConfig.GetVariableOrEmpty(KubernetesVersion), "topology", 1, 1, clusterResources)
 
 		By("Checking the ByoHost conditions reflect a successful join")
 		for _, byoHostName := range []string{byoHostName1, byoHostName2} {
@@ -146,34 +79,6 @@ var _ = Describe("When BYOH joins existing cluster [Cluster-Class]", func() {
 		// Dumps all the resources in the spec namespace, then cleanups the cluster object and the spec namespace itself.
 		dumpSpecResourcesAndCleanup(ctx, specName, bootstrapClusterProxy, artifactFolder, namespace, cancelWatches, clusterResources.Cluster, e2eConfig.GetIntervals, skipCleanup)
 
-		if dockerClient != nil && len(byohostContainerIDs) != 0 {
-			for _, byohostContainerID := range byohostContainerIDs {
-				err := dockerClient.ContainerStop(ctx, byohostContainerID, container.StopOptions{})
-				Expect(err).NotTo(HaveOccurred())
-
-				err = dockerClient.ContainerRemove(ctx, byohostContainerID, types.ContainerRemoveOptions{})
-				Expect(err).NotTo(HaveOccurred())
-			}
-		}
-
-		err := os.Remove(agentLogFile1)
-		if err != nil {
-			Showf("error removing file %s: %v", agentLogFile1, err)
-		}
-
-		err = os.Remove(agentLogFile2)
-		if err != nil {
-			Showf("error removing file %s: %v", agentLogFile2, err)
-		}
-
-		err = os.Remove(ReadByohControllerManagerLogShellFile)
-		if err != nil {
-			Showf("error removing file %s: %v", ReadByohControllerManagerLogShellFile, err)
-		}
-
-		err = os.Remove(ReadAllPodsShellFile)
-		if err != nil {
-			Showf("error removing file %s: %v", ReadAllPodsShellFile, err)
-		}
+		teardownByoHosts(ctx, dockerClient, hosts)
 	})
 })

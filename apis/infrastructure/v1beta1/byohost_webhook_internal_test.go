@@ -1,10 +1,10 @@
 // Copyright 2022 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package v1beta1
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -34,23 +34,21 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 	schema := runtime.NewScheme()
 	err := AddToScheme(schema)
 	Expect(err).NotTo(HaveOccurred())
-	decoder, _ := admission.NewDecoder(schema)
+	decoder := admission.NewDecoder(schema)
 	byoMachine := &ByoMachine{
 		ObjectMeta: metav1.ObjectMeta{Name: "byomachine1", Namespace: DefaultNamespace},
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(schema).WithObjects(byoMachine).Build()
 	v := &ByoHostValidator{
 		Client:  fakeClient,
-		decoder: decoder,
+		Decoder: decoder,
 	}
 	Context("When ByoHost gets a create request", func() {
 		var (
 			byoHost    *ByoHost
 			byoHostRaw []byte
-			ctx        context.Context
 		)
 		BeforeEach(func() {
-			ctx = context.TODO()
 			byoHost = &ByoHost{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       testByoHostKind,
@@ -65,7 +63,7 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 			byoHostRaw, err = json.Marshal(byoHost)
 			Expect(err).ShouldNot(HaveOccurred())
 		})
-		It("Should reject create request from invalid user", func() {
+		It("Should reject create request from invalid user", func(ctx SpecContext) {
 			Skip("feature not implemented yet")
 			admissionRequest := admissionv1.AdmissionRequest{
 				Operation: admissionv1.Create,
@@ -77,9 +75,9 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 			}
 			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
 			Expect(resp.AdmissionResponse.Allowed).To(Equal(false))
-			Expect(string(resp.AdmissionResponse.Result.Reason)).To(Equal(fmt.Sprintf("%s is not a valid agent username", unauthorizedUser)))
+			Expect(resp.AdmissionResponse.Result.Message).To(Equal(fmt.Sprintf("%s is not a valid agent username", unauthorizedUser)))
 		})
-		It("Should reject request from another agent user in the group", func() {
+		It("Should reject request from another agent user in the group", func(ctx SpecContext) {
 			Skip("feature not implemented yet")
 			admissionRequest := admissionv1.AdmissionRequest{
 				Operation: admissionv1.Create,
@@ -91,9 +89,9 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 			}
 			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
 			Expect(resp.AdmissionResponse.Allowed).To(Equal(false))
-			Expect(string(resp.AdmissionResponse.Result.Reason)).To(Equal(fmt.Sprintf("%s cannot create/update resource %s", byohHostTwoUser, defaultHostName)))
+			Expect(resp.AdmissionResponse.Result.Message).To(Equal(fmt.Sprintf("%s cannot create/update resource %s", byohHostTwoUser, defaultHostName)))
 		})
-		It("Should allow request from the valid agent user", func() {
+		It("Should allow request from the valid agent user", func(ctx SpecContext) {
 			admissionRequest := admissionv1.AdmissionRequest{
 				Operation: admissionv1.Create,
 				UserInfo:  v1.UserInfo{Username: byohHostOneUser},
@@ -111,10 +109,8 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 		var (
 			byoHost    *ByoHost
 			byoHostRaw []byte
-			ctx        context.Context
 		)
 		BeforeEach(func() {
-			ctx = context.TODO()
 			byoHost = &ByoHost{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       testByoHostKind,
@@ -129,7 +125,7 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 			byoHostRaw, err = json.Marshal(byoHost)
 			Expect(err).ShouldNot(HaveOccurred())
 		})
-		It("Should reject update request from invalid user", func() {
+		It("Should reject update request from invalid user", func(ctx SpecContext) {
 			admissionRequest := admissionv1.AdmissionRequest{
 				Operation: admissionv1.Update,
 				UserInfo:  v1.UserInfo{Username: unauthorizedUser},
@@ -140,9 +136,9 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 			}
 			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
 			Expect(resp.AdmissionResponse.Allowed).To(Equal(false))
-			Expect(string(resp.AdmissionResponse.Result.Reason)).To(Equal(fmt.Sprintf("%s is not a valid agent username", unauthorizedUser)))
+			Expect(resp.AdmissionResponse.Result.Message).To(Equal(fmt.Sprintf("%s is not a valid agent username", unauthorizedUser)))
 		})
-		It("Should allow update request from manager", func() {
+		It("Should allow update request from manager", func(ctx SpecContext) {
 			admissionRequest := admissionv1.AdmissionRequest{
 				Operation: admissionv1.Update,
 				UserInfo:  v1.UserInfo{Username: byohSystemManagerServiceAccount},
@@ -154,7 +150,7 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
 			Expect(resp.AdmissionResponse.Allowed).To(Equal(true))
 		})
-		It("Should allow update request from email-like user", func() {
+		It("Should allow update request from email-like user", func(ctx SpecContext) {
 			admissionRequest := admissionv1.AdmissionRequest{
 				Operation: admissionv1.Update,
 				UserInfo:  v1.UserInfo{Username: "user@example.com"},
@@ -166,7 +162,7 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
 			Expect(resp.AdmissionResponse.Allowed).To(Equal(true))
 		})
-		It("should reject the update request from users who are not like email", func() {
+		It("should reject the update request from users who are not like email", func(ctx SpecContext) {
 			admissionRequest := admissionv1.AdmissionRequest{
 				Operation: admissionv1.Update,
 				UserInfo:  v1.UserInfo{Username: unauthorizedUser},
@@ -177,10 +173,10 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 			}
 			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
 			Expect(resp.AdmissionResponse.Allowed).To(Equal(false))
-			Expect(string(resp.AdmissionResponse.Result.Reason)).To(Equal(fmt.Sprintf("%s is not a valid agent username", unauthorizedUser)))
+			Expect(resp.AdmissionResponse.Result.Message).To(Equal(fmt.Sprintf("%s is not a valid agent username", unauthorizedUser)))
 		})
 
-		It("Should reject request from another agent user in the group", func() {
+		It("Should reject request from another agent user in the group", func(ctx SpecContext) {
 			Skip("feature not implemented yet")
 			admissionRequest := admissionv1.AdmissionRequest{
 				Operation: admissionv1.Update,
@@ -192,9 +188,9 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 			}
 			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
 			Expect(resp.AdmissionResponse.Allowed).To(Equal(false))
-			Expect(string(resp.AdmissionResponse.Result.Reason)).To(Equal(fmt.Sprintf("%s cannot create/update resource %s", byohHostTwoUser, defaultHostName)))
+			Expect(resp.AdmissionResponse.Result.Message).To(Equal(fmt.Sprintf("%s cannot create/update resource %s", byohHostTwoUser, defaultHostName)))
 		})
-		It("Should allow request from the valid agent user", func() {
+		It("Should allow request from the valid agent user", func(ctx SpecContext) {
 			admissionRequest := admissionv1.AdmissionRequest{
 				Operation: admissionv1.Update,
 				UserInfo:  v1.UserInfo{Username: byohHostOneUser},
@@ -211,10 +207,8 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 		var (
 			byoHost    *ByoHost
 			byoHostRaw []byte
-			ctx        context.Context
 		)
 		BeforeEach(func() {
-			ctx = context.TODO()
 			byoHost = &ByoHost{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       testByoHostKind,
@@ -229,7 +223,7 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 			byoHostRaw, err = json.Marshal(byoHost)
 			Expect(err).ShouldNot(HaveOccurred())
 		})
-		It("Should allow delete request from any user", func() {
+		It("Should allow delete request from any user", func(ctx SpecContext) {
 			admissionRequest := admissionv1.AdmissionRequest{
 				Operation: admissionv1.Delete,
 				UserInfo:  v1.UserInfo{Username: "random-user"},
@@ -241,7 +235,7 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
 			Expect(resp.AdmissionResponse.Allowed).To(Equal(true))
 		})
-		It("Should reject delete request if status.MachineRef is not nil", func() {
+		It("Should reject delete request if status.MachineRef is not nil", func(ctx SpecContext) {
 			byoHost.Status.MachineRef = &corev1.ObjectReference{
 				Kind:       "ByoMachine",
 				Namespace:  DefaultNamespace,
@@ -260,7 +254,7 @@ var _ = Describe("ByohostWebhook/Unit", func() {
 			}
 			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
 			Expect(resp.AdmissionResponse.Allowed).To(Equal(false))
-			Expect(string(resp.AdmissionResponse.Result.Reason)).To(Equal("cannot delete ByoHost when MachineRef is assigned"))
+			Expect(resp.AdmissionResponse.Result.Message).To(Equal("cannot delete ByoHost when MachineRef is assigned"))
 		})
 	})
 })
@@ -269,10 +263,9 @@ func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 	scheme := runtime.NewScheme()
 	err := AddToScheme(scheme)
 	require.NoError(t, err)
-	decoder, err := admission.NewDecoder(scheme)
-	require.NoError(t, err)
+	decoder := admission.NewDecoder(scheme)
 
-	v := &ByoHostValidator{decoder: decoder}
+	v := &ByoHostValidator{Decoder: decoder}
 
 	testCases := []struct {
 		name      string
@@ -355,7 +348,7 @@ func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 
 			require.Equal(t, tc.wantAllow, resp.Allowed)
 			if !tc.wantAllow {
-				require.Equal(t, tc.wantMsg, string(resp.Result.Reason))
+				require.Equal(t, tc.wantMsg, resp.Result.Message)
 			}
 		})
 	}

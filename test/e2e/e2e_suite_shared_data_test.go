@@ -27,6 +27,8 @@ func TestParseSharedSuiteData(t *testing.T) {
 				pathToHostAgentBinary:           "/tmp/agent-binary/byoh-hostagent",
 				pathToByohctlBinary:             "/tmp/byohctl-binary/byohctl",
 				byohAgentBundleURLForContainers: "byohctl-e2e-agent-bundle-registry:5000/agent:e2e",
+				bundleRepoForContainers:         "byohctl-e2e-agent-bundle-registry:5000",
+				bundleRepoInsecureForContainers: true,
 			},
 		},
 		{

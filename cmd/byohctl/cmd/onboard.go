@@ -1,3 +1,6 @@
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 // cmd/byohctl/cmd/onboard.go
 package cmd
 
@@ -5,7 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -93,16 +96,134 @@ func AddOnboardFlags(cmd *cobra.Command,
 	_ = cmd.Flags().MarkHidden("namespace")
 }
 
-// Check if running on Ubuntu
-func isUbuntuSystem() bool {
-	if runtime.GOOS != "linux" {
-		return false
+// osReadFile is a variable so tests can replace it with a mock, same pattern as execCommand in
+// cmd/byohctl/service/agent.go.
+var osReadFile = os.ReadFile
+
+// supportedUbuntuVersions lists the Ubuntu VERSION_ID values a host may run. It is dictated by
+// which byoh-bundles actually get published: keep it in sync with the UBUNTU_VERSION case arms in
+// .ci/build-push-bundle.sh, which TestSupportedUbuntuVersionsMatchBundleScript enforces.
+// Onboarding a host outside this set succeeds but leaves it unable to install Kubernetes, so the
+// failure only surfaces much later, during cluster provisioning.
+var supportedUbuntuVersions = []string{"20.04", "22.04", "24.04"}
+
+// osReleasePaths are searched in order. /usr/lib/os-release is the fallback for stateless
+// systems, matching agent/registration/host_registrar.go's getOperatingSystem.
+var osReleasePaths = []string{"/etc/os-release", "/usr/lib/os-release"}
+
+// UnsupportedOSError reports that the host's OS was identified but is not one the agent supports.
+// Typed so callers and tests can match it with errors.As instead of matching on message text.
+type UnsupportedOSError struct {
+	// Detected is how the host describes itself, e.g. "Ubuntu 18.04.6 LTS".
+	Detected string
+}
+
+func (e *UnsupportedOSError) Error() string {
+	return fmt.Sprintf("%s is not supported for onboarding; supported versions are Ubuntu %s",
+		e.Detected, strings.Join(supportedUbuntuVersions, ", "))
+}
+
+// OSDetectionError reports that the host's OS could not be identified at all: os-release is
+// missing, unreadable, or lacks the fields the check needs. Distinct from UnsupportedOSError
+// because the host may well be supportable -- we just can't tell.
+type OSDetectionError struct {
+	// Reason names the part of the identification that failed.
+	Reason string
+}
+
+func (e *OSDetectionError) Error() string {
+	return fmt.Sprintf("could not identify this host's OS: %s", e.Reason)
+}
+
+// checkSupportedPlatform reports why this host cannot run the BYOH agent, or nil if it can.
+// Errors are *UnsupportedOSError or *OSDetectionError.
+//
+// There is deliberately no architecture check: byohctl is built for both amd64 and arm64, and
+// gating on arch would block running the tooling on an arm64 machine for no gain here.
+func checkSupportedPlatform() error {
+	data, err := readOSRelease()
+	if err != nil {
+		return err
 	}
-	data, err := os.ReadFile("/etc/os-release")
+	osRelease := parseOSRelease(data)
+
+	// Report the distro the way the host describes itself; ID alone ("pop") is unhelpful.
+	described := osRelease["PRETTY_NAME"]
+	if described == "" {
+		described = osRelease["ID"]
+	}
+	if described == "" {
+		described = "unknown"
+	}
+
+	// ID, not ID_LIKE: Ubuntu derivatives are not what the bundles are built and tested against.
+	if osRelease["ID"] != "ubuntu" {
+		return &UnsupportedOSError{Detected: described}
+	}
+
+	version := osRelease["VERSION_ID"]
+	if version == "" {
+		return &OSDetectionError{Reason: "no VERSION_ID in " + strings.Join(osReleasePaths, " or ")}
+	}
+	// Ubuntu point releases keep the series in VERSION_ID (22.04.5 LTS reports "22.04"), so an
+	// exact match is right here.
+	if !slices.Contains(supportedUbuntuVersions, version) {
+		return &UnsupportedOSError{Detected: described}
+	}
+
+	return nil
+}
+
+// readOSRelease returns the contents of the first readable path in osReleasePaths. On a non-Linux
+// host (byohctl also builds for macOS) no such file exists, so this is what rejects it.
+func readOSRelease() ([]byte, error) {
+	for _, path := range osReleasePaths {
+		data, err := osReadFile(path)
+		if err == nil {
+			return data, nil
+		}
+	}
+	return nil, &OSDetectionError{Reason: "no readable " + strings.Join(osReleasePaths, " or ")}
+}
+
+// parseOSRelease turns os-release contents into its KEY=VALUE pairs, unquoting values.
+// Split out from checkSupportedPlatform so the parsing is unit-testable on its own, same as
+// parseNTPSynchronized below.
+func parseOSRelease(data []byte) map[string]string {
+	values := make(map[string]string)
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+		values[strings.TrimSpace(key)] = strings.Trim(strings.TrimSpace(value), `"'`)
+	}
+	return values
+}
+
+// runCommandWithStdout is a variable so tests can replace it with a mock,
+// same pattern as execCommand in cmd/byohctl/service/agent.go.
+var runCommandWithStdout = service.RunWithStdout
+
+// isNTPSynchronized is best-effort -- the caller only warns, never blocks.
+func isNTPSynchronized() bool {
+	out, err := runCommandWithStdout("timedatectl", "show", "-p", "NTPSynchronized", "--value")
 	if err != nil {
 		return false
 	}
-	return strings.Contains(string(data), "Ubuntu")
+	return parseNTPSynchronized(out)
+}
+
+// parseNTPSynchronized interprets the output of
+// `timedatectl show -p NTPSynchronized --value`, which prints exactly "yes"
+// or "no". Split out from isNTPSynchronized so this logic is unit-testable
+// without mocking exec.Command across the cmd/service package boundary.
+func parseNTPSynchronized(output string) bool {
+	return strings.TrimSpace(output) == "yes"
 }
 
 type OnboardConfig struct {
@@ -114,6 +235,7 @@ type OnboardConfig struct {
 	Tenant      string `yaml:"tenant"`
 	Verbosity   string `yaml:"verbosity"`
 	Region      string `yaml:"region"`
+	Insecure    bool   `yaml:"insecure"`
 }
 
 func LoadOnboardConfig(path string) (*OnboardConfig, error) {
@@ -134,6 +256,15 @@ func writeBootstrapCredential(byohDir, bootstrapKubeconfigPath, namespace string
 	data, err := os.ReadFile(bootstrapKubeconfigPath)
 	if err != nil {
 		return fmt.Errorf("failed to read bootstrap kubeconfig %s: %w", bootstrapKubeconfigPath, err)
+	}
+	// The agent copies this stanza's TLS settings into the kubeconfig it generates after the
+	// bootstrap-token-to-certificate exchange (agent/registration/csr.go), so recording
+	// --insecure here is what makes it stick for the life of the host.
+	if insecure {
+		data, err = client.MakeKubeconfigInsecure(data)
+		if err != nil {
+			return fmt.Errorf("failed to apply --insecure to bootstrap kubeconfig: %w", err)
+		}
 	}
 	if err := os.MkdirAll(bootstrapAgentConfDir, service.DefaultDirPerms); err != nil {
 		return fmt.Errorf("failed to create %s: %w", bootstrapAgentConfDir, err)
@@ -175,6 +306,11 @@ func mergeConfigWithFlags(cfg *OnboardConfig) {
 	if regionName == "" {
 		regionName = cfg.Region
 	}
+	// Boolean, so there is no "unset" sentinel to compare against: the flag can only turn
+	// this on, never off, matching how the string flags above take precedence.
+	if cfg.Insecure {
+		insecure = true
+	}
 }
 
 func runOnboard(cmd *cobra.Command, args []string) {
@@ -213,10 +349,19 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	utils.LogDebug("Final onboarding values: url=%s, username=%s, domain=%s, tenant=%s, region=%s, verbosity=%s",
 		fqdn, username, domain, tenant, regionName, verbosity)
 
-	// Check if running on Ubuntu system
-	if !isUbuntuSystem() {
-		fmt.Println("Error: This command requires an Ubuntu system")
+	// Gate on OS and architecture before touching the host or contacting Platform9, so an
+	// unsupported host exits having changed nothing.
+	if err := checkSupportedPlatform(); err != nil {
+		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Advisory only -- not required for correctness, see isNTPSynchronized.
+	if !isNTPSynchronized() {
+		fmt.Println("Warning: this host's clock does not appear to be NTP-synchronized.")
+		fmt.Println("         This won't block onboarding, but an out-of-sync clock can cause")
+		fmt.Println("         confusing log timestamps and TLS certificate validity errors.")
+		fmt.Println("         Consider enabling time sync, e.g.: sudo timedatectl set-ntp true")
 	}
 
 	// Continue with interactive password if needed
@@ -291,14 +436,14 @@ func runOnboard(cmd *cobra.Command, args []string) {
 		utils.LogDebug("Using FQDN: %s, Domain: %s, Tenant: %s", fqdn, domain, tenant)
 
 		utils.LogDebug("Getting authentication token for user %s", username)
-		authClient := client.NewAuthClient(fqdn, clientToken)
+		authClient := client.NewAuthClient(fqdn, clientToken, insecure)
 		token, err := authClient.GetToken(username, password)
 		if err != nil {
 			utils.LogError("Failed to get authentication token: %v", err)
 			os.Exit(1)
 		}
 
-		k8sClient := client.NewK8sClient(fqdn, domain, tenant, token, regionName)
+		k8sClient := client.NewK8sClient(fqdn, domain, tenant, token, regionName, insecure)
 
 		utils.LogInfo("Saving kubeconfig from bootstrap secret")
 		if err := k8sClient.SaveKubeConfig("byoh-bootstrap-kc"); err != nil {
@@ -308,7 +453,7 @@ func runOnboard(cmd *cobra.Command, args []string) {
 
 		// Check if region where user wants to onboard to is available for this tenant or not
 		// If not available, roll back the onboarding process
-		available, regions, err := k8sClient.CheckRegionAvailability(regionName)
+		available, regions, err := k8sClient.CheckRegionAvailability(cmd.Context(), regionName)
 		if err != nil {
 			utils.LogError("Failed to check region availability, rolling back onboarding process: %v", err)
 			if err := k8sClient.DeleteSavedKubeconfig(); err != nil {

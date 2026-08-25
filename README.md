@@ -43,6 +43,8 @@ __BYOH__ is a Cluster API Infrastructure Provider for already-provisioned hosts 
 ## Getting Started
 Check out the [getting_started](https://github.com/platform9/cluster-api-provider-bringyourownhost/blob/main/docs/getting_started.md) guide for launching a BYOH workload cluster
 
+For an IPv6 or dual-stack control-plane endpoint, see [IPv6 and dual-stack support](./docs/ipv6_support.md).
+
 ## Community, discussion, contribution, and support
 
 BYOH was originally created by the [VMware Tanzu](https://github.com/vmware-tanzu/cluster-api-provider-bringyourownhost) team as a Cluster API sub-project. It has since been adopted by [Platform9](https://platform9.com), who now maintains this fork.
@@ -98,7 +100,7 @@ If someone wants to implement their own installer controller then they need to f
 
 ## Compatibility with Cluster API
 
-- BYOH is currently compatible wth Cluster API v1beta1 (v1.0)
+- BYOH is currently compatible with Cluster API v1beta1, built/tested against Cluster API v1.10.10
 
 ## Supported OS and Kubernetes versions
 | Operating System  | Architecture  | Kubernetes v1.31 - v1.35 |

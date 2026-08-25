@@ -124,8 +124,10 @@ vet: ## Run go vet against code.
 	GOOS=linux go vet ./...
 
 GOLANGCI_LINT = $(shell pwd)/bin/golangci-lint
+# Scope the cache to this checkout — golangci-lint's default cache is shared machine-wide, which cross-contaminates concurrent runs across worktrees.
+GOLANGCI_LINT_CACHE = $(shell pwd)/bin/golangci-lint-cache
 lint: golangci-lint
-	${GOLANGCI_LINT} run
+	GOLANGCI_LINT_CACHE=$(GOLANGCI_LINT_CACHE) ${GOLANGCI_LINT} run
 golangci-lint:
 	$(call go-get-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2)
 
@@ -248,13 +250,13 @@ cmd-test: ## Run cmd/byohctl tests (separate Go module)
 	cd cmd && go test ./...
 
 agent-test: $(GINKGO) prepare-byoh-docker-host-image ## Run agent tests
-	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; CGO_ENABLED=0 $(GINKGO) --randomize-all -r $(HOST_AGENT_DIR) --coverprofile cover.out
+	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; CGO_ENABLED=0 $(GINKGO) --randomize-all -r --coverprofile cover.out $(HOST_AGENT_DIR)
 
 controller-test: $(GINKGO) ## Run controller tests
-	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; $(GINKGO) --randomize-all controllers/infrastructure --coverprofile cover.out --vv
+	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; $(GINKGO) --randomize-all --coverprofile cover.out --vv controllers/infrastructure
 
 webhook-test: $(GINKGO) ## Run webhook tests
-	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; $(GINKGO) apis/infrastructure/v1beta1 --coverprofile cover.out
+	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; $(GINKGO) --coverprofile cover.out apis/infrastructure/v1beta1
 
 test-e2e: take-user-input docker-build prepare-byoh-docker-host-image $(GINKGO) cluster-templates-e2e ## Run the end-to-end tests
 	$(GINKGO) -v -trace -tags=e2e -focus="$(GINKGO_FOCUS)" $(_SKIP_ARGS) -nodes=$(GINKGO_NODES) --noColor=$(GINKGO_NOCOLOR) $(GINKGO_ARGS) test/e2e -- \
@@ -288,6 +290,7 @@ linux-vm-image: ## Build the Linux container image used by the *-linux-vm target
 		-e LINUX_VM=1 \
 		-e GINKGO_FOCUS -e GINKGO_SKIP -e GINKGO_NODES -e SKIP_RESOURCE_CLEANUP -e USE_EXISTING_CLUSTER \
 		-e BYOH_AGENT_BUNDLE_URL \
+		-e E2E_OS_IMAGE -e E2E_K8S_VERSION_FROM -e E2E_K8S_VERSION_TO -e IP_FAMILY \
 		-w /workspace \
 		$(LINUX_VM_IMG) \
 		make $*
@@ -344,7 +347,7 @@ publish-infra-yaml:kustomize # Generate infrastructure-components.yaml for the p
 
 CONTROLLER_GEN = $(shell pwd)/bin/controller-gen
 controller-gen: ## Download controller-gen locally if necessary.
-	$(call go-get-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5)
+	$(call go-get-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen@v0.21.0)
 
 KUSTOMIZE = $(shell pwd)/bin/kustomize
 kustomize: ## Download kustomize locally if necessary.
@@ -425,12 +428,17 @@ $(PF9_BYOHOST_SRCDIR):
 	mkdir -p $@
 
 AGENT_SRC_DIR := $(REPO_ROOT)
+BYOHCTL_DIR := $(REPO_ROOT)/cmd/byohctl
 RPM_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/rpmsrc
 DEB_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/debsrc
+
+# See docs/proposals/pf9-byohost-deb-arch-support-adr.md (§2) for why this defaults to
+# HELM_ARCH rather than a hardcoded amd64.
+PACKAGE_GOARCH ?= $(HELM_ARCH)
 COMMON_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/common
 PF9_BYOHOST_DEB_FILE := $(PF9_BYOHOST_SRCDIR)/debsrc/pf9-byohost-agent.deb
 RPMBUILD_DIR := $(PF9_BYOHOST_SRCDIR)/rpmbuild
-PF9_BYOHOST_RPM_FILE := $(RPMBUILD_DIR)/RPMS/$(shell uname -m)/pf9-byohost-1.0-$(BUILDNUM).git$(GITHASH).$(shell uname -m).rpm
+PF9_BYOHOST_RPM_FILE := $(RPMBUILD_DIR)/RPMS/$(HELM_ARCH_RAW)/pf9-byohost-1.0-$(BUILDNUM).git$(GITHASH).$(HELM_ARCH_RAW).rpm
 
 $(RPM_SRC_ROOT): | $(COMMON_SRC_ROOT)
 	echo "make RPM_SRC_ROOT: $(RPM_SRC_ROOT)"
@@ -451,15 +459,26 @@ build-host-agent-rpm:  $(PF9_BYOHOST_RPM_FILE)
 	echo "make agent-rpm pf9_byohost_rpm_file = $(PF9_BYOHOST_RPM_FILE)"
 
 #########################################################################
-$(COMMON_SRC_ROOT): build-host-agent-binary
+# Independent of build-host-agent-binary/RELEASE_DIR, which stay pinned to amd64 for the release artifact.
+# byohctl reuses the same PACKAGE_GOARCH so both binaries in the package always match one arch.
+build-byohctl-binary:
+	$(MAKE) -C $(BYOHCTL_DIR) build GOARCH=$(PACKAGE_GOARCH)
+
+$(COMMON_SRC_ROOT): build-byohctl-binary
 	echo "Building COMMON_SRC_ROOT"
 	mkdir -p $(COMMON_SRC_ROOT)
-	echo "BUILDING COMMON_SRC_ROOT/binary COPING binary pf9-byoh-hostagent-linux-amd64"
+	echo "BUILDING COMMON_SRC_ROOT/binary for GOARCH=$(PACKAGE_GOARCH)"
+	RELEASE_BINARY=./byoh-hostagent GOOS=linux GOARCH=$(PACKAGE_GOARCH) GOLDFLAGS="$(LDFLAGS) $(STATIC)" \
+	HOST_AGENT_DIR=./$(HOST_AGENT_DIR) $(MAKE) host-agent-binary
 	mkdir -p $(COMMON_SRC_ROOT)/binary
-	cp $(RELEASE_DIR)/byoh-hostagent-linux-amd64 $(COMMON_SRC_ROOT)/binary/pf9-byoh-hostagent-linux-amd64
+	cp bin/byoh-hostagent-linux-$(PACKAGE_GOARCH) $(COMMON_SRC_ROOT)/binary/pf9-byoh-hostagent
 	echo "BUILDING dir for pf9-byohost-service , COPING service pf9-byoh-agent.service "
 	mkdir -p $(COMMON_SRC_ROOT)/etc/systemd/system/
 	cp $(AGENT_SRC_DIR)/service/pf9-byohostagent.service $(COMMON_SRC_ROOT)/etc/systemd/system/pf9-byohost-agent.service
+	echo "BUILDING COMMON_SRC_ROOT/usr/bin COPING binary byohctl"
+	mkdir -p $(COMMON_SRC_ROOT)/usr/bin
+	cp $(BYOHCTL_DIR)/bin/byohctl $(COMMON_SRC_ROOT)/usr/bin/byohctl
+	chmod +x $(COMMON_SRC_ROOT)/usr/bin/byohctl
 
 $(DEB_SRC_ROOT): | $(COMMON_SRC_ROOT)
 	cp -a  $(COMMON_SRC_ROOT) $(DEB_SRC_ROOT)
@@ -467,7 +486,7 @@ $(DEB_SRC_ROOT): | $(COMMON_SRC_ROOT)
 $(PF9_BYOHOST_DEB_FILE): $(DEB_SRC_ROOT)
 	fpm -t deb -s dir -n pf9-byohost-agent \
 	 --description "Platform9 Bring Your Own Host deb package" \
-	 --license "Commercial" --architecture all --url "http://www.platform9.net" --vendor Platform9 \
+	 --license "Commercial" --architecture $(PACKAGE_GOARCH) --url "http://www.platform9.net" --vendor Platform9 \
 	 -d socat -d ethtool -d ebtables -d conntrack \
 	 --after-install $(AGENT_SRC_DIR)/scripts/pf9-byohost-agent-after-install.sh \
 	 --before-remove $(AGENT_SRC_DIR)/scripts/pf9-byohost-agent-before-remove.sh \
