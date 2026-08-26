@@ -28,7 +28,7 @@ This command will:
 
 func init() {
 	rootCmd.AddCommand(decommissionCmd)
-	decommissionCmd.Flags().StringVarP(&verbosity, "verbosity", "v", "minimal", "Log verbosity level (all, important, minimal, critical, none)")
+	decommissionCmd.Flags().StringVarP(&verbosity, "verbosity", "v", "minimal", "Log verbosity level. Requires one of: all, important, minimal, critical.\nOmitting the flag will show minimal verbosity")
 }
 
 func runDecommission(cmd *cobra.Command, args []string) {
