@@ -62,9 +62,11 @@
 
 ### What we are doing wrong -
 
-1. The downloaded SA-token based kubeconfig should be used as the --bootstrap-kubeconfig and we should not store it at `~/.byoh/config`
+1. We should not use SA-token based (long lived) kubeconfig.
+2. If we do use it then - we should not store it at `~/.byoh/config` (~/.byoh/config should be cert based kubeconfig with rotation/revokation mechanism)
+3. **This repo already has BootstrapKubconfig CR + controller meant for the same. we should explore it and use it instead**.
 
-## Notes -
+## More Notes -
 
 1. dex token is never used to register host -
    its only used to download the already generated SA-token based kubeconfig in mgmt plane tenant ns.
