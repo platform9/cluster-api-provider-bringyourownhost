@@ -65,6 +65,12 @@ const (
 	// MaxK8sObjectNameLength is the longest name a namespaced object may have,
 	// an RFC 1123 subdomain.
 	MaxK8sObjectNameLength = 253
+
+	// HostCommonNamePrefix precedes the host name in the common name of a
+	// host's client certificate. The agent builds the common name it asks for
+	// and the approver rebuilds the one it will allow, so both sides derive it
+	// from this prefix rather than from a literal of their own.
+	HostCommonNamePrefix = "byoh:host:"
 )
 
 // ByoHostEnrollmentSpec defines the desired state of ByoHostEnrollment.
