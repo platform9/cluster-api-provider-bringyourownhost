@@ -56,6 +56,10 @@ var (
 	agentCfg     *rest.Config
 )
 
+// errAttemptFailed stands in for whatever made a bootstrap attempt fail, so
+// the retry test does not care which failure it was.
+var errAttemptFailed = errors.New("attempt failed")
+
 // errAddRunnable is the failure failingManager injects, so a test can assert
 // setupHostReconciler wraps the underlying error rather than flattening it.
 var errAddRunnable = errors.New("cannot add runnable")
@@ -437,4 +441,97 @@ func TestNewManagerScopesCacheToThisHost(t *testing.T) {
 
 	require.Len(t, hosts.Items, 1)
 	assert.Equal(t, opts.hostName, hosts.Items[0].Name)
+}
+
+func TestNextDelay(t *testing.T) {
+	testCases := []struct {
+		name     string
+		current  time.Duration
+		maxDelay time.Duration
+		want     time.Duration
+	}{
+		{
+			name:     "doubles while below the cap",
+			current:  time.Second,
+			maxDelay: time.Minute,
+			want:     2 * time.Second,
+		},
+		{
+			name:     "clamps to the cap when doubling would overshoot",
+			current:  40 * time.Second,
+			maxDelay: time.Minute,
+			want:     time.Minute,
+		},
+		{
+			name:     "stays at the cap once reached",
+			current:  time.Minute,
+			maxDelay: time.Minute,
+			want:     time.Minute,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := nextDelay(tc.current, tc.maxDelay)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestRetryWithBackoff(t *testing.T) {
+	testCases := []struct {
+		name string
+		// failures is how many times the attempt fails before succeeding.
+		// A negative value means it never succeeds.
+		failures     int
+		cancelAfter  int
+		wantAttempts int
+		wantErr      error
+	}{
+		{
+			name:         "succeeds on the first attempt",
+			failures:     0,
+			wantAttempts: 1,
+		},
+		{
+			name:         "succeeds after a few failures",
+			failures:     3,
+			wantAttempts: 4,
+		},
+		{
+			name:         "gives up only when the context is done",
+			failures:     -1,
+			cancelAfter:  2,
+			wantAttempts: 2,
+			wantErr:      context.Canceled,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+
+			attempts := 0
+			attempt := func() error {
+				attempts++
+				if tc.cancelAfter > 0 && attempts >= tc.cancelAfter {
+					cancel()
+				}
+				if tc.failures < 0 || attempts <= tc.failures {
+					return errAttemptFailed
+				}
+				return nil
+			}
+
+			err := retryWithBackoff(ctx, logr.Discard(), time.Millisecond, 4*time.Millisecond, attempt)
+
+			if tc.wantErr != nil {
+				require.ErrorIs(t, err, tc.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tc.wantAttempts, attempts)
+		})
+	}
 }

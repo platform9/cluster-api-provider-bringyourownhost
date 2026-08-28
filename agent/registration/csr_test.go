@@ -5,6 +5,7 @@
 package registration_test
 
 import (
+	"context"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
@@ -16,7 +17,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/registration"
-	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/test/builder"
+	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	certv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -24,6 +25,54 @@ import (
 )
 
 const csrApprovedMsg = "approved"
+
+// hostCSR returns the single certificate signing request labeled for
+// hostName. The agent names each request with a random suffix, so a test can
+// no longer look one up by name.
+func hostCSR(ctx context.Context, hostName string) (*certv1.CertificateSigningRequest, error) {
+	list, err := k8sClientSet.CertificatesV1().CertificateSigningRequests().List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s", infrastructurev1beta1.HostCSRLabel, hostName),
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(list.Items) != 1 {
+		return nil, fmt.Errorf("expected exactly one certificate signing request for host %s, got %d", hostName, len(list.Items))
+	}
+	return &list.Items[0], nil
+}
+
+// approveAndIssue stands in for the ByoAdmission controller and the signer.
+// It gives up quietly on any error rather than failing a spec: the spec that
+// started it asserts the outcome, and this goroutine can still be running
+// after that spec ended and canceled the context it was given.
+func approveAndIssue(ctx context.Context, hostName, certData string) {
+	for ctx.Err() == nil {
+		time.Sleep(time.Millisecond * 100)
+		byohCSR, err := hostCSR(ctx, hostName)
+		if err != nil {
+			continue
+		}
+		byohCSR.Status.Conditions = append(byohCSR.Status.Conditions, certv1.CertificateSigningRequestCondition{
+			Type:    certv1.CertificateApproved,
+			Reason:  csrApprovedMsg,
+			Message: csrApprovedMsg,
+			Status:  corev1.ConditionTrue,
+		})
+		if _, err = k8sClientSet.CertificatesV1().CertificateSigningRequests().UpdateApproval(ctx, byohCSR.Name, byohCSR, metav1.UpdateOptions{}); err != nil {
+			return
+		}
+		byohCSR, err = hostCSR(ctx, hostName)
+		if err != nil {
+			return
+		}
+		byohCSR.Status.Certificate = []byte(certData)
+		if _, err = k8sClientSet.CertificatesV1().CertificateSigningRequests().UpdateStatus(ctx, byohCSR, metav1.UpdateOptions{}); err != nil {
+			return
+		}
+		return
+	}
+}
 
 var _ = Describe("CSR Registration", func() {
 	var (
@@ -104,10 +153,10 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 			Expect(err).ToNot(HaveOccurred())
 		})
 
-		It("should return error if hostname is invalid", func() {
+		It("should return error if hostname is invalid", func(ctx SpecContext) {
 			CSRRegistrar, err := registration.NewByohCSR(cfg, logr.Discard(), certExpiryDuration)
 			Expect(err).ShouldNot(HaveOccurred())
-			_, _, err = CSRRegistrar.RequestBYOHClientCert("")
+			_, _, err = CSRRegistrar.RequestBYOHClientCert(ctx, "")
 			Expect(err).To(MatchError("hostname is not valid"))
 		})
 		It("should return client config if bootstrap kubeconfig is valid", func() {
@@ -132,10 +181,11 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 		It("should create csr if bootstrap kubeconfig is valid", func(ctx SpecContext) {
 			CSRRegistrar, err := registration.NewByohCSR(cfg, logr.Discard(), certExpiryDuration)
 			Expect(err).ShouldNot(HaveOccurred())
-			_, _, err = CSRRegistrar.RequestBYOHClientCert(hostName)
+			_, _, err = CSRRegistrar.RequestBYOHClientCert(ctx, hostName)
 			Expect(err).NotTo(HaveOccurred())
-			ByohCSR, err := k8sClientSet.CertificatesV1().CertificateSigningRequests().Get(ctx, fmt.Sprintf(registration.ByohCSRNameFormat, hostName), metav1.GetOptions{})
+			ByohCSR, err := hostCSR(ctx, hostName)
 			Expect(err).ShouldNot(HaveOccurred())
+			Expect(ByohCSR.Name).To(HavePrefix(registration.ByohCSRNamePrefix + hostName))
 			// Validate k8s CSR resource
 			Expect(ByohCSR.Spec.SignerName).Should(Equal(certv1.KubeAPIServerClientSignerName))
 			Expect(ByohCSR.Spec.Usages).Should(Equal([]certv1.KeyUsage{certv1.UsageClientAuth}))
@@ -150,22 +200,6 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 
 			Expect(os.Remove(registration.TmpPrivateKey)).ShouldNot(HaveOccurred())
 		})
-		It("should fail creating CSR if the private key got changed", func(ctx SpecContext) {
-			byohCSR, err := builder.CertificateSigningRequest(
-				fmt.Sprintf(registration.ByohCSRNameFormat, hostName),
-				fmt.Sprintf(registration.ByohCSRCNFormat, hostName),
-				"byoh:hosts", 2048).Build()
-			Expect(err).NotTo(HaveOccurred())
-			_, err = k8sClientSet.CertificatesV1().CertificateSigningRequests().Create(ctx, byohCSR, metav1.CreateOptions{})
-			Expect(err).ShouldNot(HaveOccurred())
-			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
-			Expect(err).ShouldNot(HaveOccurred())
-			_, _, err = CSRRegistrar.RequestBYOHClientCert(hostName)
-			Expect(err).Should(HaveOccurred())
-			Expect(err.Error()).Should(ContainSubstring("retrieved csr is not compatible"))
-
-			Expect(os.Remove(registration.TmpPrivateKey)).ShouldNot(HaveOccurred())
-		})
 		It("should timeout if the CSR is not approved", func(ctx SpecContext) {
 			registration.CSRApprovalTimeout = time.Second * 5
 			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
@@ -176,30 +210,7 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 			Expect(os.Remove(registration.TmpPrivateKey)).ShouldNot(HaveOccurred())
 		})
 		It("should return error if not able to write kubeconfig", func(ctx SpecContext) {
-			// Simulate ByoAdmission Controller
-			go func() {
-				for {
-					time.Sleep(time.Millisecond * 100)
-					byohCSR, err := k8sClientSet.CertificatesV1().CertificateSigningRequests().Get(ctx, fmt.Sprintf(registration.ByohCSRNameFormat, hostName), metav1.GetOptions{})
-					if err != nil {
-						continue
-					}
-					byohCSR.Status.Conditions = append(byohCSR.Status.Conditions, certv1.CertificateSigningRequestCondition{
-						Type:    certv1.CertificateApproved,
-						Reason:  csrApprovedMsg,
-						Message: csrApprovedMsg,
-						Status:  corev1.ConditionTrue,
-					})
-					_, err = k8sClientSet.CertificatesV1().CertificateSigningRequests().UpdateApproval(ctx, fmt.Sprintf(registration.ByohCSRNameFormat, hostName), byohCSR, metav1.UpdateOptions{})
-					Expect(err).ShouldNot(HaveOccurred())
-					byohCSR, err = k8sClientSet.CertificatesV1().CertificateSigningRequests().Get(ctx, fmt.Sprintf(registration.ByohCSRNameFormat, hostName), metav1.GetOptions{})
-					Expect(err).ShouldNot(HaveOccurred())
-					byohCSR.Status.Certificate = []byte(testCert)
-					_, err = k8sClientSet.CertificatesV1().CertificateSigningRequests().UpdateStatus(ctx, byohCSR, metav1.UpdateOptions{})
-					Expect(err).ShouldNot(HaveOccurred())
-					return
-				}
-			}()
+			go approveAndIssue(ctx, hostName, testCert)
 			// A regular file can't be descended into as a directory component, so this
 			// deterministically fails writing the kubeconfig regardless of whether the
 			// test process is running as root or not (unlike a permission-denied path,
@@ -223,30 +234,7 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 			Expect(os.Remove(registration.TmpPrivateKey)).ShouldNot(HaveOccurred())
 		})
 		It("should create kubeconfig if csr is approved", func(ctx SpecContext) {
-			// Simulate ByoAdmission Controller
-			go func() {
-				for {
-					time.Sleep(time.Millisecond * 100)
-					byohCSR, err := k8sClientSet.CertificatesV1().CertificateSigningRequests().Get(ctx, fmt.Sprintf(registration.ByohCSRNameFormat, hostName), metav1.GetOptions{})
-					if err != nil {
-						continue
-					}
-					byohCSR.Status.Conditions = append(byohCSR.Status.Conditions, certv1.CertificateSigningRequestCondition{
-						Type:    certv1.CertificateApproved,
-						Reason:  csrApprovedMsg,
-						Message: csrApprovedMsg,
-						Status:  corev1.ConditionTrue,
-					})
-					_, err = k8sClientSet.CertificatesV1().CertificateSigningRequests().UpdateApproval(ctx, fmt.Sprintf(registration.ByohCSRNameFormat, hostName), byohCSR, metav1.UpdateOptions{})
-					Expect(err).ShouldNot(HaveOccurred())
-					byohCSR, err = k8sClientSet.CertificatesV1().CertificateSigningRequests().Get(ctx, fmt.Sprintf(registration.ByohCSRNameFormat, hostName), metav1.GetOptions{})
-					Expect(err).ShouldNot(HaveOccurred())
-					byohCSR.Status.Certificate = []byte(testCert)
-					_, err = k8sClientSet.CertificatesV1().CertificateSigningRequests().UpdateStatus(ctx, byohCSR, metav1.UpdateOptions{})
-					Expect(err).ShouldNot(HaveOccurred())
-					return
-				}
-			}()
+			go approveAndIssue(ctx, hostName, testCert)
 			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
 			err = CSRRegistrar.BootstrapKubeconfig(ctx, hostName)

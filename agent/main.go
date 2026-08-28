@@ -43,6 +43,21 @@ import (
 // heartbeat timestamp, unless overridden via the --heartbeat-interval flag.
 const DefaultHeartbeatInterval = 30 * time.Second
 
+const (
+	// bootstrapRetryInitialDelay is how long the agent waits before its
+	// first retry of the bootstrap flow, and the value the delay doubles
+	// from after that. Lowering it recovers sooner once an operator fixes
+	// the cause, at the cost of more requests against the management
+	// cluster while a host is stuck.
+	bootstrapRetryInitialDelay = 5 * time.Second
+	// bootstrapRetryMaxDelay is how far the retry delay is allowed to
+	// double. The agent has no permission to delete its own certificate
+	// requests, so a host that keeps being denied leaves one dead request
+	// behind per retry. Raising this cap slows that accumulation, and
+	// slows recovery by the same amount.
+	bootstrapRetryMaxDelay = 30 * time.Minute
+)
+
 // DefaultMaxBlockingDuration bounds how long the agent keeps pulsing
 // heartbeats during a single kubeadm install/join call, unless overridden
 // via the --max-blocking-duration flag. Comfortably above any legitimate
@@ -250,6 +265,35 @@ func handleBootstrapFlow(ctx context.Context, logger logr.Logger, hostName strin
 	return nil
 }
 
+// retryWithBackoff calls attempt until it succeeds, waiting longer after
+// each failure up to maxDelay. It gives up only when ctx is done, and
+// returns that context's error when it does.
+func retryWithBackoff(ctx context.Context, logger logr.Logger, initialDelay, maxDelay time.Duration, attempt func() error) error {
+	delay := initialDelay
+	for try := 1; ; try++ {
+		err := attempt()
+		if err == nil {
+			return nil
+		}
+		logger.Error(err, "attempt failed, retrying", "attempt", try, "retryIn", delay)
+
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+
+		delay = nextDelay(delay, maxDelay)
+	}
+}
+
+// nextDelay doubles the current backoff without going past maxDelay.
+func nextDelay(current, maxDelay time.Duration) time.Duration {
+	return min(2*current, maxDelay)
+}
+
 func certificateRotation(ctx context.Context, logger logr.Logger, hostName string, config *rest.Config) error {
 	var pollDuration = 5 * time.Second
 	for {
@@ -289,6 +333,9 @@ func certRotation(ctx context.Context, logger logr.Logger, hostName string, conf
 	return nil
 }
 
+// getConfig loads the kubeconfig the agent runs with. A kubeconfig that is
+// on disk but unreadable is not something retrying fixes, so this is one of
+// the few paths that still terminates the process.
 func getConfig(logger logr.Logger) *rest.Config {
 	config, err := registration.LoadRESTClientConfig(registration.GetBYOHConfigPath())
 	if err != nil {
@@ -298,6 +345,9 @@ func getConfig(logger logr.Logger) *rest.Config {
 	return config
 }
 
+// getClient builds the management cluster client. A client that cannot be
+// constructed from an already valid config means the scheme is wrong, which
+// no amount of retrying corrects, so this also terminates the process.
 func getClient(logger logr.Logger, config *rest.Config) client.Client {
 	k8sClient, err := client.New(config, client.Options{Scheme: scheme})
 	if err != nil {
@@ -338,9 +388,19 @@ func main() {
 	// Enable bootstrap flow if --bootstrap-kubeconfig is provided
 	// and config doesn't already exists in ~/.byoh/
 	if bootstrapKubeConfig != "" && errors.Is(err, os.ErrNotExist) {
-		if err = handleBootstrapFlow(ctx, logger, hostName); err != nil {
-			logger.Error(err, "bootstrap flow failed")
-			os.Exit(1)
+		// Bootstrap failures are recoverable. A denied certificate
+		// request, an expired bootstrap token and a timeout waiting for
+		// approval all clear up once an operator acts, so the agent has to
+		// still be running when that happens. Exiting instead would burn
+		// the systemd start limit and leave the unit failed.
+		bootstrapErr := retryWithBackoff(ctx, logger, bootstrapRetryInitialDelay, bootstrapRetryMaxDelay, func() error {
+			return handleBootstrapFlow(ctx, logger, hostName)
+		})
+		// The only way out other than success is a shutdown signal, which
+		// is an orderly stop rather than a failure to report.
+		if bootstrapErr != nil {
+			logger.Error(bootstrapErr, "bootstrap flow abandoned")
+			return
 		}
 	}
 	// Handle restart flow or if the ~/.byoh/config already exists
