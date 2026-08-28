@@ -6,10 +6,13 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: byoh-csr-creator-clusterrole
+# Only the bootstrap group may create certificate signing requests. An
+# onboarded host authenticates as byoh:hosts, and while that group was bound
+# here too, any onboarded host could mint fresh certificates for itself
+# indefinitely, which defeats the lifetime policy the approver enforces. When
+# certificate renewal is implemented, grant this permission to the per-host
+# certificate identity rather than restoring it to the shared group.
 subjects:
 - apiGroup: rbac.authorization.k8s.io
   kind: Group
   name: system:bootstrappers:byoh
-- apiGroup: rbac.authorization.k8s.io
-  kind: Group
-  name: byoh:hosts
