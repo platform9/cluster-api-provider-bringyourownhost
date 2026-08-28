@@ -30,8 +30,8 @@ This command will:
 
 func init() {
 	rootCmd.AddCommand(deauthoriseCmd)
-	deauthoriseCmd.Flags().StringVarP(&verbosity, "verbosity", "v", "minimal", "Log verbosity level (all, important, minimal, critical, none)")
-	deauthoriseCmd.Flags().BoolVarP(&deauthoriseForce, "force", "f", false, "Force deauthorise of the host.")
+	deauthoriseCmd.Flags().StringVarP(&verbosity, "verbosity", "v", "minimal", "Log verbosity level. Requires one of: all, important, minimal, critical.\nOmitting the flag will show minimal verbosity")
+  deauthoriseCmd.Flags().BoolVarP(&deauthoriseForce, "force", "f", false, "Force deauthorise of the host.")
 }
 
 func runDeauthorise(cmd *cobra.Command, args []string) {

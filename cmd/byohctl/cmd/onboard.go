@@ -78,7 +78,7 @@ func AddOnboardFlags(cmd *cobra.Command,
 	cmd.Flags().StringVarP(clientToken, "client-token", "c", "", "Client token for authentication")
 	cmd.Flags().StringVarP(domain, "domain", "d", "default", "Platform9 domain")
 	cmd.Flags().StringVarP(tenant, "tenant", "t", "service", "Platform9 tenant")
-	cmd.Flags().StringVarP(verbosity, "verbosity", "v", "minimal", "Log verbosity level (all, important, minimal, critical, none)")
+	cmd.Flags().StringVarP(verbosity, "verbosity", "v", "minimal", "Log verbosity level. Requires one of: all, important, minimal, critical.\nOmitting the flag will show minimal verbosity")
 	cmd.MarkFlagsMutuallyExclusive("password", "password-interactive")
 	cmd.Flags().StringVarP(regionName, "region", "r", "", "Platform9 region where you want to onboard this host")
 	cmd.Flags().StringVarP(configFile, "config", "f", "", "Path to onboarding config YAML file")

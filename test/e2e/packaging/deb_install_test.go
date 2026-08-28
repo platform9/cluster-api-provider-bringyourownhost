@@ -8,9 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 
-	"github.com/docker/docker/api/types/container"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -48,28 +46,8 @@ var _ = Describe("pf9-byohost deb", func() {
 		Expect(strings.TrimSpace(string(archOutput))).To(Equal(runtime.GOARCH))
 
 		By("starting a byoh/node:e2e container")
-		created, err := dockerClient.ContainerCreate(ctx,
-			&container.Config{Image: debTestImage},
-			&container.HostConfig{
-				Privileged: true,
-				Tmpfs:      map[string]string{"/run": "", "/run/lock": "", "/tmp": ""},
-			},
-			nil, nil, "")
-		Expect(err).NotTo(HaveOccurred())
-		containerID := created.ID
-		defer func() {
-			_ = dockerClient.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
-		}()
-
-		Expect(dockerClient.ContainerStart(ctx, containerID, container.StartOptions{})).To(Succeed())
-
-		By("waiting for systemd to come up")
-		Eventually(func() (string, error) {
-			output, _, execErr := execInContainer(ctx, containerID, []string{"systemctl", "is-system-running"}, nil)
-			return output, execErr
-		}, 30*time.Second, time.Second).Should(SatisfyAny(
-			ContainSubstring("running"), ContainSubstring("degraded"),
-		))
+		containerID, cleanup := startPackagingContainer(ctx, debTestImage)
+		defer cleanup()
 
 		By("copying the built deb into the container")
 		Expect(copyFileToContainer(ctx, containerID, debPath, debContainerPath)).To(Succeed())
@@ -95,26 +73,9 @@ var _ = Describe("pf9-byohost deb", func() {
 			"/usr/bin/byohctl",
 		))
 
-		By("asserting byohctl was installed executable and runs")
-		byohctlOutput, exitCode, err := execInContainer(ctx, containerID, []string{"byohctl", "version"}, nil)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(exitCode).To(Equal(0), "byohctl version failed:\n%s", byohctlOutput)
-
-		By("asserting after-install.sh generated the EnvironmentFile the systemd unit reads BOOTSTRAP_KUBECONFIG from")
-		confOutput, exitCode, err := execInContainer(ctx, containerID,
-			[]string{"cat", "/etc/pf9-byohost-agent.service.d/pf9-byohost-agent.conf"}, nil)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(exitCode).To(Equal(0))
-		Expect(confOutput).To(ContainSubstring("BOOTSTRAP_KUBECONFIG="))
-		Expect(confOutput).To(ContainSubstring("NAMESPACE="))
-		Expect(confOutput).To(ContainSubstring("REGION="))
-
-		// Not asserting is-active: same reasoning as the RPM test - no real
-		// cluster for the agent to reach in this environment.
-		By("asserting the service is enabled")
-		enabledOutput, _, err := execInContainer(ctx, containerID, []string{"systemctl", "is-enabled", "pf9-byohost-agent"}, nil)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(strings.TrimSpace(enabledOutput)).To(Equal("enabled"))
+		assertByohctlRuns(ctx, containerID)
+		assertEnvironmentFile(ctx, containerID, "after-install.sh")
+		assertServiceEnabled(ctx, containerID)
 
 		By("uninstalling the deb")
 		uninstallOutput, exitCode, err := execInContainer(ctx, containerID, []string{"dpkg", "-r", "pf9-byohost-agent"}, nil)
@@ -122,16 +83,12 @@ var _ = Describe("pf9-byohost deb", func() {
 		Expect(exitCode).To(Equal(0), "dpkg -r failed:\n%s", uninstallOutput)
 
 		By("asserting the binary, unit file, byohctl, and generated conf directory are gone")
-		for _, path := range []string{
+		assertPathsRemoved(ctx, containerID, "dpkg -r", []string{
 			"/binary/pf9-byoh-hostagent",
 			"/etc/systemd/system/pf9-byohost-agent.service",
 			"/etc/pf9-byohost-agent.service.d",
 			"/usr/bin/byohctl",
-		} {
-			_, pathExitCode, pathErr := execInContainer(ctx, containerID, []string{"test", "-e", path}, nil)
-			Expect(pathErr).NotTo(HaveOccurred())
-			Expect(pathExitCode).NotTo(Equal(0), "%s should have been removed by dpkg -r", path)
-		}
+		})
 
 		By("asserting before-remove.sh logged to the same directory every other pf9 log lives in")
 		uninstallLogOutput, exitCode, err := execInContainer(ctx, containerID,
