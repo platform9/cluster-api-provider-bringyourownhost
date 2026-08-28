@@ -190,6 +190,10 @@ func setupControllers(ctx context.Context, mgr ctrl.Manager, opts controllerOpti
 	if err := (&infrastructurev1beta1.BootstrapKubeconfig{}).SetupWebhookWithManager(mgr); err != nil {
 		return fmt.Errorf("create BootstrapKubeconfig webhook: %w", err)
 	}
+
+	if err := (&infrastructurev1beta1.ByoHostEnrollmentValidator{Client: mgr.GetClient()}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("create ByoHostEnrollment webhook: %w", err)
+	}
 	//+kubebuilder:scaffold:builder
 
 	return nil
