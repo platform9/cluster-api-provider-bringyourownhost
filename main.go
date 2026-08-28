@@ -18,7 +18,9 @@ import (
 	"k8s.io/klog/v2/klogr"
 
 	admissionv1beta1 "k8s.io/api/admission/v1beta1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientset "k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -152,6 +154,17 @@ func setupControllers(ctx context.Context, mgr ctrl.Manager, opts controllerOpti
 		}).SetupWithManager(mgr); err != nil {
 			return fmt.Errorf("create ByoAdmission controller: %w", err)
 		}
+	}
+
+	if err := (&byohcontrollers.ByoHostEnrollmentReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+		TransportConfigMap: types.NamespacedName{
+			Namespace: metav1.NamespaceSystem,
+			Name:      byohcontrollers.DefaultTransportConfigMapName,
+		},
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("create ByoHostEnrollment controller: %w", err)
 	}
 
 	if err := (&byohcontrollers.K8sInstallerConfigReconciler{
