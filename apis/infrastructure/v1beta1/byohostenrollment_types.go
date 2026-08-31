@@ -13,15 +13,58 @@ import (
 const (
 	// CredentialReady is True once the credential Secret named by
 	// Status.CredentialSecretRef exists and holds a bootstrap kubeconfig the
-	// host can use. It goes back to False while the credential is being
-	// replaced, which happens on every retry: a new credential for a host
-	// invalidates the previous one.
+	// host can use. It is False, with a reason, whenever no usable credential
+	// exists: before the first one is minted, and after a failed attempt to
+	// mint or replace one.
 	CredentialReady clusterv1.ConditionType = "CredentialReady"
 
 	// Consumed is True once the host has exchanged the credential for a
 	// client certificate. The credential is deleted on that transition and is
 	// not refreshed again.
 	Consumed clusterv1.ConditionType = "Consumed"
+
+	// TransportUnavailableReason is set on CredentialReady when the
+	// deployment-level transport ConfigMap is missing or does not describe a
+	// usable API server endpoint. Nothing about the enrollment is wrong; the
+	// deployment is not finished.
+	TransportUnavailableReason = "TransportUnavailable"
+
+	// CredentialMintFailedReason is set on CredentialReady when the token or
+	// the credential Secret could not be written.
+	CredentialMintFailedReason = "CredentialMintFailed" //nolint: gosec // a condition reason, not a credential
+)
+
+// Constants describing the artifacts a ByoHostEnrollment produces.
+const (
+	// EnrollmentFinalizer keeps the enrollment around until its bootstrap
+	// token Secret has been deleted. That Secret lives in kube-system, which a
+	// namespaced object cannot own, so nothing else would remove it.
+	EnrollmentFinalizer = "byohostenrollment.infrastructure.cluster.x-k8s.io"
+
+	// CredentialSecretType marks the Secret holding a host's bootstrap
+	// kubeconfig, so that RBAC and any sweeper can select these Secrets alone.
+	CredentialSecretType corev1.SecretType = "infrastructure.cluster.x-k8s.io/bootstrap-kubeconfig"
+
+	// CredentialSecretNameSuffix is appended to the enrollment name to name its
+	// credential Secret.
+	CredentialSecretNameSuffix = "-bootstrap"
+
+	// CredentialSecretKubeconfigKey holds the rendered bootstrap kubeconfig.
+	CredentialSecretKubeconfigKey = "kubeconfig"
+
+	// CredentialSecretHostNameKey holds the host name this credential was
+	// minted for. It travels with the credential so the agent does not have to
+	// read the machine's own hostname and reach a different answer.
+	CredentialSecretHostNameKey = "hostName"
+
+	// EnrollmentLabel is set on the bootstrap token Secret in kube-system,
+	// naming the enrollment that minted it. The Secret cannot carry an owner
+	// reference across namespaces, so this label is the only link back.
+	EnrollmentLabel = "byoh.infrastructure.cluster.x-k8s.io/enrollment"
+
+	// MaxK8sObjectNameLength is the longest name a namespaced object may have,
+	// an RFC 1123 subdomain.
+	MaxK8sObjectNameLength = 253
 )
 
 // ByoHostEnrollmentSpec defines the desired state of ByoHostEnrollment.

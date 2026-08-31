@@ -7,6 +7,14 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - events
   - secrets
   verbs:
@@ -58,6 +66,7 @@ rules:
   - bootstrapkubeconfigs
   - byoclusters
   - byohostagentupgrades
+  - byohostenrollments
   - byohosts
   - byomachines
   - byomachinetemplates
@@ -76,6 +85,7 @@ rules:
   - bootstrapkubeconfigs/finalizers
   - byoclusters/finalizers
   - byohostagentupgrades/finalizers
+  - byohostenrollments/finalizers
   - byohosts/finalizers
   - byomachines/finalizers
   - byomachinetemplates/finalizers
@@ -88,6 +98,7 @@ rules:
   - bootstrapkubeconfigs/status
   - byoclusters/status
   - byohostagentupgrades/status
+  - byohostenrollments/status
   - byohosts/status
   - byomachines/status
   - byomachinetemplates/status
