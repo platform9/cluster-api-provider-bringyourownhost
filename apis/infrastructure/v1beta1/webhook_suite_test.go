@@ -163,6 +163,9 @@ var _ = BeforeSuite(func() {
 	err = (&byohv1beta1.BootstrapKubeconfig{}).SetupWebhookWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 
+	err = (&byohv1beta1.ByoHostEnrollmentValidator{Client: mgr.GetClient()}).SetupWebhookWithManager(mgr)
+	Expect(err).NotTo(HaveOccurred())
+
 	//+kubebuilder:scaffold:webhook
 
 	go func() {
