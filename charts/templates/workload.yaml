@@ -1810,6 +1810,117 @@ spec:
       subresources:
         status: {}
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    cluster.x-k8s.io/provider: infrastructure-byoh
+  name: byoh-manager-role
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - events
+      - secrets
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - certificates.k8s.io
+    resources:
+      - certificatesigningrequests
+    verbs:
+      - create
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - certificates.k8s.io
+    resources:
+      - certificatesigningrequests/approval
+    verbs:
+      - update
+  - apiGroups:
+      - certificates.k8s.io
+    resourceNames:
+      - kubernetes.io/kube-apiserver-client
+    resources:
+      - signers
+    verbs:
+      - approve
+  - apiGroups:
+      - cluster.x-k8s.io
+    resources:
+      - clusters
+      - clusters/status
+      - machines
+      - machines/status
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - infrastructure.cluster.x-k8s.io
+    resources:
+      - '*'
+      - bootstrapkubeconfigs
+      - byoclusters
+      - byohostagentupgrades
+      - byohostenrollments
+      - byohosts
+      - byomachines
+      - byomachinetemplates
+      - k8sinstallerconfigs
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - infrastructure.cluster.x-k8s.io
+    resources:
+      - bootstrapkubeconfigs/finalizers
+      - byoclusters/finalizers
+      - byohostagentupgrades/finalizers
+      - byohostenrollments/finalizers
+      - byohosts/finalizers
+      - byomachines/finalizers
+      - byomachinetemplates/finalizers
+      - k8sinstallerconfigs/finalizers
+    verbs:
+      - update
+  - apiGroups:
+      - infrastructure.cluster.x-k8s.io
+    resources:
+      - bootstrapkubeconfigs/status
+      - byoclusters/status
+      - byohostagentupgrades/status
+      - byohostenrollments/status
+      - byohosts/status
+      - byomachines/status
+      - byomachinetemplates/status
+      - k8sinstallerconfigs/status
+    verbs:
+      - get
+      - patch
+      - update
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -1876,106 +1987,6 @@ spec:
           secret:
             defaultMode: 420
             secretName: byoh-webhook-service-cert
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  labels:
-    cluster.x-k8s.io/provider: infrastructure-byoh
-  name: byoh-manager-role
-rules:
-  - apiGroups:
-      - ""
-    resources:
-      - events
-      - secrets
-    verbs:
-      - create
-      - delete
-      - get
-      - list
-      - patch
-      - update
-      - watch
-  - apiGroups:
-      - certificates.k8s.io
-    resources:
-      - certificatesigningrequests
-    verbs:
-      - create
-      - get
-      - list
-      - watch
-  - apiGroups:
-      - certificates.k8s.io
-    resources:
-      - certificatesigningrequests/approval
-    verbs:
-      - update
-  - apiGroups:
-      - certificates.k8s.io
-    resourceNames:
-      - kubernetes.io/kube-apiserver-client
-    resources:
-      - signers
-    verbs:
-      - approve
-  - apiGroups:
-      - cluster.x-k8s.io
-    resources:
-      - clusters
-      - clusters/status
-      - machines
-      - machines/status
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups:
-      - infrastructure.cluster.x-k8s.io
-    resources:
-      - '*'
-      - bootstrapkubeconfigs
-      - byoclusters
-      - byohostagentupgrades
-      - byohosts
-      - byomachines
-      - byomachinetemplates
-      - k8sinstallerconfigs
-    verbs:
-      - create
-      - delete
-      - get
-      - list
-      - patch
-      - update
-      - watch
-  - apiGroups:
-      - infrastructure.cluster.x-k8s.io
-    resources:
-      - bootstrapkubeconfigs/finalizers
-      - byoclusters/finalizers
-      - byohostagentupgrades/finalizers
-      - byohosts/finalizers
-      - byomachines/finalizers
-      - byomachinetemplates/finalizers
-      - k8sinstallerconfigs/finalizers
-    verbs:
-      - update
-  - apiGroups:
-      - infrastructure.cluster.x-k8s.io
-    resources:
-      - bootstrapkubeconfigs/status
-      - byoclusters/status
-      - byohostagentupgrades/status
-      - byohosts/status
-      - byomachines/status
-      - byomachinetemplates/status
-      - k8sinstallerconfigs/status
-    verbs:
-      - get
-      - patch
-      - update
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
