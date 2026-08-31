@@ -6,6 +6,9 @@ package controllers
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -16,6 +19,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientset "k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -45,11 +49,30 @@ const (
 	// the agent's CSRs.
 	maxCSRExpirationSeconds int32 = 86400 * 365
 
+	// bootstrapUsernamePrefix is what the API server records in spec.username
+	// when a request authenticates with a bootstrap token. The rest of the
+	// username is the token's public ID. A client cannot set this field, which
+	// is what makes it usable as an identity.
+	bootstrapUsernamePrefix = "system:bootstrap:"
+
+	// certificateRequestPEMType is the only PEM block spec.request may hold.
+	certificateRequestPEMType = "CERTIFICATE REQUEST"
+
 	reasonRequesterNotBootstrapper = "RequesterNotByohBootstrapper"
 	reasonUnexpectedSignerName     = "UnexpectedSignerName"
 	reasonUnexpectedUsages         = "UnexpectedUsages"
 	reasonExpirationTooLong        = "ExpirationTooLong"
+	reasonMalformedUsername        = "MalformedBootstrapUsername"
+	reasonUnknownBootstrapToken    = "UnknownBootstrapToken"
+	reasonAmbiguousBootstrapToken  = "AmbiguousBootstrapToken"
+	reasonMalformedRequest         = "MalformedCertificateRequest"
+	reasonCommonNameNotPermitted   = "CommonNameNotPermitted"
 )
+
+// EnrollmentTokenIDIndex indexes ByoHostEnrollment objects by the bootstrap
+// token they minted, so a certificate request's requester resolves to its
+// enrollment in one cache read.
+const EnrollmentTokenIDIndex = "status.tokenID"
 
 // csrDenial explains why a certificate signing request must not be approved.
 type csrDenial struct {
@@ -61,12 +84,19 @@ type csrDenial struct {
 
 // ByoAdmissionReconciler reconciles a ByoAdmission object
 type ByoAdmissionReconciler struct {
+	// ClientSet settles requests through the approval subresource, which the
+	// typed client cannot reach.
 	ClientSet clientset.Interface
+
+	// Client reads ByoHostEnrollment objects through the manager's cache,
+	// using the EnrollmentTokenIDIndex.
+	Client client.Client
 }
 
 //+kubebuilder:rbac:groups=certificates.k8s.io,resources=certificatesigningrequests,verbs=create;get;list;watch
 //+kubebuilder:rbac:groups=certificates.k8s.io,resources=certificatesigningrequests/approval,verbs=update
 //+kubebuilder:rbac:groups=certificates.k8s.io,resources=signers,resourceNames=kubernetes.io/kube-apiserver-client,verbs=approve
+//+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=byohostenrollments,verbs=get;list;watch
 
 // Reconcile continuously checks for CSRs, approves the ones a BYO host is
 // allowed to have and denies the rest.
@@ -104,7 +134,11 @@ func (r *ByoAdmissionReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
-	if denial := validateByohCSR(csr); denial != nil {
+	denial, err := r.validate(ctx, csr)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	if denial != nil {
 		logger.Info("Denying CSR", "object", req.NamespacedName, "reason", denial.reason, "message", denial.message)
 		if err := r.setCSRCondition(ctx, csr, certv1.CertificateDenied, denial.reason, denial.message); err != nil {
 			return reconcile.Result{}, err
@@ -140,6 +174,115 @@ func (r *ByoAdmissionReconciler) setCSRCondition(ctx context.Context, csr *certv
 		return fmt.Errorf("update the approval of certificate signing request %q: %w", csr.Name, err)
 	}
 	return nil
+}
+
+// validate reports why csr must not be approved, and returns nil when the
+// request is one a BYOH host is allowed to have. An error means the answer is
+// unknown, which is never an approval: the request is left pending and the
+// reconcile is retried.
+func (r *ByoAdmissionReconciler) validate(ctx context.Context, csr *certv1.CertificateSigningRequest) (*csrDenial, error) {
+	if denial := validateByohCSR(csr); denial != nil {
+		return denial, nil
+	}
+	return r.validateEnrolledHost(ctx, csr)
+}
+
+// validateEnrolledHost reports why csr must not be approved for the host its
+// subject claims to be.
+//
+// The checks above establish that the requester holds a BYOH bootstrap token.
+// They say nothing about which host that token was minted for, so on their own
+// a credential handed to one host still buys a certificate for another. The
+// enrollment that minted the token is the record of which host it was for, and
+// spec.username carries the token ID that leads back to it.
+//
+// A token with no enrollment behind it is revoked or forged, so it is denied.
+// The enrollment controller records status.tokenID before it writes the token
+// Secret, so any token that can authenticate is already indexed and a miss here
+// is never a race.
+func (r *ByoAdmissionReconciler) validateEnrolledHost(ctx context.Context, csr *certv1.CertificateSigningRequest) (*csrDenial, error) {
+	tokenID, ok := bootstrapTokenID(csr.Spec.Username)
+	if !ok {
+		return &csrDenial{
+			reason:  reasonMalformedUsername,
+			message: fmt.Sprintf("requester %q is not a bootstrap token identity", csr.Spec.Username),
+		}, nil
+	}
+
+	enrollments := &infrastructurev1beta1.ByoHostEnrollmentList{}
+	if err := r.Client.List(ctx, enrollments, client.MatchingFields{EnrollmentTokenIDIndex: tokenID}); err != nil {
+		return nil, fmt.Errorf("list ByoHostEnrollments for bootstrap token %q: %w", tokenID, err)
+	}
+	if len(enrollments.Items) == 0 {
+		return &csrDenial{
+			reason:  reasonUnknownBootstrapToken,
+			message: fmt.Sprintf("no ByoHostEnrollment holds bootstrap token %q", tokenID),
+		}, nil
+	}
+	if len(enrollments.Items) > 1 {
+		return &csrDenial{
+			reason:  reasonAmbiguousBootstrapToken,
+			message: fmt.Sprintf("%d ByoHostEnrollments hold bootstrap token %q, so the host it belongs to is unknown", len(enrollments.Items), tokenID),
+		}, nil
+	}
+	enrollment := &enrollments.Items[0]
+
+	commonName, err := requestedCommonName(csr.Spec.Request)
+	if err != nil {
+		return &csrDenial{
+			reason:  reasonMalformedRequest,
+			message: err.Error(),
+		}, nil
+	}
+
+	permitted := infrastructurev1beta1.HostCommonNamePrefix + enrollment.Name
+	if commonName != permitted {
+		return &csrDenial{
+			reason: reasonCommonNameNotPermitted,
+			message: fmt.Sprintf("common name %q was requested, but ByoHostEnrollment %s/%s permits only %q",
+				commonName, enrollment.Namespace, enrollment.Name, permitted),
+		}, nil
+	}
+	return nil, nil
+}
+
+// enrollmentTokenIDIndexer backs EnrollmentTokenIDIndex. An enrollment that
+// has not yet minted a token is left out of the index rather than filed under
+// the empty string, so a request quoting no token ID matches nothing.
+func enrollmentTokenIDIndexer(object client.Object) []string {
+	enrollment, ok := object.(*infrastructurev1beta1.ByoHostEnrollment)
+	if !ok || enrollment.Status.TokenID == "" {
+		return nil
+	}
+	return []string{enrollment.Status.TokenID}
+}
+
+// bootstrapTokenID returns the token ID a bootstrap token username carries,
+// and reports whether username had that shape at all.
+func bootstrapTokenID(username string) (string, bool) {
+	tokenID, found := strings.CutPrefix(username, bootstrapUsernamePrefix)
+	if !found || tokenID == "" {
+		return "", false
+	}
+	return tokenID, true
+}
+
+// requestedCommonName returns the common name in a PEM-encoded certificate
+// signing request. Everything inside the request is client-supplied, so the
+// common name is a claim to check rather than an identity to trust.
+func requestedCommonName(request []byte) (string, error) {
+	block, _ := pem.Decode(request)
+	if block == nil {
+		return "", errors.New("certificate request is not PEM")
+	}
+	if block.Type != certificateRequestPEMType {
+		return "", fmt.Errorf("certificate request holds a %q PEM block, want %q", block.Type, certificateRequestPEMType)
+	}
+	parsed, err := x509.ParseCertificateRequest(block.Bytes)
+	if err != nil {
+		return "", fmt.Errorf("parse certificate request: %w", err)
+	}
+	return parsed.Subject.CommonName, nil
 }
 
 // validateByohCSR reports why csr must not be approved, and returns nil when
@@ -192,7 +335,11 @@ func checkCSRCondition(conditions []certv1.CertificateSigningRequestCondition, c
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *ByoAdmissionReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *ByoAdmissionReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager) error {
+	if err := mgr.GetFieldIndexer().IndexField(ctx, &infrastructurev1beta1.ByoHostEnrollment{}, EnrollmentTokenIDIndex, enrollmentTokenIDIndexer); err != nil {
+		return fmt.Errorf("index ByoHostEnrollment by %s: %w", EnrollmentTokenIDIndex, err)
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&certv1.CertificateSigningRequest{}).WithEventFilter(
 		// watch only BYOH created CSRs
