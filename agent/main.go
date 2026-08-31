@@ -54,6 +54,17 @@ const (
 	// DefaultExpirationSeconds defines the expiry time for Certificates
 	// which is currently set to 1 year aligned with kubeadm defaults.
 	DefaultExpirationSeconds = 86400 * 365
+
+	// bootstrapRetryInitialDelay is how long the agent waits before its first retry of the
+	// bootstrap flow, and the value the delay doubles from after that. Lowering it recovers sooner
+	// once an operator fixes the cause, at the cost of more requests against the management cluster
+	// while a host is stuck.
+	bootstrapRetryInitialDelay = 5 * time.Second
+	// bootstrapRetryMaxDelay defines how much the retry delay is allowed to double. For example,
+	// the agent does not have permissions to delete its own certificate requests, so if a host's
+	// requests keep getting denied, it leaves one CSR per retry. Raising this cap slows the
+	// accumulation of such resources but it slows recovery by the same amount.
+	bootstrapRetryMaxDelay = 30 * time.Minute
 )
 
 var (
@@ -256,6 +267,32 @@ func handleBootstrapFlow(ctx context.Context, logger logr.Logger, hostName strin
 	return nil
 }
 
+// retryWithBackoff calls attempt until it succeeds, waiting longer after
+// each failure up to maxDelay. It gives up only when ctx is done, and
+// returns that context's error when it does.
+func retryWithBackoff(ctx context.Context, logger logr.Logger, initialDelay, maxDelay time.Duration, attemptFn func() error) error {
+	delay := initialDelay
+	attemptCount := 0
+	for {
+		attemptCount += 1
+		err := attemptFn()
+		if err == nil {
+			return nil
+		}
+		logger.Error(err, "attempt failed, retrying", "attempt", attemptCount, "retryIn", delay)
+
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+
+		delay = min(2*delay, maxDelay)
+	}
+}
+
 func certificateRotation(ctx context.Context, logger logr.Logger, hostName string, config *rest.Config) error {
 	var pollDuration = 5 * time.Second
 	for {
@@ -295,6 +332,10 @@ func certRotation(ctx context.Context, logger logr.Logger, hostName string, conf
 	return nil
 }
 
+// getConfig loads the kubeconfig the agent runs with.
+//
+// NOTE: An invalid kubeconfig is not a retryable fix and will terminate the process instead of
+// returning an error.
 func getConfig(logger logr.Logger) *rest.Config {
 	config, err := registration.LoadRESTClientConfig(registration.GetBYOHConfigPath())
 	if err != nil {
@@ -304,6 +345,10 @@ func getConfig(logger logr.Logger) *rest.Config {
 	return config
 }
 
+// getClient builds the management cluster client.
+//
+// NOTE: A failed attempt at building the client implies an invalid config and is not a retryable
+// fix. As a result it will terminates the process.
 func getClient(logger logr.Logger, config *rest.Config) client.Client {
 	k8sClient, err := client.New(config, client.Options{Scheme: scheme})
 	if err != nil {
@@ -344,12 +389,22 @@ func main() {
 	// Enable bootstrap flow if --bootstrap-kubeconfig is provided
 	// and config doesn't already exists in ~/.byoh/
 	if bootstrapKubeConfig != "" && errors.Is(err, os.ErrNotExist) {
-		if err = handleBootstrapFlow(ctx, logger, hostName); err != nil {
-			logger.Error(err, "bootstrap flow failed")
-			os.Exit(1)
+		// Instead of failing hard and exiting on errors during the bootstrap steps, we should retry
+		// with a backoff. There should be very few ways where we exit because of a failure, because
+		// it burns through the systemd start limit and leaves the agent in a state where it is not
+		// running on the host at all.
+		bootstrapErr := retryWithBackoff(ctx, logger, bootstrapRetryInitialDelay, bootstrapRetryMaxDelay, func() error {
+			return handleBootstrapFlow(ctx, logger, hostName)
+		})
+
+		// An error here means either we received a shutdown signal or we failed to bootstrap the host within bootstrapRetryMaxDelay.
+		if bootstrapErr != nil {
+			logger.Error(bootstrapErr, "bootstrap flow abandoned")
+			return
 		}
 	}
-	// Handle restart flow or if the ~/.byoh/config already exists
+	// Either the agent was restarted or bootstrap was successful during first time the agent was
+	// started. Either way we should have ~/.byoh/config available on the host now.
 	config := getConfig(logger)
 	k8sClient := getClient(logger, config)
 	registration.LocalHostRegistrar = &registration.HostRegistrar{K8sClient: k8sClient}
@@ -361,6 +416,7 @@ func main() {
 
 	// Start certificate rotation goroutine.
 	// This is behind a feature flag for now. Set 'CERTIFICATE_ROTATION=true' to enable it.
+	// FIXME: This needs to be auto detected and not behind a feature flag.
 	if os.Getenv("CERTIFICATE_ROTATION") == "true" {
 		go func() {
 			err = certificateRotation(ctx, logger, hostName, config)
