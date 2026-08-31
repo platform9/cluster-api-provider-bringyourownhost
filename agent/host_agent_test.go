@@ -21,6 +21,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gexec"
+	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/internal/csrtest"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/registration"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/version"
 	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
@@ -601,16 +602,13 @@ var _ = Describe("Agent", func() {
 			output, _, err := runner.ExecByoDockerHost(byoHostContainer)
 			Expect(err).NotTo(HaveOccurred())
 			defer e2e.StreamDockerLog(output, agentLogFile)()
-			byohCSRLookupKey := types.NamespacedName{Name: fmt.Sprintf(registration.ByohCSRNameFormat, hostName)}
-			byohCSR := &certv1.CertificateSigningRequest{}
-
 			Eventually(func(ctx SpecContext) string {
-				err := k8sClient.Get(ctx, byohCSRLookupKey, byohCSR)
-				if err != nil {
-					return err.Error()
+				byohCSR, kerr := csrtest.Get(ctx, clientSet, hostName)
+				if kerr != nil {
+					return kerr.Error()
 				}
 				return byohCSR.Name
-			}, 10, 1).WithContext(ctx).Should(Equal(fmt.Sprintf(registration.ByohCSRNameFormat, hostName)))
+			}, 10, 1).WithContext(ctx).Should(HavePrefix(registration.ByohCSRNamePrefix + hostName))
 		})
 		It("should persist private key", func(ctx SpecContext) {
 			// start agent
@@ -659,6 +657,51 @@ var _ = Describe("Agent", func() {
 				return false
 			}, time.Second*4).Should(BeTrue())
 		})
+		It("should create a new CSR when the previous one was denied", func(ctx SpecContext) {
+			// start agent
+			output, _, err := runner.ExecByoDockerHost(byoHostContainer)
+			Expect(err).NotTo(HaveOccurred())
+			defer e2e.StreamDockerLog(output, agentLogFile)()
+
+			By("denying the certificate signing request the agent created on startup")
+			var deniedName string
+			Eventually(func(ctx SpecContext) error {
+				byohCSR, kerr := csrtest.Get(ctx, clientSet, hostName)
+				if kerr != nil {
+					return kerr
+				}
+				byohCSR.Status.Conditions = append(byohCSR.Status.Conditions, certv1.CertificateSigningRequestCondition{
+					Type:    certv1.CertificateDenied,
+					Reason:  "denied",
+					Message: "denied",
+					Status:  corev1.ConditionTrue,
+				})
+				_, kerr = clientSet.CertificatesV1().CertificateSigningRequests().UpdateApproval(ctx, byohCSR.Name, byohCSR, metav1.UpdateOptions{})
+				if kerr != nil {
+					return kerr
+				}
+				deniedName = byohCSR.Name
+				return nil
+			}, time.Second*10, time.Second).WithContext(ctx).Should(Succeed(), "the agent never created a certificate signing request to deny")
+
+			By("waiting for the agent to create a replacement certificate signing request")
+			// The agent has no permission to delete the denied request, so
+			// recovering from it can only show up as a second, differently
+			// named one.
+			Eventually(func(ctx SpecContext) []string {
+				items, kerr := csrtest.List(ctx, clientSet, hostName)
+				if kerr != nil {
+					return nil
+				}
+				var replacements []string
+				for _, item := range items {
+					if item.Name != deniedName {
+						replacements = append(replacements, item.Name)
+					}
+				}
+				return replacements
+			}, time.Second*60, time.Second).WithContext(ctx).Should(HaveLen(1), "the agent did not replace the denied certificate signing request")
+		})
 		It("should create kubeconfig if the csr is approved", func(ctx SpecContext) {
 			// start agent
 			output, _, err := runner.ExecByoDockerHost(byoHostContainer)
@@ -667,7 +710,7 @@ var _ = Describe("Agent", func() {
 
 			// Approve CSR
 			Eventually(func() (done bool) {
-				byohCSR, kerr := clientSet.CertificatesV1().CertificateSigningRequests().Get(ctx, fmt.Sprintf(registration.ByohCSRNameFormat, hostName), metav1.GetOptions{})
+				byohCSR, kerr := csrtest.Get(ctx, clientSet, hostName)
 				if kerr != nil {
 					return false
 				}
@@ -677,11 +720,11 @@ var _ = Describe("Agent", func() {
 					Message: "approved",
 					Status:  corev1.ConditionTrue,
 				})
-				_, err = clientSet.CertificatesV1().CertificateSigningRequests().UpdateApproval(ctx, fmt.Sprintf(registration.ByohCSRNameFormat, hostName), byohCSR, metav1.UpdateOptions{})
+				_, err = clientSet.CertificatesV1().CertificateSigningRequests().UpdateApproval(ctx, byohCSR.Name, byohCSR, metav1.UpdateOptions{})
 				return err == nil
 			}, time.Second*4).Should(BeTrue())
 			// Issue Certificate
-			byohCSR, err := clientSet.CertificatesV1().CertificateSigningRequests().Get(ctx, fmt.Sprintf(registration.ByohCSRNameFormat, hostName), metav1.GetOptions{})
+			byohCSR, err := csrtest.Get(ctx, clientSet, hostName)
 			Expect(err).ShouldNot(HaveOccurred())
 			var FakeCert = `
 -----BEGIN CERTIFICATE-----
