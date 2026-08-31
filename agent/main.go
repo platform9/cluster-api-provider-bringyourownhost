@@ -39,16 +39,22 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
-// DefaultHeartbeatInterval is how often the agent refreshes its ByoHost
-// heartbeat timestamp, unless overridden via the --heartbeat-interval flag.
-const DefaultHeartbeatInterval = 30 * time.Second
+const (
+	// DefaultHeartbeatInterval is how often the agent refreshes its ByoHost
+	// heartbeat timestamp, unless overridden via the --heartbeat-interval flag.
+	DefaultHeartbeatInterval = 30 * time.Second
 
-// DefaultMaxBlockingDuration bounds how long the agent keeps pulsing
-// heartbeats during a single kubeadm install/join call, unless overridden
-// via the --max-blocking-duration flag. Comfortably above any legitimate
-// install or join duration, so it only ever kicks in for a genuinely
-// wedged call.
-const DefaultMaxBlockingDuration = 30 * time.Minute
+	// DefaultMaxBlockingDuration bounds how long the agent keeps pulsing
+	// heartbeats during a single kubeadm install/join call, unless overridden
+	// via the --max-blocking-duration flag. Comfortably above any legitimate
+	// install or join duration, so it only ever kicks in for a genuinely
+	// wedged call.
+	DefaultMaxBlockingDuration = 30 * time.Minute
+
+	// DefaultExpirationSeconds defines the expiry time for Certificates
+	// which is currently set to 1 year aligned with kubeadm defaults.
+	DefaultExpirationSeconds = 86400 * 365
+)
 
 var (
 	namespace           string
@@ -136,7 +142,7 @@ func setupflags() {
 	klog.ClearLogger()
 
 	flag.StringVar(&namespace, "namespace", "default", "Namespace in the management cluster where you would like to register this host")
-	flag.Int64Var(&certExpiryDuration, "certExpiryDuration", registration.ExpirationSeconds, "Duration (in seconds) for the expiration of the host certificates")
+	flag.Int64Var(&certExpiryDuration, "certExpiryDuration", DefaultExpirationSeconds, "Duration (in seconds) for the expiration of the host certificates")
 	flag.Var(&labels, "label", "labels to attach to the ByoHost CR in the form labelname=labelVal for e.g. '--label site=apac --label cores=2'")
 	flag.StringVar(&metricsbindaddress, "metricsbindaddress", ":8080", "metricsbindaddress is the TCP address that the controller should bind to for serving prometheus metrics.It can be set to \"0\" to disable the metrics serving")
 	flag.StringVar(&downloadpath, "downloadpath", "/var/lib/byoh/bundles", "File System path to keep the downloads")
@@ -243,7 +249,7 @@ func handleBootstrapFlow(ctx context.Context, logger logr.Logger, hostName strin
 	if err != nil {
 		return fmt.Errorf("ByohCSR intialization failed: %v", err)
 	}
-	err = byohCSR.BootstrapKubeconfig(ctx, hostName)
+	err = byohCSR.BootstrapKubeconfig(ctx, hostName, 5*time.Minute)
 	if err != nil {
 		return fmt.Errorf("kubeconfig generation failed: %v", err)
 	}
