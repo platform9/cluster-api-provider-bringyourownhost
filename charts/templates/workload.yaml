@@ -891,6 +891,192 @@ metadata:
   labels:
     cluster.x-k8s.io/provider: infrastructure-byoh
     cluster.x-k8s.io/v1beta1: v1beta1
+  name: byohostenrollments.infrastructure.cluster.x-k8s.io
+spec:
+  group: infrastructure.cluster.x-k8s.io
+  names:
+    kind: ByoHostEnrollment
+    listKind: ByoHostEnrollmentList
+    plural: byohostenrollments
+    shortNames:
+      - byohe
+    singular: byohostenrollment
+  scope: Namespaced
+  versions:
+    - additionalPrinterColumns:
+        - jsonPath: .status.conditions[?(@.type=='CredentialReady')].status
+          name: Ready
+          type: string
+        - jsonPath: .status.conditions[?(@.type=='Consumed')].status
+          name: Consumed
+          type: string
+        - jsonPath: .status.credentialSecretRef.name
+          name: Secret
+          type: string
+        - jsonPath: .status.expiresAt
+          name: Expires
+          type: date
+        - jsonPath: .metadata.creationTimestamp
+          name: Age
+          type: date
+      name: v1beta1
+      schema:
+        openAPIV3Schema:
+          description: |-
+            ByoHostEnrollment is the Schema for the byohostenrollments API. One object
+            enrolls one host: metadata.name is the host name, which is also the name of
+            the ByoHost the host later registers and the suffix of the common name in
+            its client certificate. Creating a second enrollment for the same host is a
+            name conflict rather than a second credential, so retries are idempotent
+            without any extra rule.
+
+            Labels on this object become the labels on the resulting ByoHost, which is
+            how deployment-specific grouping reaches a host without this API carrying a
+            field for it.
+          properties:
+            apiVersion:
+              description: |-
+                APIVersion defines the versioned schema of this representation of an object.
+                Servers should convert recognized schemas to the latest internal value, and
+                may reject unrecognized values.
+                More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+              type: string
+            kind:
+              description: |-
+                Kind is a string value representing the REST resource this object represents.
+                Servers may infer this from the endpoint the client submits requests to.
+                Cannot be updated.
+                In CamelCase.
+                More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: ByoHostEnrollmentSpec defines the desired state of ByoHostEnrollment.
+              properties:
+                tokenTTL:
+                  default: 30m
+                  description: |-
+                    TokenTTL is how long each minted bootstrap token stays valid. The
+                    credential is re-minted while the host has not yet consumed it, so this
+                    bounds the lifetime of a single token rather than the lifetime of the
+                    enrollment - use ValidUntil for the latter.
+                  type: string
+                validUntil:
+                  description: |-
+                    ValidUntil is the deadline past which the credential is no longer
+                    re-minted. It exists for hosts that are enrolled well before they first
+                    boot - an image build, or a machine racked days ahead of use - where a
+                    single TokenTTL would expire before the host ever asks for a
+                    certificate. Unset means the enrollment is refreshed for as long as it
+                    exists.
+                  format: date-time
+                  type: string
+              type: object
+            status:
+              description: ByoHostEnrollmentStatus defines the observed state of ByoHostEnrollment.
+              properties:
+                conditions:
+                  description: Conditions provide observations of the operational state of a Cluster API resource.
+                  items:
+                    description: Condition defines an observation of a Cluster API resource operational state.
+                    properties:
+                      lastTransitionTime:
+                        description: |-
+                          lastTransitionTime is the last time the condition transitioned from one status to another.
+                          This should be when the underlying condition changed. If that is not known, then using the time when
+                          the API field changed is acceptable.
+                        format: date-time
+                        type: string
+                      message:
+                        description: |-
+                          message is a human readable message indicating details about the transition.
+                          This field may be empty.
+                        maxLength: 10240
+                        minLength: 1
+                        type: string
+                      reason:
+                        description: |-
+                          reason is the reason for the condition's last transition in CamelCase.
+                          The specific API may choose whether or not this field is considered a guaranteed API.
+                          This field may be empty.
+                        maxLength: 256
+                        minLength: 1
+                        type: string
+                      severity:
+                        description: |-
+                          severity provides an explicit classification of Reason code, so the users or machines can immediately
+                          understand the current situation and act accordingly.
+                          The Severity field MUST be set only when Status=False.
+                        maxLength: 32
+                        type: string
+                      status:
+                        description: status of the condition, one of True, False, Unknown.
+                        type: string
+                      type:
+                        description: |-
+                          type of condition in CamelCase or in foo.example.com/CamelCase.
+                          Many .condition.type values are consistent across resources like Available, but because arbitrary conditions
+                          can be useful (see .node.status.conditions), the ability to deconflict is important.
+                        maxLength: 256
+                        minLength: 1
+                        type: string
+                    required:
+                      - lastTransitionTime
+                      - status
+                      - type
+                    type: object
+                  type: array
+                credentialSecretRef:
+                  description: |-
+                    CredentialSecretRef names the Secret, in this object's own namespace,
+                    holding the bootstrap kubeconfig for this host. The kubeconfig lives in
+                    a Secret rather than in status so that reading an enrollment record and
+                    reading a host's credential can be granted separately.
+                  properties:
+                    name:
+                      default: ""
+                      description: |-
+                        Name of the referent.
+                        This field is effectively required, but due to backwards compatibility is
+                        allowed to be empty. Instances of this type with an empty value here are
+                        almost certainly wrong.
+                        More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                      type: string
+                  type: object
+                  x-kubernetes-map-type: atomic
+                expiresAt:
+                  description: ExpiresAt is when the current token stops being accepted.
+                  format: date-time
+                  type: string
+                observedGeneration:
+                  description: |-
+                    ObservedGeneration is the Generation of the spec this status was last
+                    computed from.
+                  format: int64
+                  type: integer
+                tokenID:
+                  description: |-
+                    TokenID is the public half of the bootstrap token currently backing the
+                    credential. A certificate request authenticated as
+                    system:bootstrap:<tokenID> resolves back to this enrollment, which is how
+                    the approver learns which host a request is allowed to claim.
+                  type: string
+              type: object
+          type: object
+      served: true
+      storage: true
+      subresources:
+        status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.21.0
+  labels:
+    cluster.x-k8s.io/provider: infrastructure-byoh
+    cluster.x-k8s.io/v1beta1: v1beta1
   name: byomachinetemplates.infrastructure.cluster.x-k8s.io
 spec:
   group: infrastructure.cluster.x-k8s.io
