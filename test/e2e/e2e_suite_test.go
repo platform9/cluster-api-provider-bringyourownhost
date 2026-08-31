@@ -27,6 +27,7 @@ import (
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/test/builder"
 	certv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/clientcmd"
@@ -509,14 +510,21 @@ func Byf(format string, a ...interface{}) {
 	By(fmt.Sprintf(format, a...))
 }
 
-func generateBootstrapKubeconfig(ctx context.Context, clusterProxy framework.ClusterProxy, name string) string {
+// generateBootstrapKubeconfig mints a bootstrap credential for hostName and
+// returns the kubeconfig the agent in that host's container starts with.
+//
+// The enrolment it creates alongside is what lets the CSR approver tie the
+// resulting certificate request back to hostName. Without it the approver
+// cannot tell which host the credential was issued for and denies the request,
+// so every host needs its own BootstrapKubeconfig and its own enrolment.
+func generateBootstrapKubeconfig(ctx context.Context, clusterProxy framework.ClusterProxy, clusterName, hostName, namespace string) string {
 	config, _ := clientcmd.LoadFromFile(clusterProxy.GetKubeconfigPath())
-	name = "kind-" + name
+	name := "kind-" + clusterName
 
 	server := config.Clusters[name].Server
 	caData := b64.StdEncoding.EncodeToString(config.Clusters[name].CertificateAuthorityData)
 	skipTLS := config.Clusters[name].InsecureSkipTLSVerify
-	bootstrapKubeconfigCRD := builder.BootstrapKubeconfig("default", "test-config").
+	bootstrapKubeconfigCRD := builder.BootstrapKubeconfig(namespace, hostName).
 		WithServer(server).
 		WithSkipTLSVerify(skipTLS).
 		WithCAData(caData).
@@ -536,5 +544,48 @@ func generateBootstrapKubeconfig(ctx context.Context, clusterProxy framework.Clu
 		return createdBootstrapKubeconfig.Status.BootstrapKubeconfigData
 	}, e2eConfig.GetIntervals("", "wait-controllers")...).ShouldNot(BeNil())
 
-	return *createdBootstrapKubeconfig.Status.BootstrapKubeconfigData
+	bootstrapKubeconfigData := *createdBootstrapKubeconfig.Status.BootstrapKubeconfigData
+	createHostEnrollment(ctx, clusterProxy, hostName, namespace, bootstrapKubeconfigData)
+
+	return bootstrapKubeconfigData
+}
+
+// createHostEnrollment records, against hostName, the bootstrap token embedded
+// in bootstrapKubeconfigData. The enrolment controller would normally mint that
+// token itself; here the BootstrapKubeconfig controller already has, so only
+// the record the approver reads is missing.
+func createHostEnrollment(ctx context.Context, clusterProxy framework.ClusterProxy, hostName, namespace, bootstrapKubeconfigData string) {
+	tokenID := bootstrapTokenIDFromKubeconfig(bootstrapKubeconfigData)
+
+	enrollment := &infraproviderv1.ByoHostEnrollment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      hostName,
+			Namespace: namespace,
+		},
+	}
+	Expect(clusterProxy.GetClient().Create(ctx, enrollment)).NotTo(HaveOccurred(), "failed to create ByoHostEnrollment")
+
+	Eventually(func() error {
+		key := types.NamespacedName{Name: hostName, Namespace: namespace}
+		if err := clusterProxy.GetClient().Get(ctx, key, enrollment); err != nil {
+			return err
+		}
+		enrollment.Status.TokenID = tokenID
+		return clusterProxy.GetClient().Status().Update(ctx, enrollment)
+	}, e2eConfig.GetIntervals("", "wait-controllers")...).Should(Succeed())
+}
+
+// bootstrapTokenIDFromKubeconfig returns the public half of the bootstrap token
+// a kubeconfig authenticates with.
+func bootstrapTokenIDFromKubeconfig(kubeconfigData string) string {
+	config, err := clientcmd.Load([]byte(kubeconfigData))
+	Expect(err).NotTo(HaveOccurred(), "failed to parse the bootstrap kubeconfig")
+
+	authInfo, found := config.AuthInfos[infraproviderv1.DefaultAuth]
+	Expect(found).To(BeTrue(), "bootstrap kubeconfig has no %s auth info", infraproviderv1.DefaultAuth)
+
+	tokenID, _, found := strings.Cut(authInfo.Token, ".")
+	Expect(found).To(BeTrue(), "bootstrap token is not in <id>.<secret> form")
+
+	return tokenID
 }

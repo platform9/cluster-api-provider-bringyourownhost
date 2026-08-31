@@ -76,7 +76,7 @@ var _ = Describe("When a host onboards via byohctl using a bootstrap kubeconfig,
 			CommandArgs: map[string]string{
 				agentFlagBootstrapKubeconfig: byohctlBootstrapConfPath,
 			},
-			BootstrapKubeconfigData: generateBootstrapKubeconfig(ctx, bootstrapClusterProxy, clusterConName),
+			BootstrapKubeconfigData: generateBootstrapKubeconfig(ctx, bootstrapClusterProxy, clusterConName, byoHostName, namespace.Name),
 		}
 
 		created, err := runner.createDockerContainer()
