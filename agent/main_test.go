@@ -438,3 +438,61 @@ func TestNewManagerScopesCacheToThisHost(t *testing.T) {
 	require.Len(t, hosts.Items, 1)
 	assert.Equal(t, opts.hostName, hosts.Items[0].Name)
 }
+
+func TestRetryWithBackoff(t *testing.T) {
+	testCases := []struct {
+		name string
+		// failures is how many times the attempt fails before succeeding.
+		// A negative value means it never succeeds.
+		failures     int
+		cancelAfter  int
+		wantAttempts int
+		wantErr      error
+	}{
+		{
+			name:         "succeeds on the first attempt",
+			failures:     0,
+			wantAttempts: 1,
+		},
+		{
+			name:         "succeeds after a few failures",
+			failures:     3,
+			wantAttempts: 4,
+		},
+		{
+			name:         "gives up only when the context is done",
+			failures:     -1,
+			cancelAfter:  2,
+			wantAttempts: 2,
+			wantErr:      context.Canceled,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+
+			attempts := 0
+			attempt := func() error {
+				attempts++
+				if tc.cancelAfter > 0 && attempts >= tc.cancelAfter {
+					cancel()
+				}
+				if tc.failures < 0 || attempts <= tc.failures {
+					return errors.New("attempt failed")
+				}
+				return nil
+			}
+
+			err := retryWithBackoff(ctx, logr.Discard(), time.Millisecond, 4*time.Millisecond, attempt)
+
+			if tc.wantErr != nil {
+				require.ErrorIs(t, err, tc.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tc.wantAttempts, attempts)
+		})
+	}
+}
