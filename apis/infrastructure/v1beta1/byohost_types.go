@@ -33,6 +33,11 @@ const (
 	// HostOSFamilyRHEL is the HostOSFamilyLabel value for hosts whose
 	// package manager is rpm.
 	HostOSFamilyRHEL = "rhel"
+	// HostCSRLabel marks a CertificateSigningRequest as belonging to a
+	// particular host. The agent finds its own request through this label
+	// instead of a fixed object name, so a denied request can be replaced
+	// rather than reused on every restart.
+	HostCSRLabel = "byoh.infrastructure.cluster.x-k8s.io/csr-host-name"
 	// BundleLookupBaseRegistryAnnotation annotation used to store the base registry for the bundle lookup
 	BundleLookupBaseRegistryAnnotation = "byoh.infrastructure.cluster.x-k8s.io/bundle-registry"
 	// ClusterLabel label is used to mark a cluster where it is attached to
