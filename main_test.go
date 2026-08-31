@@ -32,10 +32,10 @@ import (
 // wantControllers is the number of runnables setupControllers adds to the
 // manager when CSR auto-approval is on: one per controller
 // (ClusterCacheReconciler, ByoMachine, ByoHost, ByoHostAgentUpgrade,
-// ByoMachineTemplate, ByoCluster, ByoAdmission, K8sInstallerConfig,
-// BootstrapKubeconfig). Webhooks register handler paths on the webhook server
-// instead, so they do not show up here.
-const wantControllers = 9
+// ByoMachineTemplate, ByoCluster, ByoAdmission, ByoHostEnrollment,
+// K8sInstallerConfig, BootstrapKubeconfig). Webhooks register handler paths on
+// the webhook server instead, so they do not show up here.
+const wantControllers = 10
 
 var (
 	testEnv *envtest.Environment
