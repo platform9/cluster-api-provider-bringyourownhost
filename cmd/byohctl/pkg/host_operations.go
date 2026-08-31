@@ -6,7 +6,6 @@ package pkg
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/client"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/service"
@@ -20,53 +19,65 @@ const (
 	OperationDecommission HostOperationType = "decommission"
 )
 
-// PerformHostOperation performs the common steps for host deauthorisation or decommissioning
-func PerformHostOperation(ctx context.Context, operationType HostOperationType, namespace string) error {
+// HostIO abstracts the side-effecting operations PerformHostOperation
+// needs (interactive prompts and Debian package purge) so tests can pass a
+// stub without mutating package-level state.
+type HostIO interface {
+	Confirm(msg string) (bool, error)
+	Purge() error
+}
+
+// DefaultHostIO wires HostIO to the real utils.AskBool and
+// service.PurgeDebianPackage implementations for production callers.
+type DefaultHostIO struct{}
+
+var _ HostIO = DefaultHostIO{}
+
+func (DefaultHostIO) Confirm(msg string) (bool, error) {
+	return utils.AskBool(msg)
+}
+
+func (DefaultHostIO) Purge() error {
+	return service.PurgeDebianPackage()
+}
+
+// PerformHostOperation performs the common steps for host deauthorisation or decommissioning.
+func PerformHostOperation(ctx context.Context, client *client.Client, io HostIO, operationType HostOperationType, namespace string, force bool) error {
 
 	// Deauthorise and decommission host steps -
-	// 1. Authenticate with Platform9 with the kubeconfig present in the agent directory ( kubeconfig )
-	// 2. Check if the host is already onboarded ( by checking the respective byohost object in the management cluster)
-	// 3. If the host is onboarded - Check if machineRef is set to the byohost object; If not set, just delete the byohost object and exit
-	// 4. Annonate the respective machine object with "cluster.x-k8s.io/delete-machine"="yes"
-	// 5. Scale down the machine deployment by 1
-	// 6. Wait for machineRef to be unset from the byohost object status field
+	// 1. Check if the host is already onboarded ( by checking the respective byohost object in the management cluster)
+	// 2. If the host is onboarded - Check if machineRef is set to the byohost object; If not set, just delete the byohost object and exit
+	// 3. Annonate the respective machine object with "cluster.x-k8s.io/delete-machine"="yes"
+	// 4. Scale down the machine deployment by 1
+	// 5. Wait for machineRef to be unset from the byohost object status field
 	// Once the machienRef is unset, host is deauthorised
 	// If the request is to decommission, delete the byohost object and run dpkg purge
-	// 7. Delete the byohost object
-	// 8. Run dpkg --purge byohost-agent
+	// 6. Delete the byohost object
+	// 7. Run dpkg --purge byohost-agent
 
 	utils.LogInfo("Performing %s operation for host in namespace %s", operationType, namespace)
 
-	// 1. Check if kubeconfig file exists
-	if _, err := os.Stat(service.KubeconfigFilePath); os.IsNotExist(err) {
-		return fmt.Errorf("kubeconfig file not found at %s. Please onboard the host first.", service.KubeconfigFilePath)
-	}
-
-	// 2. Get Kubernetes client
-	client, err := client.GetK8sClient(service.KubeconfigFilePath)
-	if err != nil {
-		return fmt.Errorf("failed to get Kubernetes client: %v", err)
-	}
-
-	utils.LogSuccess("Successfully retrieved Kubernetes client")
-
-	// 3. Check if byohost object exists
+	// 1. Check if byohost object exists
 	byoHost, err := client.GetByoHostObject(namespace)
 	if err != nil {
 		fmt.Println("failed to get ByoHosts object from the management plane: " + err.Error())
 		// There might be a chance that the byohost object is not present in the management cluster
 		// If decommission, ask user to proceed with host cleanup or not, run dpkg purge if yes
 		if operationType == OperationDecommission {
-			// Ask user to proceed with host cleanup or not
-			continueDecommission, err := utils.AskBool("Do you want to proceed with host cleanup? (y/n)")
-			if err != nil {
-				return fmt.Errorf("failed to get user input: %v", err)
+			if !force {
+				// Ask user to proceed with host cleanup or not
+				continueDecommission, err := io.Confirm("Do you want to proceed with host cleanup? (y/n)")
+				if err != nil {
+					return fmt.Errorf("failed to get user input: %v", err)
+				}
+				if !continueDecommission {
+					utils.LogInfo("Host cleanup declined by user; skipping dpkg purge")
+					return nil
+				}
+			} else {
+				utils.LogInfo("--force set: proceeding with host cleanup despite unreachable management plane")
 			}
-			if !continueDecommission {
-				return nil
-			}
-			err = service.PurgeDebianPackage()
-			if err != nil {
+			if err := io.Purge(); err != nil {
 				return fmt.Errorf("failed to run dpkg purge: %v", err)
 			}
 			utils.LogSuccess("Successfully ran dpkg purge")
@@ -75,19 +86,23 @@ func PerformHostOperation(ctx context.Context, operationType HostOperationType, 
 
 		// If its here, the operationType is deauthorise
 		// For deathorise byoHost object must be present in the management cluster
+		if force {
+			utils.LogInfo("--force set: management plane unreachable or ByoHost missing; treating deauthorise as a no-op")
+			return nil
+		}
 		return fmt.Errorf("Cannot proceed ahead with the deauthorisation. Either restart the pf9-byohost-agent service or decommission and re-onboard.")
 	}
 
 	utils.LogSuccess("Successfully retrieved ByoHosts object from the management plane")
 
-	// 4. Check if machineRef is set to the byohost object
+	// 2. Check if machineRef is set to the byohost object
 	if byoHost.Status.MachineRef == nil {
 		// Host is not attached to any cluster
 		// Delete the byohost object and run dpkg purge if decommission
 		// If deauthorise, just return
 		if operationType == OperationDecommission {
 			utils.LogInfo("MachineRef is not set to the byohost object. Host is not part of any cluster. Deleting the byohost object and running dpkg purge.")
-			return performHostDecommissionWithNoMachineRef(client, namespace)
+			return performHostDecommissionWithNoMachineRef(ctx, client, io, namespace)
 		}
 		return fmt.Errorf("machineRef is not set for the byohost object. This host is not part of the cluster. Cannot proceed ahead with de-auth")
 
@@ -119,7 +134,7 @@ func PerformHostOperation(ctx context.Context, operationType HostOperationType, 
 		fmt.Println("Info: Machine deployment replica count is 1. This is the last node in the cluster.")
 
 		// Ask user to continue de-auth or not
-		continueDeauth, err := utils.AskBool("Do you want to continue with de-auth? (y/n)")
+		continueDeauth, err := io.Confirm("Do you want to continue with de-auth? (y/n)")
 		if err != nil {
 			return fmt.Errorf("failed to get user input: %v", err)
 		}
@@ -140,7 +155,7 @@ func PerformHostOperation(ctx context.Context, operationType HostOperationType, 
 		return fmt.Errorf("failed to get machine object: %v", err)
 	}
 
-	// 5. Annonate the respective machine object with "cluster.x-k8s.io/delete-machine"="yes"
+	// 3. Annonate the respective machine object with "cluster.x-k8s.io/delete-machine"="yes"
 	err = client.AnnotateMachineObject(ctx, unstructuredMachineObj, namespace, "cluster.x-k8s.io/delete-machine", "yes")
 	if err != nil {
 		return fmt.Errorf("failed to annotate machine object: %v", err)
@@ -148,7 +163,7 @@ func PerformHostOperation(ctx context.Context, operationType HostOperationType, 
 
 	utils.LogSuccess("Successfully annotated machine object that needs to be removed from the cluster")
 
-	// 6. Scale down the machine deployment by 1
+	// 4. Scale down the machine deployment by 1
 	err = client.ScaleDownMachineDeployment(ctx, unstructuredMachineObj, namespace)
 	if err != nil {
 		return fmt.Errorf("failed to scale down machine deployment: %v", err)
@@ -156,7 +171,7 @@ func PerformHostOperation(ctx context.Context, operationType HostOperationType, 
 
 	utils.LogSuccess("Successfully scaled down machine deployment by 1")
 
-	// 7. Wait for machineRef to be unset from the byohost object status field
+	// 5. Wait for machineRef to be unset from the byohost object status field
 	err = client.WaitForMachineRefToBeUnset(ctx, byoHost, namespace)
 	if err != nil {
 		return fmt.Errorf("failed to wait for machineRef to be unset: %v", err)
@@ -166,30 +181,23 @@ func PerformHostOperation(ctx context.Context, operationType HostOperationType, 
 
 	// If operation is decommission, delete the byohost object and run dpkg purge
 	if operationType == OperationDecommission {
-		return performHostDecommissionWithNoMachineRef(client, namespace)
+		return performHostDecommissionWithNoMachineRef(ctx, client, io, namespace)
 	}
 
 	return nil
 }
 
 // Helper function to consolidate decommissioning logic when no machineRef is set
-func performHostDecommissionWithNoMachineRef(client *client.Client, namespace string) error {
-	// 1. Delete the byohost object
-	// 2. Run dpkg purge
-	// 3. Return success
-
+func performHostDecommissionWithNoMachineRef(ctx context.Context, client *client.Client, io HostIO, namespace string) error {
 	utils.LogInfo("Deleting ByoHosts object and running dpkg purge")
-	// 1. Delete the byohost object
-	err := client.DeleteByoHostObject(namespace)
-	if err != nil {
+
+	if err := client.DeleteByoHostObject(namespace); err != nil {
 		return fmt.Errorf("failed to delete ByoHosts object: %v", err)
 	}
 
 	utils.LogSuccess("Successfully deleted ByoHosts object")
 
-	// 2. Run dpkg purge
-	err = service.PurgeDebianPackage()
-	if err != nil {
+	if err := io.Purge(); err != nil {
 		return fmt.Errorf("failed to run dpkg purge: %v", err)
 	}
 

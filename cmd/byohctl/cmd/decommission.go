@@ -14,6 +14,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var decommissionForce bool
+
 var decommissionCmd = &cobra.Command{
 	Use:   "decommission",
 	Short: "Decommission a host from the pf9 kaapi management cluster",
@@ -29,11 +31,17 @@ This command will:
 func init() {
 	rootCmd.AddCommand(decommissionCmd)
 	decommissionCmd.Flags().StringVarP(&verbosity, "verbosity", "v", "minimal", "Log verbosity level. Requires one of: all, important, minimal, critical.\nOmitting the flag will show minimal verbosity")
+	decommissionCmd.Flags().BoolVarP(&decommissionForce, "force", "f", false, "Forcefully decommission the host.")
 }
 
 func runDecommission(cmd *cobra.Command, args []string) {
 
 	utils.SetConsoleOutputLevel(verbosity)
+
+	if _, err := os.Stat(service.KubeconfigFilePath); os.IsNotExist(err) {
+		fmt.Printf("kubeconfig file not found at %s. Please onboard the host first.\n", service.KubeconfigFilePath)
+		os.Exit(1)
+	}
 
 	namespace, err := client.GetNamespaceFromConfig(service.KubeconfigFilePath)
 	if err != nil {
@@ -41,7 +49,13 @@ func runDecommission(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	err = pkg.PerformHostOperation(cmd.Context(), pkg.OperationDecommission, namespace)
+	k8sClient, err := client.GetK8sClient(service.KubeconfigFilePath)
+	if err != nil {
+		fmt.Println("Failed to get Kubernetes client: " + err.Error())
+		os.Exit(1)
+	}
+
+	err = pkg.PerformHostOperation(cmd.Context(), k8sClient, pkg.DefaultHostIO{}, pkg.OperationDecommission, namespace, decommissionForce)
 	if err != nil {
 		fmt.Println("Failed to decommission host. " + err.Error())
 		os.Exit(1)
