@@ -258,8 +258,15 @@ controller-test: $(GINKGO) ## Run controller tests
 webhook-test: $(GINKGO) ## Run webhook tests
 	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; $(GINKGO) --coverprofile cover.out apis/infrastructure/v1beta1
 
-test-e2e: take-user-input docker-build prepare-byoh-docker-host-image $(GINKGO) cluster-templates-e2e ## Run the end-to-end tests
-	$(GINKGO) -v -trace -tags=e2e -focus="$(GINKGO_FOCUS)" $(_SKIP_ARGS) -nodes=$(GINKGO_NODES) --noColor=$(GINKGO_NOCOLOR) $(GINKGO_ARGS) test/e2e -- \
+# CI will download the agent bundle from the saved artifacts if SKIP_BUILD is set.
+ifdef SKIP_BUILD
+BUILD_HOST_AGENT_DEB_PREREQ :=
+else
+BUILD_HOST_AGENT_DEB_PREREQ := build-host-agent-deb
+endif
+
+test-e2e: take-user-input docker-build prepare-byoh-docker-host-image $(GINKGO) cluster-templates-e2e $(BUILD_HOST_AGENT_DEB_PREREQ) ## Run the end-to-end tests
+	$(GINKGO) -vv -trace -tags=e2e -focus="$(GINKGO_FOCUS)" $(_SKIP_ARGS) -nodes=$(GINKGO_NODES) --noColor=$(GINKGO_NOCOLOR) $(GINKGO_ARGS) test/e2e -- \
 	    -e2e.artifacts-folder="$(ARTIFACTS)" \
 	    -e2e.config="$(E2E_CONF_FILE)" \
 	    -e2e.skip-resource-cleanup=$(SKIP_RESOURCE_CLEANUP) -e2e.use-existing-cluster=$(USE_EXISTING_CLUSTER) \
@@ -320,8 +327,6 @@ take-user-input:
 	@echo "$$WARNING"
 	@read -p "Do you want to proceed [Y/n]?" REPLY; \
 	if [[ $$REPLY = "Y" || $$REPLY = "y" ]]; then echo starting e2e test; exit 0 ; else echo aborting; exit 1; fi
-	
-
 
 $(GINKGO): # Build ginkgo from tools folder.
 	cd $(TOOLS_DIR); GOBIN=$(TOOLS_BIN_DIR) go install $(GINKGO_PKG)
