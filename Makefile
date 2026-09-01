@@ -258,8 +258,15 @@ controller-test: $(GINKGO) ## Run controller tests
 webhook-test: $(GINKGO) ## Run webhook tests
 	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; $(GINKGO) --coverprofile cover.out apis/infrastructure/v1beta1
 
-test-e2e: take-user-input docker-build prepare-byoh-docker-host-image $(GINKGO) cluster-templates-e2e ## Run the end-to-end tests
-	$(GINKGO) -v -trace -tags=e2e -focus="$(GINKGO_FOCUS)" $(_SKIP_ARGS) -nodes=$(GINKGO_NODES) --noColor=$(GINKGO_NOCOLOR) $(GINKGO_ARGS) test/e2e -- \
+# CI will download the agent bundle from the saved artifacts if SKIP_BUILD is set.
+ifdef SKIP_BUILD
+BUILD_HOST_AGENT_DEB_PREREQ :=
+else
+BUILD_HOST_AGENT_DEB_PREREQ := build-host-agent-deb
+endif
+
+test-e2e: take-user-input docker-build prepare-byoh-docker-host-image $(GINKGO) cluster-templates-e2e $(BUILD_HOST_AGENT_DEB_PREREQ) ## Run the end-to-end tests
+	$(GINKGO) -vv -trace -tags=e2e -focus="$(GINKGO_FOCUS)" $(_SKIP_ARGS) -nodes=$(GINKGO_NODES) --noColor=$(GINKGO_NOCOLOR) $(GINKGO_ARGS) test/e2e -- \
 	    -e2e.artifacts-folder="$(ARTIFACTS)" \
 	    -e2e.config="$(E2E_CONF_FILE)" \
 	    -e2e.skip-resource-cleanup=$(SKIP_RESOURCE_CLEANUP) -e2e.use-existing-cluster=$(USE_EXISTING_CLUSTER) \
@@ -320,8 +327,6 @@ take-user-input:
 	@echo "$$WARNING"
 	@read -p "Do you want to proceed [Y/n]?" REPLY; \
 	if [[ $$REPLY = "Y" || $$REPLY = "y" ]]; then echo starting e2e test; exit 0 ; else echo aborting; exit 1; fi
-	
-
 
 $(GINKGO): # Build ginkgo from tools folder.
 	cd $(TOOLS_DIR); GOBIN=$(TOOLS_BIN_DIR) go install $(GINKGO_PKG)
@@ -436,15 +441,24 @@ DEB_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/debsrc
 # HELM_ARCH rather than a hardcoded amd64.
 PACKAGE_GOARCH ?= $(HELM_ARCH)
 COMMON_SRC_ROOT := $(PF9_BYOHOST_SRCDIR)/common
+# COMMON_SRC_ROOT/DEB_SRC_ROOT/RPM_SRC_ROOT are directories. Make treats a directory as up to
+# date the moment it exists, even half-populated by a crashed prior run. The stamp gives each
+# one a real mtime to check, so the recipe can rm -rf and repopulate instead of trusting
+# whatever's already sitting there.
+COMMON_SRC_STAMP := $(COMMON_SRC_ROOT)/.stamp
+DEB_SRC_STAMP := $(DEB_SRC_ROOT)/.stamp
+RPM_SRC_STAMP := $(RPM_SRC_ROOT)/.stamp
 PF9_BYOHOST_DEB_FILE := $(PF9_BYOHOST_SRCDIR)/debsrc/pf9-byohost-agent.deb
 RPMBUILD_DIR := $(PF9_BYOHOST_SRCDIR)/rpmbuild
 PF9_BYOHOST_RPM_FILE := $(RPMBUILD_DIR)/RPMS/$(HELM_ARCH_RAW)/pf9-byohost-1.0-$(BUILDNUM).git$(GITHASH).$(HELM_ARCH_RAW).rpm
 
-$(RPM_SRC_ROOT): | $(COMMON_SRC_ROOT)
+$(RPM_SRC_STAMP): $(COMMON_SRC_STAMP)
 	echo "make RPM_SRC_ROOT: $(RPM_SRC_ROOT)"
+	rm -rf $(RPM_SRC_ROOT)
 	cp -a $(COMMON_SRC_ROOT) $(RPM_SRC_ROOT)
+	touch $@
 
-$(PF9_BYOHOST_RPM_FILE): |$(RPM_SRC_ROOT)
+$(PF9_BYOHOST_RPM_FILE): $(RPM_SRC_STAMP)
 	echo "make PF9_BYOHOST_RPM_FILE $(PF9_BYOHOST_RPM_FILE) "
 	rpmbuild -bb \
 	    --define "_topdir $(RPMBUILD_DIR)"  \
@@ -464,26 +478,30 @@ build-host-agent-rpm:  $(PF9_BYOHOST_RPM_FILE)
 build-byohctl-binary:
 	$(MAKE) -C $(BYOHCTL_DIR) build GOARCH=$(PACKAGE_GOARCH)
 
-$(COMMON_SRC_ROOT): build-byohctl-binary
+$(COMMON_SRC_STAMP): build-byohctl-binary
 	echo "Building COMMON_SRC_ROOT"
+	rm -rf $(COMMON_SRC_ROOT)
 	mkdir -p $(COMMON_SRC_ROOT)
 	echo "BUILDING COMMON_SRC_ROOT/binary for GOARCH=$(PACKAGE_GOARCH)"
 	RELEASE_BINARY=./byoh-hostagent GOOS=linux GOARCH=$(PACKAGE_GOARCH) GOLDFLAGS="$(LDFLAGS) $(STATIC)" \
 	HOST_AGENT_DIR=./$(HOST_AGENT_DIR) $(MAKE) host-agent-binary
 	mkdir -p $(COMMON_SRC_ROOT)/binary
 	cp bin/byoh-hostagent-linux-$(PACKAGE_GOARCH) $(COMMON_SRC_ROOT)/binary/pf9-byoh-hostagent
-	echo "BUILDING dir for pf9-byohost-service , COPING service pf9-byoh-agent.service "
+	echo "BUILDING dir for pf9-byohost-service, COPYING service pf9-byoh-agent.service"
 	mkdir -p $(COMMON_SRC_ROOT)/etc/systemd/system/
 	cp $(AGENT_SRC_DIR)/service/pf9-byohostagent.service $(COMMON_SRC_ROOT)/etc/systemd/system/pf9-byohost-agent.service
-	echo "BUILDING COMMON_SRC_ROOT/usr/bin COPING binary byohctl"
+	echo "BUILDING COMMON_SRC_ROOT/usr/bin COPYING binary byohctl"
 	mkdir -p $(COMMON_SRC_ROOT)/usr/bin
 	cp $(BYOHCTL_DIR)/bin/byohctl $(COMMON_SRC_ROOT)/usr/bin/byohctl
 	chmod +x $(COMMON_SRC_ROOT)/usr/bin/byohctl
+	touch $@
 
-$(DEB_SRC_ROOT): | $(COMMON_SRC_ROOT)
-	cp -a  $(COMMON_SRC_ROOT) $(DEB_SRC_ROOT)
+$(DEB_SRC_STAMP): $(COMMON_SRC_STAMP)
+	rm -rf $(DEB_SRC_ROOT)
+	cp -a $(COMMON_SRC_ROOT) $(DEB_SRC_ROOT)
+	touch $@
 
-$(PF9_BYOHOST_DEB_FILE): $(DEB_SRC_ROOT)
+$(PF9_BYOHOST_DEB_FILE): $(DEB_SRC_STAMP)
 	fpm -t deb -s dir -n pf9-byohost-agent \
 	 --description "Platform9 Bring Your Own Host deb package" \
 	 --license "Commercial" --architecture $(PACKAGE_GOARCH) --url "http://www.platform9.net" --vendor Platform9 \
