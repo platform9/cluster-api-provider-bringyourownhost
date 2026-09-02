@@ -12,6 +12,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
+// Name is a host name that has already been through Normalize. Taking this
+// type rather than a string means a caller cannot pass a raw host name where
+// the normalized object name is required.
+type Name string
+
 // Normalize turns a machine's host name into the object name used for that
 // host: lowercase, underscores replaced with hyphens, and a trailing dot
 // removed. Kubernetes object names must be lowercase, and kubelet lowercases
@@ -30,7 +35,7 @@ import (
 // error rather than being mangled further. Two different host names can
 // normalize to the same object name; resolving that collision is not this
 // function's job.
-func Normalize(name string) (string, error) {
+func Normalize(name string) (Name, error) {
 	normalized := strings.ToLower(name)
 	normalized = strings.ReplaceAll(normalized, "_", "-")
 	normalized = strings.TrimSuffix(normalized, ".")
@@ -40,5 +45,5 @@ func Normalize(name string) (string, error) {
 			name, normalized, strings.Join(errs, "; "))
 	}
 
-	return normalized, nil
+	return Name(normalized), nil
 }

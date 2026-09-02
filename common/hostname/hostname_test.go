@@ -17,7 +17,7 @@ func TestNormalize(t *testing.T) {
 	testCases := []struct {
 		name  string
 		input string
-		want  string
+		want  hostname.Name
 	}{
 		{
 			name:  "already a valid object name",
@@ -52,7 +52,7 @@ func TestNormalize(t *testing.T) {
 		{
 			name:  "longest accepted name",
 			input: strings.Repeat("a", 253),
-			want:  strings.Repeat("a", 253),
+			want:  hostname.Name(strings.Repeat("a", 253)),
 		},
 	}
 
@@ -73,7 +73,7 @@ func TestNormalizeIsIdempotent(t *testing.T) {
 	first, err := hostname.Normalize("Web_01.Example.COM.")
 	require.NoError(t, err)
 
-	second, err := hostname.Normalize(first)
+	second, err := hostname.Normalize(string(first))
 	require.NoError(t, err)
 	assert.Equal(t, first, second)
 }
