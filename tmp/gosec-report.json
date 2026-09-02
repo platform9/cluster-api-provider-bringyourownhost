@@ -1,0 +1,44 @@
+{
+	"Golang errors": {},
+	"Issues": [
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1/byohostenrollment_types.go",
+			"code": "34: \t// FIXME CLAUDE: Is this effectively an enrolment failure instead? Should we rename this to EnrolmentFailedReason?\n35: \tCredentialGenerateFailedReason = \"CredentialGenerateFailed\" //nolint: gosec // a condition reason, not a credential\n36: )\n",
+			"line": "35",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/test/e2e/e2e_k8s_bundle_registry.go",
+			"code": "169: \n170: \trunCmd := exec.CommandContext(ctx, \"docker\", \"run\", //nolint:gosec // fixed args, no user input\n171: \t\t\"--name\", k8sBundleBuilderContainer,\n172: \t\t\"-e\", \"BUILD_ONLY=1\",\n173: \t\t\"-e\", \"CONTAINERD_VERSION=\"+k8sBundleContainerdVersion,\n174: \t\t\"-e\", \"KUBERNETES_VERSION=\"+kubernetesVersion,\n175: \t\t\"-e\", \"KUBERNETES_MAJOR_VERSION=\"+majorMinor,\n176: \t\t\"-e\", \"CRITOOL_VERSION=\"+critoolVersion,\n177: \t\t\"-e\", \"ARCH=\"+debianArch,\n178: \t\t\"-e\", \"UBUNTU_VERSION=\"+k8sBundleUbuntuVersion,\n179: \t\tk8sBundleBuilderImageTag,\n180: \t)\n181: \tif output, runErr := runCmd.CombinedOutput(); runErr != nil {\n",
+			"line": "170-180",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		}
+	],
+	"Stats": {
+		"files": 67,
+		"lines": 11331,
+		"nosec": 17,
+		"found": 2
+	},
+	"GosecVersion": "dev"
+}
