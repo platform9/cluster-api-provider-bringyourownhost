@@ -591,7 +591,7 @@ func TestEnrollmentTokenIDIndexer(t *testing.T) {
 			want:   []string{testTokenID},
 		},
 		{
-			name:   "an enrollment that has not minted a token yet",
+			name:   "an enrollment that has not created a token yet",
 			object: enrollment(testHostName, ""),
 		},
 		{
@@ -616,7 +616,7 @@ func TestValidateEnrolledHost(t *testing.T) {
 		wantReason  string
 	}{
 		{
-			name:        "the common name matches the enrollment that minted the token",
+			name:        "the common name matches the enrollment that created the token",
 			enrollments: []client.Object{enrollment(testHostName, testTokenID)},
 		},
 		{
