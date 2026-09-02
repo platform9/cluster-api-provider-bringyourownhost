@@ -510,7 +510,7 @@ func Byf(format string, a ...interface{}) {
 	By(fmt.Sprintf(format, a...))
 }
 
-// generateBootstrapKubeconfig mints a bootstrap credential for hostName and
+// generateBootstrapKubeconfig creates a bootstrap credential for hostName and
 // returns the kubeconfig the agent in that host's container starts with.
 //
 // The enrolment it creates alongside is what lets the CSR approver tie the
@@ -550,10 +550,11 @@ func generateBootstrapKubeconfig(ctx context.Context, clusterProxy framework.Clu
 	return bootstrapKubeconfigData
 }
 
-// createHostEnrollment records, against hostName, the bootstrap token embedded
-// in bootstrapKubeconfigData. The enrolment controller would normally mint that
-// token itself; here the BootstrapKubeconfig controller already has, so only
-// the record the approver reads is missing.
+// createHostEnrollment records the bootstrap token embedded in
+// bootstrapKubeconfigData against hostName. The enrolment controller would
+// normally generate that token itself. Here the BootstrapKubeconfig
+// controller already has, so this only backfills the record the approver
+// reads.
 func createHostEnrollment(ctx context.Context, clusterProxy framework.ClusterProxy, hostName, namespace, bootstrapKubeconfigData string) {
 	tokenID := bootstrapTokenIDFromKubeconfig(bootstrapKubeconfigData)
 
