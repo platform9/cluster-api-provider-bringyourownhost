@@ -70,7 +70,7 @@ const (
 )
 
 // EnrollmentTokenIDIndex indexes ByoHostEnrollment objects by the bootstrap
-// token they minted, so a certificate request's requester resolves to its
+// token they created, so a certificate request's requester resolves to its
 // enrollment in one cache read.
 const EnrollmentTokenIDIndex = "status.tokenID"
 
@@ -191,9 +191,9 @@ func (r *ByoAdmissionReconciler) validate(ctx context.Context, csr *certv1.Certi
 // subject claims to be.
 //
 // The checks above establish that the requester holds a BYOH bootstrap token.
-// They say nothing about which host that token was minted for, so on their own
+// They say nothing about which host that token was created for, so on their own
 // a credential handed to one host still buys a certificate for another. The
-// enrollment that minted the token is the record of which host it was for, and
+// enrollment that created the token is the record of which host it was for, and
 // spec.username carries the token ID that leads back to it.
 //
 // A token with no enrollment behind it is revoked or forged, so it is denied.
@@ -247,7 +247,7 @@ func (r *ByoAdmissionReconciler) validateEnrolledHost(ctx context.Context, csr *
 }
 
 // enrollmentTokenIDIndexer backs EnrollmentTokenIDIndex. An enrollment that
-// has not yet minted a token is left out of the index rather than filed under
+// has not yet created a token is left out of the index rather than filed under
 // the empty string, so a request quoting no token ID matches nothing.
 func enrollmentTokenIDIndexer(object client.Object) []string {
 	enrollment, ok := object.(*infrastructurev1beta1.ByoHostEnrollment)
