@@ -715,6 +715,7 @@ func TestUsableToken(t *testing.T) {
 	}
 }
 
+// FIXME CLAUDE: Rewrite with skill:writing-tests. Table driven tests.
 func TestParseTransportConfig(t *testing.T) {
 	caPEM := testCAPEM(t)
 
@@ -754,12 +755,36 @@ func TestValidateCABundle(t *testing.T) {
 		data    string
 		wantErr bool
 	}{
-		{name: "one certificate", data: caPEM, wantErr: false},
-		{name: "two certificates", data: caPEM + caPEM, wantErr: false},
-		{name: "empty", data: "", wantErr: true},
-		{name: "not pem", data: "hello", wantErr: true},
-		{name: "wrong block type", data: "-----BEGIN RSA PRIVATE KEY-----\nZm9v\n-----END RSA PRIVATE KEY-----\n", wantErr: true},
-		{name: "pem body is not a certificate", data: "-----BEGIN CERTIFICATE-----\nZm9v\n-----END CERTIFICATE-----\n", wantErr: true},
+		{
+			name:    "one certificate",
+			data:    caPEM,
+			wantErr: false,
+		},
+		{
+			name:    "two certificates",
+			data:    caPEM + caPEM,
+			wantErr: false,
+		},
+		{
+			name:    "empty",
+			data:    "",
+			wantErr: true,
+		},
+		{
+			name:    "not pem",
+			data:    "hello",
+			wantErr: true,
+		},
+		{
+			name:    "wrong block type",
+			data:    "-----BEGIN RSA PRIVATE KEY-----\nZm9v\n-----END RSA PRIVATE KEY-----\n",
+			wantErr: true,
+		},
+		{
+			name:    "pem body is not a certificate",
+			data:    "-----BEGIN CERTIFICATE-----\nZm9v\n-----END CERTIFICATE-----\n",
+			wantErr: true,
+		},
 	}
 
 	for _, tc := range testCases {

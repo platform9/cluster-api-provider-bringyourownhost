@@ -735,6 +735,7 @@ func (r *ByoMachineReconciler) createInstallerConfig(ctx context.Context, machin
 	return nil
 }
 
+// FIXME CLAUDE: Needs dedicated tests.
 func generateSafeLabelValue(namespace, name string) string {
 	originalValue := namespace + "." + name
 
