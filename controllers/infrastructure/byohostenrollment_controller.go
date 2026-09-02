@@ -43,6 +43,8 @@ const (
 	// the API server URL, the SNI name or the CA, and must not be trusted to
 	// supply them.
 	//
+	// The deployment supplies this ConfigMap. Nothing in this repo creates it.
+	//
 	// Keys:
 	//
 	//	apiserverURL             https://<host>:<port>, required. Must be an
@@ -54,7 +56,6 @@ const (
 	//	                         host is not in that certificate's SANs.
 	//	certificateAuthorityData PEM-encoded CA bundle for the API server,
 	//	                         required. Raw PEM, not base64 of PEM.
-	// FIXME CLAUDE: No one creates this yet? Is this feature incomplete?
 	DefaultTransportConfigMapName = "byoh-bootstrap-transport"
 
 	// TransportConfigMapAPIServerURLKey names the API server endpoint.
@@ -82,8 +83,8 @@ const (
 	tokenRenewalMargin = 5 * time.Minute
 )
 
-// ByoHostEnrollmentReconciler mints the bootstrap credential for one BYO host
-// and delivers it as a Secret in the enrollment's own namespace.
+// ByoHostEnrollmentReconciler creates the bootstrap credential for one BYO
+// host and delivers it as a Secret in the enrollment's own namespace.
 type ByoHostEnrollmentReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -93,32 +94,23 @@ type ByoHostEnrollmentReconciler struct {
 	TransportConfigMap types.NamespacedName
 }
 
-// transportConfig is the validated content of the transport ConfigMap.
-// FIXME CLAUDE: Move after all methods of ByoHostEnrollmentReconciler.
-type transportConfig struct {
-	apiServerURL  string
-	tlsServerName string
-	caData        []byte
-}
-
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=byohostenrollments,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=byohostenrollments/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=byohostenrollments/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 
-// Reconcile mints and delivers the bootstrap credential for one host.
+// Reconcile creates and delivers the bootstrap credential for one host.
 //
 // The write order is load-bearing. The token ID reaches status before the
 // token Secret exists, so a reconcile that dies partway leaves a record of the
-// token it minted. The next pass finds that token and either reuses it or
-// deletes it, instead of minting a second live credential and abandoning the
+// token it created. The next pass finds that token and either reuses it or
+// deletes it, instead of creating a second live credential and abandoning the
 // first for the rest of its lifetime.
 func (r *ByoHostEnrollmentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("Reconcile request received")
 
-	// FIXME CLAUDE: Where is the agent code to create a ByoHostEnrollment? Is this yet to be implemented?
 	enrollment := &infrav1.ByoHostEnrollment{}
 	if err := r.Get(ctx, req.NamespacedName, enrollment); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -149,42 +141,95 @@ func (r *ByoHostEnrollmentReconciler) reconcileNormal(ctx context.Context, enrol
 
 	hostName, err := hostname.Normalize(enrollment.Name)
 	if err != nil {
-		return ctrl.Result{}, r.markNotReady(ctx, enrollment, infrav1.CredentialGenerateFailedReason, err.Error())
+		return ctrl.Result{}, r.patchEnrollment(ctx, enrollment,
+			enrollmentNotReadyMutateFn(enrollment, infrav1.InvalidHostNameReason, err.Error()))
 	}
 
-	// FIXME CLAUDE: a missing transport config should be a critical failure instead of silently retrying? Isn't this a pre-requisite for this controller?
-	transport, err := r.readTransportConfig(ctx)
-	if err != nil {
-		logger.Info("Transport configuration is unusable, will retry", "error", err.Error())
-		if markErr := r.markNotReady(ctx, enrollment, infrav1.TransportUnavailableReason, err.Error()); markErr != nil {
+	transportKey := r.TransportConfigMap
+	if transportKey.Name == "" {
+		transportKey.Name = DefaultTransportConfigMapName
+	}
+	if transportKey.Namespace == "" {
+		transportKey.Namespace = metav1.NamespaceSystem
+	}
+
+	var transport *transportConfig
+	configMap := &corev1.ConfigMap{}
+	transportErr := r.Get(ctx, transportKey, configMap)
+	if transportErr != nil {
+		transportErr = fmt.Errorf("get transport ConfigMap %s: %w", transportKey, transportErr)
+	} else {
+		transport, transportErr = parseTransportConfig(configMap)
+	}
+	if transportErr != nil {
+		logger.Info("Transport configuration is unusable, will retry", "error", transportErr.Error())
+		markErr := r.patchEnrollment(ctx, enrollment,
+			enrollmentNotReadyMutateFn(enrollment, infrav1.TransportUnavailableReason, transportErr.Error()))
+		if markErr != nil {
 			return ctrl.Result{}, markErr
 		}
 		return ctrl.Result{RequeueAfter: transportRetryInterval}, nil
 	}
 
-	tokenStr, expiresAt, err := r.ensureBootstrapToken(ctx, enrollment, hostName)
+	token, err := r.ensureBootstrapToken(ctx, enrollment, hostName)
 	if err != nil {
-		if markErr := r.markNotReady(ctx, enrollment, infrav1.CredentialGenerateFailedReason, err.Error()); markErr != nil {
+		markErr := r.patchEnrollment(ctx, enrollment,
+			enrollmentNotReadyMutateFn(enrollment, infrav1.CredentialGenerateFailedReason, err.Error()))
+		if markErr != nil {
 			return ctrl.Result{}, markErr
 		}
 		return ctrl.Result{}, err
 	}
 
-	// FIXME CLAUDE: Inline this function instead. One time use.
-	// Update tests to assert the rendered kubeconfig accordingly in reconcileNormal tests.
-	kubeconfig, err := renderBootstrapKubeconfig(transport, tokenStr)
+	// The kubeconfig the agent uses to request its own client certificate.
+	kubeconfig, err := runtime.Encode(clientcmdlatest.Codec, &clientcmdapi.Config{
+		Clusters: map[string]*clientcmdapi.Cluster{infrav1.DefaultClusterName: {
+			Server:                   transport.apiServerURL,
+			TLSServerName:            transport.tlsServerName,
+			CertificateAuthorityData: transport.caData,
+		}},
+		AuthInfos: map[string]*clientcmdapi.AuthInfo{infrav1.DefaultAuth: {Token: token.value}},
+		Contexts: map[string]*clientcmdapi.Context{infrav1.DefaultContext: {
+			Cluster:   infrav1.DefaultClusterName,
+			AuthInfo:  infrav1.DefaultAuth,
+			Namespace: infrav1.DefaultNamespace,
+		}},
+		CurrentContext: infrav1.DefaultContext,
+	})
 	if err != nil {
-		if markErr := r.markNotReady(ctx, enrollment, infrav1.CredentialGenerateFailedReason, err.Error()); markErr != nil {
+		err = fmt.Errorf("encode bootstrap kubeconfig: %w", err)
+		markErr := r.patchEnrollment(ctx, enrollment,
+			enrollmentNotReadyMutateFn(enrollment, infrav1.CredentialGenerateFailedReason, err.Error()))
+		if markErr != nil {
 			return ctrl.Result{}, markErr
 		}
 		return ctrl.Result{}, err
 	}
 
-	// FIXME CLAUDE: Inline this function instead. One time use. Update tests to assert the secret's
-	// contents accordingly in reconcileNormal tests.
-	credentialSecret := buildCredentialSecret(enrollment, hostName, kubeconfig)
+	// byohctl reads this Secret and pushes it to the host. The owner reference
+	// makes deletion of the enrollment remove it.
+	credentialSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      credentialSecretName(enrollment.Name),
+			Namespace: enrollment.Namespace,
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: infrav1.GroupVersion.String(),
+				Kind:       "ByoHostEnrollment",
+				Name:       enrollment.Name,
+				UID:        enrollment.UID,
+				Controller: new(true),
+			}},
+		},
+		Type: infrav1.CredentialSecretType,
+		Data: map[string][]byte{
+			infrav1.CredentialSecretKubeconfigKey: kubeconfig,
+			infrav1.CredentialSecretHostNameKey:   []byte(hostName),
+		},
+	}
 	if err = r.createOrUpdateSecret(ctx, credentialSecret); err != nil {
-		if markErr := r.markNotReady(ctx, enrollment, infrav1.CredentialGenerateFailedReason, err.Error()); markErr != nil {
+		markErr := r.patchEnrollment(ctx, enrollment,
+			enrollmentNotReadyMutateFn(enrollment, infrav1.CredentialGenerateFailedReason, err.Error()))
+		if markErr != nil {
 			return ctrl.Result{}, markErr
 		}
 		return ctrl.Result{}, err
@@ -192,7 +237,7 @@ func (r *ByoHostEnrollmentReconciler) reconcileNormal(ctx context.Context, enrol
 
 	err = r.patchEnrollment(ctx, enrollment, func() {
 		enrollment.Status.CredentialSecretRef = &corev1.LocalObjectReference{Name: credentialSecret.Name}
-		enrollment.Status.ExpiresAt = new(metav1.NewTime(expiresAt))
+		enrollment.Status.ExpiresAt = new(metav1.NewTime(token.expiresAt))
 		enrollment.Status.ObservedGeneration = enrollment.Generation
 		conditions.MarkTrue(enrollment, infrav1.CredentialReady)
 	})
@@ -200,14 +245,13 @@ func (r *ByoHostEnrollmentReconciler) reconcileNormal(ctx context.Context, enrol
 		return ctrl.Result{}, err
 	}
 
-	logger.Info("Bootstrap credential is ready", "secret", credentialSecret.Name, "expiresAt", expiresAt)
+	logger.Info("Bootstrap credential is ready", "secret", credentialSecret.Name, "expiresAt", token.expiresAt)
 	return ctrl.Result{}, nil
 }
 
-// reconcileDelete removes the bootstrap token Secret this enrollment minted.
+// reconcileDelete removes the bootstrap token Secret this enrollment created.
 // The credential Secret is owned by the enrollment and cascades on its own; the
 // token Secret lives in kube-system, which a namespaced object cannot own.
-// FIXME CLAUDE: Needs dedicated tests.
 func (r *ByoHostEnrollmentReconciler) reconcileDelete(ctx context.Context, enrollment *infrav1.ByoHostEnrollment) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
@@ -232,12 +276,8 @@ func (r *ByoHostEnrollmentReconciler) reconcileDelete(ctx context.Context, enrol
 
 // ensureBootstrapToken returns a live bootstrap token for this enrollment,
 // reusing the one status already names when that token still exists and has
-// useful life left. It returns the full token string and the moment it expires.
-//
-// FIXME CLAUDE: Needs dedicated unit tests. Use skill:writing-tests
-//
-// FIXME CLAUDE: "hostname" should become a type. So that we can guarantee everywhere that only the normalized version is used. The fix itself will need to go into the common/hostname module.
-func (r *ByoHostEnrollmentReconciler) ensureBootstrapToken(ctx context.Context, enrollment *infrav1.ByoHostEnrollment, hostName string) (string, time.Time, error) {
+// useful life left.
+func (r *ByoHostEnrollmentReconciler) ensureBootstrapToken(ctx context.Context, enrollment *infrav1.ByoHostEnrollment, hostName hostname.Name) (*bootstrapToken, error) {
 	logger := log.FromContext(ctx)
 	now := time.Now().UTC()
 
@@ -250,31 +290,31 @@ func (r *ByoHostEnrollmentReconciler) ensureBootstrapToken(ctx context.Context, 
 		err := r.Get(ctx, key, existing)
 		switch {
 		case err == nil:
-			if tokenStr, expiresAt, ok := usableToken(existing, now); ok {
-				return tokenStr, expiresAt, nil
+			if token := validateToken(existing, now); token != nil {
+				return token, nil
 			}
 			// The recorded token is expired, malformed, or carries no
 			// expiration at all. A token with no expiration never stops
 			// working, so it is deleted rather than left behind.
 			logger.Info("Discarding unusable bootstrap token Secret", "secret", key.Name)
 			if deleteErr := r.Delete(ctx, existing); deleteErr != nil && !apierrors.IsNotFound(deleteErr) {
-				return "", time.Time{}, fmt.Errorf("delete unusable bootstrap token Secret %s: %w", key.Name, deleteErr)
+				return nil, fmt.Errorf("delete unusable bootstrap token Secret %s: %w", key.Name, deleteErr)
 			}
 		case apierrors.IsNotFound(err):
 			// The token ID was recorded but the Secret was never written, or
-			// was removed. Minting a replacement strands nothing.
+			// was removed. A replacement strands nothing.
 		default:
-			return "", time.Time{}, fmt.Errorf("get bootstrap token Secret %s: %w", key.Name, err)
+			return nil, fmt.Errorf("get bootstrap token Secret %s: %w", key.Name, err)
 		}
 	}
 
 	tokenStr, err := bootstraputil.GenerateBootstrapToken()
 	if err != nil {
-		return "", time.Time{}, fmt.Errorf("generate bootstrap token: %w", err)
+		return nil, fmt.Errorf("generate bootstrap token: %w", err)
 	}
 	tokenID, _, err := bootstraptoken.GetTokenIDSecretFromBootstrapToken(tokenStr)
 	if err != nil {
-		return "", time.Time{}, fmt.Errorf("split bootstrap token: %w", err)
+		return nil, fmt.Errorf("split bootstrap token: %w", err)
 	}
 
 	ttl := defaultTokenTTL
@@ -285,7 +325,7 @@ func (r *ByoHostEnrollmentReconciler) ensureBootstrapToken(ctx context.Context, 
 
 	tokenSecret, err := buildTokenSecret(tokenStr, hostName, infrav1.BootstrapTokenExtraGroups, expiresAt)
 	if err != nil {
-		return "", time.Time{}, err
+		return nil, err
 	}
 	tokenSecret.Labels = map[string]string{
 		infrav1.EnrollmentLabel: generateSafeLabelValue(enrollment.Namespace, enrollment.Name),
@@ -300,16 +340,18 @@ func (r *ByoHostEnrollmentReconciler) ensureBootstrapToken(ctx context.Context, 
 		enrollment.Status.ExpiresAt = new(metav1.NewTime(expiresAt))
 	})
 	if err != nil {
-		return "", time.Time{}, err
+		return nil, err
 	}
 
 	if err := r.createOrUpdateSecret(ctx, tokenSecret); err != nil {
-		return "", time.Time{}, err
+		return nil, err
 	}
 
-	// FIXME CLAUDE: Do not use the word "mint" and its forms ever. Minted is "Created" or "Generated". Use that instead as appropriate.
-	logger.Info("Minted bootstrap token", "tokenID", tokenID, "expiresAt", expiresAt)
-	return tokenStr, expiresAt, nil
+	logger.Info("Created bootstrap token", "tokenID", tokenID, "expiresAt", expiresAt)
+	return &bootstrapToken{
+		value:     tokenStr,
+		expiresAt: expiresAt,
+	}, nil
 }
 
 // createOrUpdateSecret creates secret, falling back to an update when a
@@ -328,30 +370,9 @@ func (r *ByoHostEnrollmentReconciler) createOrUpdateSecret(ctx context.Context, 
 	return nil
 }
 
-// markNotReady records why no usable credential exists yet.
-// FIXME CLAUDE: Remove this function. Replace at call sites so that we only do:
-// r.patchEnrollment(ctx, enrollment, enrolmentNotReadyMutateFn())
-func (r *ByoHostEnrollmentReconciler) markNotReady(ctx context.Context, enrollment *infrav1.ByoHostEnrollment, reason, message string) error {
-	// I edited this as I was experimenting to see how this would have looked.
-	// I like this version better.
-	// This is effectively what I want at callsitese of markNotReady instead of markNotReady itself. Also pass args to enrolemntNotReadyMutateFn accordingly.
-	return r.patchEnrollment(ctx, enrollment, enrolmentNotReadyMutateFn(enrollment, reason, message))
-}
-
-// Make sure you move this at the end of all methods of ByoHostEnrollmentReconciler for clean code organisation.
-func enrolmentNotReadyMutateFn(enrollment *infrav1.ByoHostEnrollment, reason, message string) func() {
-	return func() {
-		enrollment.Status.ObservedGeneration = enrollment.Generation
-		conditions.MarkFalse(enrollment, infrav1.CredentialReady, reason, clusterv1.ConditionSeverityWarning, "%s", message)
-	}
-}
-
-// END FIXME CLAUDE for the markNotReady section.
-
 // patchEnrollment applies mutate to enrollment and persists the result. Each
 // staged write takes its own helper so that the order the stages run in is the
 // order they reach the API server.
-// FIXME CLAUDE: Add dedicated tests with skill:writing-tests
 func (r *ByoHostEnrollmentReconciler) patchEnrollment(ctx context.Context, enrollment *infrav1.ByoHostEnrollment, mutate func()) error {
 	helper, err := patch.NewHelper(enrollment, r.Client)
 	if err != nil {
@@ -372,32 +393,34 @@ func (r *ByoHostEnrollmentReconciler) patchEnrollment(ctx context.Context, enrol
 	return nil
 }
 
-// readTransportConfig loads and validates the deployment-level transport
-// ConfigMap. A missing or malformed ConfigMap is an error, never a partial
-// credential.
-// FIXME CLAUDE: Used once. Inline the code at call site.
-func (r *ByoHostEnrollmentReconciler) readTransportConfig(ctx context.Context) (*transportConfig, error) {
-	key := r.TransportConfigMap
-	if key.Name == "" {
-		key.Name = DefaultTransportConfigMapName
-	}
-	if key.Namespace == "" {
-		key.Namespace = metav1.NamespaceSystem
-	}
-
-	configMap := &corev1.ConfigMap{}
-	if err := r.Get(ctx, key, configMap); err != nil {
-		return nil, fmt.Errorf("get transport ConfigMap %s: %w", key, err)
-	}
-	return parseTransportConfig(configMap)
-}
-
 // SetupWithManager sets up the controller with the Manager.
 func (r *ByoHostEnrollmentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&infrav1.ByoHostEnrollment{}).
 		Owns(&corev1.Secret{}).
 		Complete(r)
+}
+
+// transportConfig is the validated content of the transport ConfigMap.
+type transportConfig struct {
+	apiServerURL  string
+	tlsServerName string
+	caData        []byte
+}
+
+// bootstrapToken is a token that is safe to hand to a host: the full token
+// string and the moment it stops working.
+type bootstrapToken struct {
+	value     string
+	expiresAt time.Time
+}
+
+// enrollmentNotReadyMutateFn records why no usable credential exists yet.
+func enrollmentNotReadyMutateFn(enrollment *infrav1.ByoHostEnrollment, reason, message string) func() {
+	return func() {
+		enrollment.Status.ObservedGeneration = enrollment.Generation
+		conditions.MarkFalse(enrollment, infrav1.CredentialReady, reason, clusterv1.ConditionSeverityWarning, "%s", message)
+	}
 }
 
 // parseTransportConfig validates the transport ConfigMap's keys.
@@ -436,7 +459,9 @@ func parseTransportConfig(configMap *corev1.ConfigMap) (*transportConfig, error)
 func validateCABundle(data []byte) error {
 	found := false
 	rest := data
-	// FIXME CLAUDE: Explain why we need a for loop without any conditions here.
+	// The loop walks every PEM block in the bundle. pem.Decode signals the end
+	// by returning a nil block, and that is only known inside the body, so
+	// there is nothing to put in the loop header.
 	for {
 		var block *pem.Block
 		block, rest = pem.Decode(rest)
@@ -457,16 +482,15 @@ func validateCABundle(data []byte) error {
 	return nil
 }
 
-// FIXME CLAUDE: skill:unslop this docstring.
 // buildTokenSecret assembles the bootstrap.kubernetes.io/token Secret the API
 // server's bootstrap authenticator reads.
 //
-// Two of these fields fail silently when wrong, on a host, long after the write.
-// A missing expiration makes the token immortal, and an immortal token in a
-// group that may create certificate requests is a permanent cluster credential.
-// A group outside the API server's bootstrap group pattern is rejected at
-// token-use time as a 401, so it is checked here instead.
-func buildTokenSecret(tokenStr, hostName, group string, expiresAt time.Time) (*corev1.Secret, error) {
+// Both the expiration and the group are checked here because neither fails
+// where it is written. A token with no expiration never stops working, which
+// in a group that may create certificate requests is a permanent cluster
+// credential. A group outside the API server's bootstrap group pattern is
+// rejected only when the host uses the token, as a 401.
+func buildTokenSecret(tokenStr string, hostName hostname.Name, group string, expiresAt time.Time) (*corev1.Secret, error) {
 	tokenID, tokenSecret, err := bootstraptoken.GetTokenIDSecretFromBootstrapToken(tokenStr)
 	if err != nil {
 		return nil, fmt.Errorf("split bootstrap token: %w", err)
@@ -490,96 +514,38 @@ func buildTokenSecret(tokenStr, hostName, group string, expiresAt time.Time) (*c
 			bootstrapapi.BootstrapTokenExpirationKey: []byte(
 				expiresAt.UTC().Format(time.RFC3339)),
 			bootstrapapi.BootstrapTokenUsageAuthentication: []byte("true"),
-			// FIXME CLAUDE: Go suggestion: Replace with fmt.Appendf
-			bootstrapapi.BootstrapTokenDescriptionKey: []byte(
-				fmt.Sprintf("Bootstrap credential for BYOH host %s", hostName)),
+			bootstrapapi.BootstrapTokenDescriptionKey: fmt.Appendf(
+				nil, "Bootstrap credential for BYOH host %s", hostName),
 			bootstrapapi.BootstrapTokenExtraGroupsKey: []byte(group),
 		},
 	}, nil
 }
 
-// usableToken reports whether an existing token Secret can still be handed to a
-// host, and returns the token string and expiry when it can. A Secret with no
-// expiration is never usable: it would authenticate forever.
-//
-// FIXME CLAUDE: This is effectively a validateToken func? Rename as appropriate. Needs dedicated tests. Return a token object that has the value and expiresAt as attributes. A nil object mean invalid. A non-nil means valid. Then we don't need the ok bool either. Update wherever we're passing both tokenStr and expiresAt with the new type instead.
-func usableToken(secret *corev1.Secret, now time.Time) (tokenStr string, expiresAt time.Time, ok bool) {
+// validateToken checks whether an existing token Secret can still be handed to
+// a host. It returns the token when it can and nil when it cannot. A Secret
+// with no expiration is never usable: it would authenticate forever.
+func validateToken(secret *corev1.Secret, now time.Time) *bootstrapToken {
 	tokenID := string(secret.Data[bootstrapapi.BootstrapTokenIDKey])
 	tokenSecret := string(secret.Data[bootstrapapi.BootstrapTokenSecretKey])
 	if tokenID == "" || tokenSecret == "" {
-		return "", time.Time{}, false
+		return nil
 	}
 
 	rawExpiration, found := secret.Data[bootstrapapi.BootstrapTokenExpirationKey]
 	if !found || len(rawExpiration) == 0 {
-		return "", time.Time{}, false
+		return nil
 	}
 	expiry, err := time.Parse(time.RFC3339, string(rawExpiration))
 	if err != nil {
-		return "", time.Time{}, false
+		return nil
 	}
 	if !expiry.After(now.Add(tokenRenewalMargin)) {
-		return "", time.Time{}, false
+		return nil
 	}
 
-	return tokenID + "." + tokenSecret, expiry, true
-}
-
-// renderBootstrapKubeconfig produces the kubeconfig the agent uses to request
-// its own client certificate.
-func renderBootstrapKubeconfig(transport *transportConfig, tokenStr string) ([]byte, error) {
-	config := &clientcmdapi.Config{
-		Clusters: map[string]*clientcmdapi.Cluster{
-			infrav1.DefaultClusterName: {
-				Server:                   transport.apiServerURL,
-				TLSServerName:            transport.tlsServerName,
-				CertificateAuthorityData: transport.caData,
-			},
-		},
-		AuthInfos: map[string]*clientcmdapi.AuthInfo{
-			infrav1.DefaultAuth: {
-				Token: tokenStr,
-			},
-		},
-		Contexts: map[string]*clientcmdapi.Context{
-			infrav1.DefaultContext: {
-				Cluster:   infrav1.DefaultClusterName,
-				AuthInfo:  infrav1.DefaultAuth,
-				Namespace: infrav1.DefaultNamespace,
-			},
-		},
-		CurrentContext: infrav1.DefaultContext,
-	}
-
-	encoded, err := runtime.Encode(clientcmdlatest.Codec, config)
-	if err != nil {
-		return nil, fmt.Errorf("encode bootstrap kubeconfig: %w", err)
-	}
-	return encoded, nil
-}
-
-// buildCredentialSecret assembles the Secret byohctl reads and pushes to the
-// host. The owner reference makes deletion of the enrollment remove it.
-func buildCredentialSecret(enrollment *infrav1.ByoHostEnrollment, hostName string, kubeconfig []byte) *corev1.Secret {
-	return &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      credentialSecretName(enrollment.Name),
-			Namespace: enrollment.Namespace,
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion: infrav1.GroupVersion.String(),
-					Kind:       "ByoHostEnrollment",
-					Name:       enrollment.Name,
-					UID:        enrollment.UID,
-					Controller: new(true),
-				},
-			},
-		},
-		Type: infrav1.CredentialSecretType,
-		Data: map[string][]byte{
-			infrav1.CredentialSecretKubeconfigKey: kubeconfig,
-			infrav1.CredentialSecretHostNameKey:   []byte(hostName),
-		},
+	return &bootstrapToken{
+		value:     tokenID + "." + tokenSecret,
+		expiresAt: expiry,
 	}
 }
 

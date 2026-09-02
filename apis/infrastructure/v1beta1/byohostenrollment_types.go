@@ -14,14 +14,19 @@ const (
 	// CredentialReady is True once the credential Secret named by
 	// Status.CredentialSecretRef exists and holds a bootstrap kubeconfig the
 	// host can use. It is False, with a reason, whenever no usable credential
-	// exists: before the first one is minted, and after a failed attempt to
-	// mint or replace one.
+	// exists: before the first one is created, and after a failed attempt to
+	// create or replace one.
 	CredentialReady clusterv1.ConditionType = "CredentialReady"
 
 	// Consumed is True once the host has exchanged the credential for a
 	// client certificate. The credential is deleted on that transition and is
 	// not refreshed again.
 	Consumed clusterv1.ConditionType = "Consumed"
+
+	// InvalidHostNameReason is set on CredentialReady when the enrollment name
+	// does not normalize to a usable host name. Retrying cannot help: the
+	// enrollment has to be created again under a name that normalizes.
+	InvalidHostNameReason = "InvalidHostName"
 
 	// TransportUnavailableReason is set on CredentialReady when the
 	// deployment-level transport ConfigMap is missing or does not describe a
@@ -31,7 +36,6 @@ const (
 
 	// CredentialGenerateFailedReason is set on CredentialReady when the token or
 	// the credential Secret could not be written.
-	// FIXME CLAUDE: Is this effectively an enrolment failure instead? Should we rename this to EnrolmentFailedReason?
 	CredentialGenerateFailedReason = "CredentialGenerateFailed" //nolint: gosec // a condition reason, not a credential
 )
 
@@ -54,12 +58,12 @@ const (
 	CredentialSecretKubeconfigKey = "kubeconfig"
 
 	// CredentialSecretHostNameKey holds the host name this credential was
-	// minted for. It travels with the credential so the agent does not have to
+	// created for. It travels with the credential so the agent does not have to
 	// read the machine's own hostname and reach a different answer.
 	CredentialSecretHostNameKey = "hostName"
 
 	// EnrollmentLabel is set on the bootstrap token Secret in kube-system,
-	// naming the enrollment that minted it. The Secret cannot carry an owner
+	// naming the enrollment that created it. The Secret cannot carry an owner
 	// reference across namespaces, so this label is the only link back.
 	EnrollmentLabel = "byoh.infrastructure.cluster.x-k8s.io/enrollment"
 
@@ -76,8 +80,8 @@ const (
 
 // ByoHostEnrollmentSpec defines the desired state of ByoHostEnrollment.
 type ByoHostEnrollmentSpec struct {
-	// TokenTTL is how long each minted bootstrap token stays valid. The
-	// credential is re-minted while the host has not yet consumed it, so this
+	// TokenTTL is how long each bootstrap token stays valid once created. The
+	// credential is regenerated while the host has not yet consumed it, so this
 	// bounds the lifetime of a single token rather than the lifetime of the
 	// enrollment - use ValidUntil for the latter.
 	// +optional
@@ -85,7 +89,7 @@ type ByoHostEnrollmentSpec struct {
 	TokenTTL *metav1.Duration `json:"tokenTTL,omitempty"`
 
 	// ValidUntil is the deadline past which the credential is no longer
-	// re-minted. It exists for hosts that are enrolled well before they first
+	// regenerated. It exists for hosts that are enrolled well before they first
 	// boot - an image build, or a machine racked days ahead of use - where a
 	// single TokenTTL would expire before the host ever asks for a
 	// certificate. Unset means the enrollment is refreshed for as long as it
