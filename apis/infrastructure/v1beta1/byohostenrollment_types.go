@@ -29,9 +29,10 @@ const (
 	// deployment is not finished.
 	TransportUnavailableReason = "TransportUnavailable"
 
-	// CredentialMintFailedReason is set on CredentialReady when the token or
+	// CredentialGenerateFailedReason is set on CredentialReady when the token or
 	// the credential Secret could not be written.
-	CredentialMintFailedReason = "CredentialMintFailed" //nolint: gosec // a condition reason, not a credential
+	// FIXME CLAUDE: Is this effectively an enrolment failure instead? Should we rename this to EnrolmentFailedReason?
+	CredentialGenerateFailedReason = "CredentialGenerateFailed" //nolint: gosec // a condition reason, not a credential
 )
 
 // Constants describing the artifacts a ByoHostEnrollment produces.

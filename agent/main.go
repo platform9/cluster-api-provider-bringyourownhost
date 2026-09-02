@@ -65,6 +65,12 @@ const (
 	// requests keep getting denied, it leaves one CSR per retry. Raising this cap slows the
 	// accumulation of such resources but it slows recovery by the same amount.
 	bootstrapRetryMaxDelay = 30 * time.Minute
+
+	// csrApprovalTimeout bounds how long the agent waits for its certificate
+	// request to be approved and issued before giving up on this attempt. The
+	// bootstrap flow retries, so a timeout here costs a retry rather than the
+	// agent's whole run.
+	csrApprovalTimeout = 5 * time.Minute
 )
 
 var (
@@ -260,7 +266,7 @@ func handleBootstrapFlow(ctx context.Context, logger logr.Logger, hostName strin
 	if err != nil {
 		return fmt.Errorf("ByohCSR intialization failed: %v", err)
 	}
-	err = byohCSR.BootstrapKubeconfig(ctx, hostName, 5*time.Minute)
+	err = byohCSR.BootstrapKubeconfig(ctx, hostName, csrApprovalTimeout)
 	if err != nil {
 		return fmt.Errorf("kubeconfig generation failed: %v", err)
 	}
