@@ -87,7 +87,7 @@ func (v *ByoHostEnrollmentValidator) ValidateCreate(ctx context.Context, obj run
 // ValidateUpdate implements admission.CustomValidator. The spec is immutable:
 // re-enrolling a host means deleting the enrollment and creating it again, so
 // there is no state where an edited spec has to be reconciled against a
-// credential minted from the previous one.
+// credential created from the previous one.
 func (v *ByoHostEnrollmentValidator) ValidateUpdate(_ context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
 	oldEnrollment, ok := oldObj.(*ByoHostEnrollment)
 	if !ok {
@@ -124,7 +124,7 @@ func validateEnrollmentName(name string) error {
 		return field.Invalid(field.NewPath("metadata").Child("name"), name, err.Error())
 	}
 
-	if normalized != name {
+	if string(normalized) != name {
 		return field.Invalid(field.NewPath("metadata").Child("name"), name,
 			fmt.Sprintf("host name is not normalized, use %q", normalized))
 	}
