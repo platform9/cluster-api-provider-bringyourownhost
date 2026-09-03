@@ -20,3 +20,4 @@ spec:
           - "--metrics-addr=127.0.0.1:8080"
           - "--enable-leader-election"
           - "--byohostagent-heartbeat-timeout={{ .Values.byohostAgentHeartbeatTimeout | default \"120s\" }}"
+          - "--bootstrap-apiserver-url={{ required \"bootstrapAPIServerURL is required: the https endpoint a BYO host dials to reach this management cluster\" .Values.bootstrapAPIServerURL }}"

@@ -18,9 +18,7 @@ import (
 	"k8s.io/klog/v2/klogr"
 
 	admissionv1beta1 "k8s.io/api/admission/v1beta1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientset "k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -52,6 +50,8 @@ var (
 	enableLeaderElection         bool
 	probeAddr                    string
 	byohostAgentHeartbeatTimeout time.Duration
+	bootstrapAPIServerURL        string
+	bootstrapAPIServerCAFile     string
 )
 
 // controllerOptions is the flag- and environment-derived configuration
@@ -65,6 +65,9 @@ type controllerOptions struct {
 	// Nil disables the ByoAdmission controller, leaving CSRs to be approved
 	// manually.
 	csrClientSet clientset.Interface
+
+	// bootstrapTransport says how a BYO host reaches this management cluster.
+	bootstrapTransport byohcontrollers.BootstrapTransport
 }
 
 func init() {
@@ -86,6 +89,10 @@ func setFlags() {
 		"Enable leader election for controller manager. Enabling this will ensure there is only one active controller manager.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.DurationVar(&byohostAgentHeartbeatTimeout, "byohostagent-heartbeat-timeout", DefaultHeartbeatTimeout, "The duration after which the agent is considered to be disconnected.")
+	flag.StringVar(&bootstrapAPIServerURL, "bootstrap-apiserver-url", "",
+		"Required. The https endpoint a BYO host dials to reach this management cluster, as https://<host>:<port>.")
+	flag.StringVar(&bootstrapAPIServerCAFile, "bootstrap-apiserver-ca-file", "",
+		"Path to a PEM CA bundle that verifies that endpoint. Defaults to the cluster's own kube-root-ca.crt, which only covers internal endpoints.")
 	flag.Parse()
 }
 
@@ -158,12 +165,9 @@ func setupControllers(ctx context.Context, mgr ctrl.Manager, opts controllerOpti
 	}
 
 	if err := (&byohcontrollers.ByoHostEnrollmentReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		TransportConfigMap: types.NamespacedName{
-			Namespace: metav1.NamespaceSystem,
-			Name:      byohcontrollers.DefaultTransportConfigMapName,
-		},
+		Client:    mgr.GetClient(),
+		Scheme:    mgr.GetScheme(),
+		Transport: opts.bootstrapTransport,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("create ByoHostEnrollment controller: %w", err)
 	}
@@ -212,6 +216,16 @@ func main() {
 	// here for both the controller registrations and mgr.Start.
 	ctx := ctrl.SetupSignalHandler()
 
+	// The bootstrap transport is a deployment property, so a bad value is a
+	// deployment mistake. Checking it here stops the manager with one clear
+	// message, instead of parking every enrollment on a condition nobody is
+	// watching.
+	bootstrapTransport, err := byohcontrollers.NewBootstrapTransport(bootstrapAPIServerURL, bootstrapAPIServerCAFile)
+	if err != nil {
+		setupLog.Error(err, "invalid bootstrap transport configuration")
+		os.Exit(1)
+	}
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
@@ -226,7 +240,8 @@ func main() {
 	}
 
 	opts := controllerOptions{
-		heartbeatTimeout: byohostAgentHeartbeatTimeout,
+		heartbeatTimeout:   byohostAgentHeartbeatTimeout,
+		bootstrapTransport: bootstrapTransport,
 		// Set 'BYOH_SKIP_KERNEL_MODULE_CLEANUP=enable' to skip unloading overlay/br_netfilter kernel
 		// modules during uninstall. Real BYO hosts own their kernel and must unload these modules;
 		// e2e's containerized hosts share Docker's kernel, so unloading them there breaks Docker's
