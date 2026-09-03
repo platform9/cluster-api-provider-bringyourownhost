@@ -331,10 +331,13 @@ func (r *ByoHostEnrollmentReconciler) ensureBootstrapToken(ctx context.Context, 
 		infrav1.EnrollmentLabel: generateSafeLabelValue(enrollment.Namespace, enrollment.Name),
 	}
 
-	// The token ID is recorded before the Secret exists. Losing the process
-	// between these two writes leaves a status pointing at a token that was
-	// never created, which the next pass simply replaces. The reverse order
-	// would leave a live token nothing refers to.
+	// tokenStr only exists in memory until the Secret write below. So
+	// recording tokenID in status first is safe: if we crash now, nothing
+	// was ever created. If the patch succeeds but the Secret write fails,
+	// status names a token that does not exist, and the next pass gets a
+	// NotFound and generates a replacement. Writing the Secret first would
+	// risk the opposite: a live token in kube-system that status never
+	// records, sitting there for its full TTL.
 	err = r.patchEnrollment(ctx, enrollment, func() {
 		enrollment.Status.TokenID = tokenID
 		enrollment.Status.ExpiresAt = new(metav1.NewTime(expiresAt))
