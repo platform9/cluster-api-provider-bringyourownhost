@@ -41,6 +41,7 @@ import (
 
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/registration"
 	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
+	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/common/hostname"
 )
 
 // certificatePEMBlockType is the PEM block type certRotation insists on.
@@ -495,4 +496,223 @@ func TestRetryWithBackoff(t *testing.T) {
 			assert.Equal(t, tc.wantAttempts, attempts)
 		})
 	}
+}
+
+// readHostName must never fall back to the machine's own reported host name: byohctl already
+// normalizes the name it registers on the management cluster side, and a disagreement between the
+// two only shows up much later as a certificate common name mismatch.
+func TestReadHostName(t *testing.T) {
+	testCases := []struct {
+		name       string
+		writeFile  bool
+		content    string
+		want       string
+		wantErrSub string
+	}{
+		{
+			name:      "reads and normalizes the identity file",
+			writeFile: true,
+			content:   "My-Host_Name.\n",
+			want:      "my-host-name",
+		},
+		{
+			name:       "missing identity file is a startup error",
+			writeFile:  false,
+			wantErrSub: "read host identity",
+		},
+		{
+			name:       "empty identity file is a startup error",
+			writeFile:  true,
+			content:    "   \n",
+			wantErrSub: "is empty",
+		},
+		{
+			name:       "identity that cannot normalize into an object name is a startup error",
+			writeFile:  true,
+			content:    "not a valid host name!!",
+			wantErrSub: "normalize host identity",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if tc.writeFile {
+				path := filepath.Join(dir, hostname.FileName)
+				writeErr := os.WriteFile(path, []byte(tc.content), 0o600)
+				require.NoError(t, writeErr)
+			}
+
+			got, err := readHostName(dir)
+
+			if tc.wantErrSub != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErrSub)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestResolveNamespace(t *testing.T) {
+	testCases := []struct {
+		name        string
+		flagValue   string
+		flagChanged bool
+		writeFile   bool
+		fileContent string
+		want        string
+	}{
+		{
+			name:        "an explicit flag wins over the namespace file",
+			flagValue:   "flag-ns",
+			flagChanged: true,
+			writeFile:   true,
+			fileContent: "file-ns",
+			want:        "flag-ns",
+		},
+		{
+			name:        "the namespace file is used when the flag was not set",
+			flagValue:   "default",
+			flagChanged: false,
+			writeFile:   true,
+			fileContent: "file-ns",
+			want:        "file-ns",
+		},
+		{
+			name:      "the flag value is kept when no namespace file exists",
+			flagValue: "default",
+			want:      "default",
+		},
+		{
+			name:        "the flag value is kept when the namespace file is empty",
+			flagValue:   "default",
+			writeFile:   true,
+			fileContent: "   \n",
+			want:        "default",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if tc.writeFile {
+				path := filepath.Join(dir, namespaceFileName)
+				writeErr := os.WriteFile(path, []byte(tc.fileContent), 0o600)
+				require.NoError(t, writeErr)
+			}
+
+			got := resolveNamespace(tc.flagValue, tc.flagChanged, dir)
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestWaitForBootstrapCredentialReturnsImmediatelyWhenFileAlreadyExists(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bootstrap-kubeconfig.yaml")
+	err := os.WriteFile(path, []byte("data"), 0o600)
+	require.NoError(t, err)
+
+	waitErr := waitForBootstrapCredential(t.Context(), logr.Discard(), path, time.Hour)
+
+	require.NoError(t, waitErr)
+}
+
+// The wait must notice the file on its own short poll interval, not on retryWithBackoff's delay,
+// which starts at bootstrapRetryInitialDelay and only grows from there.
+func TestWaitForBootstrapCredentialReturnsPromptlyOnceFileAppears(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bootstrap-kubeconfig.yaml")
+
+	start := time.Now()
+	done := make(chan error, 1)
+	go func() {
+		done <- waitForBootstrapCredential(t.Context(), logr.Discard(), path, time.Millisecond)
+	}()
+
+	err := os.WriteFile(path, []byte("data"), 0o600)
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		select {
+		case waitErr := <-done:
+			assert.NoError(t, waitErr)
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 5*time.Millisecond, "waitForBootstrapCredential never returned after the file appeared")
+
+	assert.Less(t, time.Since(start), bootstrapRetryInitialDelay,
+		"the wait should not have consumed any of the retry backoff's initial delay")
+}
+
+func TestWaitForBootstrapCredentialReturnsContextErrorWhenCanceled(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bootstrap-kubeconfig.yaml")
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err := waitForBootstrapCredential(ctx, logr.Discard(), path, time.Millisecond)
+
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+// ensureBootstrapCredential reads the bootstrapKubeConfig package variable directly, matching
+// handleBootstrapFlow, which it wraps; these tests save and restore it like the existing bootstrap
+// flow tests in host_agent_test.go do.
+func TestEnsureBootstrapCredential(t *testing.T) {
+	t.Run("skips the certificate path when byohConfigPath already exists", func(t *testing.T) {
+		original := bootstrapKubeConfig
+		t.Cleanup(func() { bootstrapKubeConfig = original })
+		bootstrapKubeConfig = filepath.Join(t.TempDir(), "does-not-exist")
+
+		byohConfigPath := filepath.Join(t.TempDir(), "config")
+		writeErr := os.WriteFile(byohConfigPath, []byte("existing"), 0o600)
+		require.NoError(t, writeErr)
+
+		err := ensureBootstrapCredential(t.Context(), logr.Discard(), "test-host", byohConfigPath)
+
+		require.NoError(t, err)
+	})
+
+	t.Run("is a no-op when no bootstrap kubeconfig is configured", func(t *testing.T) {
+		original := bootstrapKubeConfig
+		t.Cleanup(func() { bootstrapKubeConfig = original })
+		bootstrapKubeConfig = ""
+
+		byohConfigPath := filepath.Join(t.TempDir(), "config")
+
+		err := ensureBootstrapCredential(t.Context(), logr.Discard(), "test-host", byohConfigPath)
+
+		require.NoError(t, err)
+	})
+
+	t.Run("waits for the bootstrap kubeconfig before attempting the CSR exchange", func(t *testing.T) {
+		original := bootstrapKubeConfig
+		t.Cleanup(func() { bootstrapKubeConfig = original })
+
+		dir := t.TempDir()
+		bootstrapKubeConfig = filepath.Join(dir, "bootstrap-kubeconfig.yaml")
+		byohConfigPath := filepath.Join(dir, "config")
+
+		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+		defer cancel()
+
+		// The bootstrap kubeconfig file never appears, so this can only return once ctx is
+		// done. If ensureBootstrapCredential skipped the wait and went straight into
+		// handleBootstrapFlow, that call would fail immediately on the missing file instead
+		// of blocking on it, and this would return well before the deadline.
+		start := time.Now()
+		err := ensureBootstrapCredential(ctx, logr.Discard(), "test-host", byohConfigPath)
+		elapsed := time.Since(start)
+
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.GreaterOrEqual(t, elapsed, 200*time.Millisecond)
+	})
 }

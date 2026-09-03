@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/registration"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/version"
 	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
+	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/common/hostname"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/feature"
 	certv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -71,6 +73,22 @@ const (
 	// bootstrap flow retries, so a timeout here costs a retry rather than the
 	// agent's whole run.
 	csrApprovalTimeout = 5 * time.Minute
+
+	// bootstrapCredentialPollInterval is how often the agent checks whether the
+	// bootstrap kubeconfig file has appeared. It is a fixed interval rather than
+	// retryWithBackoff's doubling delay: that backoff exists to slow down repeated
+	// failures against the management cluster, but a bootstrap kubeconfig that has
+	// not been written yet is not a failure to back off from, it is an ordering
+	// race between the agent starting and byohctl finishing the host's enrollment.
+	// A short, constant interval notices the file soon after it lands instead of
+	// idling through a delay that has already grown large.
+	bootstrapCredentialPollInterval = 2 * time.Second
+
+	// namespaceFileName is the file under the agent's config directory holding the
+	// tenant namespace byohctl learns only after it creates the host's enrollment,
+	// which happens after the agent is already installed. See resolveNamespace for
+	// how this interacts with the --namespace flag.
+	namespaceFileName = "namespace"
 )
 
 var (
@@ -365,6 +383,105 @@ func getClient(logger logr.Logger, config *rest.Config) client.Client {
 	return k8sClient
 }
 
+// readHostName reads the agent's identity from the hostname file byohctl writes into configDir.
+// A missing or empty file is a startup error rather than a fallback to the machine's own reported
+// host name: the two can disagree, and byohctl already normalizes the name it registers on the
+// management cluster side, so falling back here would only surface as a certificate common name
+// mismatch much later.
+func readHostName(configDir string) (string, error) {
+	path := filepath.Join(configDir, hostname.FileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read host identity from %s: %w", path, err)
+	}
+
+	raw := strings.TrimSpace(string(data))
+	if raw == "" {
+		return "", fmt.Errorf("host identity file %s is empty", path)
+	}
+
+	name, err := hostname.Normalize(raw)
+	if err != nil {
+		return "", fmt.Errorf("normalize host identity read from %s: %w", path, err)
+	}
+
+	return string(name), nil
+}
+
+// resolveNamespace decides which namespace the agent registers into. An explicitly set
+// --namespace flag always wins, which keeps existing hosts working exactly as before: their
+// systemd drop-in already passes --namespace. Otherwise it falls back to the namespace file
+// byohctl writes once it has created the host's enrollment, so a newly onboarded host picks up
+// its tenant namespace at runtime instead of needing it baked into the drop-in before the
+// enrollment (and therefore the namespace) exists.
+func resolveNamespace(flagValue string, flagChanged bool, configDir string) string {
+	if flagChanged {
+		return flagValue
+	}
+
+	data, err := os.ReadFile(filepath.Join(configDir, namespaceFileName))
+	if err != nil {
+		return flagValue
+	}
+
+	fileValue := strings.TrimSpace(string(data))
+	if fileValue == "" {
+		return flagValue
+	}
+
+	return fileValue
+}
+
+// waitForBootstrapCredential blocks until path exists or ctx is done. See
+// bootstrapCredentialPollInterval for why this polls on a fixed interval instead of sharing
+// retryWithBackoff's doubling delay.
+func waitForBootstrapCredential(ctx context.Context, logger logr.Logger, path string, pollInterval time.Duration) error {
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+
+	logger.Info("waiting for bootstrap kubeconfig to appear", "path", path)
+
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if _, err := os.Stat(path); err == nil {
+				return nil
+			}
+		}
+	}
+}
+
+// ensureBootstrapCredential runs the bootstrap-kubeconfig-to-certificate exchange when the agent
+// is not yet onboarded. An existing byohConfigPath means that exchange already ran to completion,
+// so the whole certificate path stays skipped; no bootstrap kubeconfig configured means there is
+// nothing to exchange. Otherwise it first waits for the bootstrap kubeconfig file itself to exist,
+// since the agent can start before byohctl finishes writing it, then retries the CSR exchange with
+// backoff.
+func ensureBootstrapCredential(ctx context.Context, logger logr.Logger, hostName, byohConfigPath string) error {
+	_, err := os.Stat(byohConfigPath)
+	if bootstrapKubeConfig == "" || !errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+
+	if waitErr := waitForBootstrapCredential(ctx, logger, bootstrapKubeConfig, bootstrapCredentialPollInterval); waitErr != nil {
+		return waitErr
+	}
+
+	// Instead of failing hard and exiting on errors during the bootstrap steps, we should retry
+	// with a backoff. There should be very few ways where we exit because of a failure, because
+	// it burns through the systemd start limit and leaves the agent in a state where it is not
+	// running on the host at all.
+	return retryWithBackoff(ctx, logger, bootstrapRetryInitialDelay, bootstrapRetryMaxDelay, func() error {
+		return handleBootstrapFlow(ctx, logger, hostName)
+	})
+}
+
 // TODO - fix logging
 func main() {
 	setupflags()
@@ -385,29 +502,22 @@ func main() {
 	// here for both the reconciler registration and mgr.Start.
 	ctx := ctrl.SetupSignalHandler()
 
-	hostName, err := os.Hostname()
+	configDir := filepath.Dir(registration.GetBYOHConfigPath())
+
+	hostName, err := readHostName(configDir)
 	if err != nil {
-		logger.Error(err, "could not determine hostname")
+		logger.Error(err, "could not determine host identity")
 		return
 	}
 
-	_, err = os.Stat(registration.GetBYOHConfigPath())
-	// Enable bootstrap flow if --bootstrap-kubeconfig is provided
-	// and config doesn't already exists in ~/.byoh/
-	if bootstrapKubeConfig != "" && errors.Is(err, os.ErrNotExist) {
-		// Instead of failing hard and exiting on errors during the bootstrap steps, we should retry
-		// with a backoff. There should be very few ways where we exit because of a failure, because
-		// it burns through the systemd start limit and leaves the agent in a state where it is not
-		// running on the host at all.
-		bootstrapErr := retryWithBackoff(ctx, logger, bootstrapRetryInitialDelay, bootstrapRetryMaxDelay, func() error {
-			return handleBootstrapFlow(ctx, logger, hostName)
-		})
+	namespace = resolveNamespace(namespace, pflag.CommandLine.Changed("namespace"), configDir)
 
-		// An error here means either we received a shutdown signal or we failed to bootstrap the host within bootstrapRetryMaxDelay.
-		if bootstrapErr != nil {
-			logger.Error(bootstrapErr, "bootstrap flow abandoned")
-			return
-		}
+	// An error here means either the host is already onboarded (byohConfigPath exists, so
+	// ensureBootstrapCredential is a no-op), we received a shutdown signal, or we failed to
+	// bootstrap the host within bootstrapRetryMaxDelay.
+	if err = ensureBootstrapCredential(ctx, logger, hostName, registration.GetBYOHConfigPath()); err != nil {
+		logger.Error(err, "bootstrap flow abandoned")
+		return
 	}
 	// Either the agent was restarted or bootstrap was successful during first time the agent was
 	// started. Either way we should have ~/.byoh/config available on the host now.
