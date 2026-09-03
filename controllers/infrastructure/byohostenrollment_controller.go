@@ -51,18 +51,12 @@ const (
 	//	                         endpoint that passes TLS through, because a
 	//	                         proxy that terminates TLS strips the client
 	//	                         certificate the host later presents.
-	//	tlsServerName            SNI name to verify the server certificate
-	//	                         against, optional. Set it when apiserverURL's
-	//	                         host is not in that certificate's SANs.
 	//	certificateAuthorityData PEM-encoded CA bundle for the API server,
 	//	                         required. Raw PEM, not base64 of PEM.
 	DefaultTransportConfigMapName = "byoh-bootstrap-transport"
 
 	// TransportConfigMapAPIServerURLKey names the API server endpoint.
 	TransportConfigMapAPIServerURLKey = "apiserverURL"
-
-	// TransportConfigMapTLSServerNameKey names the SNI name to verify against.
-	TransportConfigMapTLSServerNameKey = "tlsServerName"
 
 	// TransportConfigMapCADataKey holds the PEM-encoded CA bundle.
 	TransportConfigMapCADataKey = "certificateAuthorityData"
@@ -185,7 +179,6 @@ func (r *ByoHostEnrollmentReconciler) reconcileNormal(ctx context.Context, enrol
 	kubeconfig, err := runtime.Encode(clientcmdlatest.Codec, &clientcmdapi.Config{
 		Clusters: map[string]*clientcmdapi.Cluster{infrav1.DefaultClusterName: {
 			Server:                   transport.apiServerURL,
-			TLSServerName:            transport.tlsServerName,
 			CertificateAuthorityData: transport.caData,
 		}},
 		AuthInfos: map[string]*clientcmdapi.AuthInfo{infrav1.DefaultAuth: {Token: token.value}},
@@ -406,9 +399,8 @@ func (r *ByoHostEnrollmentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 // transportConfig is the validated content of the transport ConfigMap.
 type transportConfig struct {
-	apiServerURL  string
-	tlsServerName string
-	caData        []byte
+	apiServerURL string
+	caData       []byte
 }
 
 // bootstrapToken is a token that is safe to hand to a host: the full token
@@ -450,9 +442,8 @@ func parseTransportConfig(configMap *corev1.ConfigMap) (*transportConfig, error)
 	}
 
 	return &transportConfig{
-		apiServerURL:  apiServerURL,
-		tlsServerName: configMap.Data[TransportConfigMapTLSServerNameKey],
-		caData:        []byte(caData),
+		apiServerURL: apiServerURL,
+		caData:       []byte(caData),
 	}, nil
 }
 

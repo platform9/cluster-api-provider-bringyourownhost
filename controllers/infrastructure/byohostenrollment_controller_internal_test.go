@@ -48,7 +48,6 @@ const (
 	testEnrollmentName      = "web-01"
 	testEnrollmentNamespace = "tenant-a"
 	testAPIServerURL        = "https://vcluster-cp.example.test:443"
-	testTLSServerName       = "kubernetes.default"
 )
 
 // testCAPEM returns a self-signed certificate in PEM form, so the CA
@@ -111,9 +110,8 @@ func testTransportConfigMap(t *testing.T) *corev1.ConfigMap {
 			Namespace: metav1.NamespaceSystem,
 		},
 		Data: map[string]string{
-			TransportConfigMapAPIServerURLKey:  testAPIServerURL,
-			TransportConfigMapTLSServerNameKey: testTLSServerName,
-			TransportConfigMapCADataKey:        testCAPEM(t),
+			TransportConfigMapAPIServerURLKey: testAPIServerURL,
+			TransportConfigMapCADataKey:       testCAPEM(t),
 		},
 	}
 }
@@ -228,13 +226,12 @@ func assertCredentialSecretOwnerReference(t *testing.T, secret *corev1.Secret, e
 }
 
 // assertKubeconfigTransport checks the rendered kubeconfig names the
-// expected server, SNI and CA, and carries the enrollment's bootstrap token.
+// expected server and CA, and carries the enrollment's bootstrap token.
 func assertKubeconfigTransport(t *testing.T, config *clientcmdapi.Config, transportConfigMap *corev1.ConfigMap, tokenID string) {
 	t.Helper()
 
 	assert.Equal(t, infrav1.DefaultContext, config.CurrentContext)
 	assert.Equal(t, testAPIServerURL, config.Clusters[infrav1.DefaultClusterName].Server)
-	assert.Equal(t, testTLSServerName, config.Clusters[infrav1.DefaultClusterName].TLSServerName)
 	assert.Equal(t, []byte(transportConfigMap.Data[TransportConfigMapCADataKey]),
 		config.Clusters[infrav1.DefaultClusterName].CertificateAuthorityData)
 	assert.False(t, config.Clusters[infrav1.DefaultClusterName].InsecureSkipTLSVerify)
@@ -827,27 +824,16 @@ func TestParseTransportConfig(t *testing.T) {
 	caPEM := testCAPEM(t)
 
 	testCases := []struct {
-		name              string
-		data              map[string]string
-		wantTLSServerName string
-		wantErr           bool
+		name    string
+		data    map[string]string
+		wantErr bool
 	}{
 		{
 			name: "a complete config map parses",
 			data: map[string]string{
-				TransportConfigMapAPIServerURLKey:  testAPIServerURL,
-				TransportConfigMapTLSServerNameKey: testTLSServerName,
-				TransportConfigMapCADataKey:        caPEM,
-			},
-			wantTLSServerName: testTLSServerName,
-		},
-		{
-			name: "tls server name is optional",
-			data: map[string]string{
 				TransportConfigMapAPIServerURLKey: testAPIServerURL,
 				TransportConfigMapCADataKey:       caPEM,
 			},
-			wantTLSServerName: "",
 		},
 		{
 			name:    "no api server url",
@@ -889,7 +875,6 @@ func TestParseTransportConfig(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, transport)
 			assert.Equal(t, testAPIServerURL, transport.apiServerURL)
-			assert.Equal(t, tc.wantTLSServerName, transport.tlsServerName)
 			assert.Equal(t, []byte(caPEM), transport.caData)
 		})
 	}
