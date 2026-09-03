@@ -117,16 +117,58 @@ func GetOSFamily(lookPath func(string) (string, error)) string {
 	return ""
 }
 
+// netInterface decouples GetNetworkStatus from net.Interface so tests can
+// supply fake interfaces without a real OS routing table.
+type netInterface struct {
+	Name    string
+	Flags   net.Flags
+	MACAddr string
+	Addrs   []net.Addr
+}
+
+func systemInterfaces() ([]netInterface, error) {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]netInterface, 0, len(ifaces))
+	for _, iface := range ifaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		result = append(result, netInterface{
+			Name:    iface.Name,
+			Flags:   iface.Flags,
+			MACAddr: iface.HardwareAddr.String(),
+			Addrs:   addrs,
+		})
+	}
+	return result, nil
+}
+
 // GetNetworkStatus returns the network interface(s) status for the host
 func (hr *HostRegistrar) GetNetworkStatus() []infrastructurev1beta1.NetworkStatus {
+	return hr.getNetworkStatus(gateway.DiscoverInterface, gateway.DiscoverInterfaceIPv6, systemInterfaces)
+}
+
+func (hr *HostRegistrar) getNetworkStatus(
+	discoverIPv4 func() (net.IP, error),
+	discoverIPv6 func() (net.IP, error),
+	interfaces func() ([]netInterface, error),
+) []infrastructurev1beta1.NetworkStatus {
+
 	Network := make([]infrastructurev1beta1.NetworkStatus, 0)
 
-	defaultIP, err := gateway.DiscoverInterface()
-	if err != nil {
-		return Network
+	var defaultIPs []net.IP
+	if ip, err := discoverIPv4(); err == nil {
+		defaultIPs = append(defaultIPs, ip)
+	}
+	if ip, err := discoverIPv6(); err == nil {
+		defaultIPs = append(defaultIPs, ip)
 	}
 
-	ifaces, err := net.Interfaces()
+	ifaces, err := interfaces()
 	if err != nil {
 		return Network
 	}
@@ -138,14 +180,9 @@ func (hr *HostRegistrar) GetNetworkStatus() []infrastructurev1beta1.NetworkStatu
 			netStatus.Connected = true
 		}
 
-		netStatus.MACAddr = iface.HardwareAddr.String()
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-
+		netStatus.MACAddr = iface.MACAddr
 		netStatus.NetworkInterfaceName = iface.Name
-		for _, addr := range addrs {
+		for _, addr := range iface.Addrs {
 			var ip net.IP
 			switch v := addr.(type) {
 			case *net.IPNet:
@@ -153,9 +190,12 @@ func (hr *HostRegistrar) GetNetworkStatus() []infrastructurev1beta1.NetworkStatu
 			case *net.IPAddr:
 				ip = v.IP
 			}
-			if ip.String() == defaultIP.String() {
-				netStatus.IsDefault = true
-				hr.ByoHostInfo.DefaultNetworkInterfaceName = netStatus.NetworkInterfaceName
+			for _, defaultIP := range defaultIPs {
+				if ip.Equal(defaultIP) {
+					netStatus.IsDefault = true
+					hr.ByoHostInfo.DefaultNetworkInterfaceName = netStatus.NetworkInterfaceName
+					break
+				}
 			}
 			netStatus.IPAddrs = append(netStatus.IPAddrs, addr.String())
 		}
