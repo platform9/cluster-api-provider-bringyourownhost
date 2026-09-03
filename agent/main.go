@@ -60,11 +60,11 @@ const (
 	// once an operator fixes the cause, at the cost of more requests against the management cluster
 	// while a host is stuck.
 	bootstrapRetryInitialDelay = 5 * time.Second
-	// bootstrapRetryMaxDelay defines how much the retry delay is allowed to double. For example,
-	// the agent does not have permissions to delete its own certificate requests, so if a host's
-	// requests keep getting denied, it leaves one CSR per retry. Raising this cap slows the
-	// accumulation of such resources but it slows recovery by the same amount.
-	bootstrapRetryMaxDelay = 30 * time.Minute
+	// bootstrapRetryMaxDelay defines how much the retry delay is allowed to double. The
+	// bootstrap token the agent authenticates with defaults to a 30 minute TTL, so a cap
+	// close to that leaves room for only one retry before the token expires. A 10 minute
+	// cap leaves room for several attempts within the token's lifetime.
+	bootstrapRetryMaxDelay = 10 * time.Minute
 
 	// csrApprovalTimeout bounds how long the agent waits for its certificate
 	// request to be approved and issued before giving up on this attempt. The
