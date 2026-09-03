@@ -12,13 +12,13 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	clientcmdlatest "k8s.io/client-go/tools/clientcmd/api/latest"
 	bootstrapapi "k8s.io/cluster-bootstrap/token/api"
@@ -37,38 +37,23 @@ import (
 )
 
 const (
-	// DefaultTransportConfigMapName is the name of the ConfigMap describing how
-	// a BYO host reaches the management cluster's API server. It is one object
-	// for the whole deployment: the caller creating an enrollment cannot know
-	// the API server URL, the SNI name or the CA, and must not be trusted to
-	// supply them.
-	//
-	// The deployment supplies this ConfigMap. Nothing in this repo creates it.
-	//
-	// Keys:
-	//
-	//	apiserverURL             https://<host>:<port>, required. Must be an
-	//	                         endpoint that passes TLS through, because a
-	//	                         proxy that terminates TLS strips the client
-	//	                         certificate the host later presents.
-	//	certificateAuthorityData PEM-encoded CA bundle for the API server,
-	//	                         required. Raw PEM, not base64 of PEM.
-	DefaultTransportConfigMapName = "byoh-bootstrap-transport"
+	// rootCAConfigMapName is the ConfigMap the root CA publisher maintains in
+	// every namespace. It carries the CA that signs the API server's serving
+	// certificate, so a BYO host can be handed it without the deployment
+	// supplying anything.
+	rootCAConfigMapName = "kube-root-ca.crt"
 
-	// TransportConfigMapAPIServerURLKey names the API server endpoint.
-	TransportConfigMapAPIServerURLKey = "apiserverURL"
-
-	// TransportConfigMapCADataKey holds the PEM-encoded CA bundle.
-	TransportConfigMapCADataKey = "certificateAuthorityData"
+	// rootCAConfigMapKey holds the PEM-encoded CA bundle in that ConfigMap.
+	rootCAConfigMapKey = "ca.crt"
 
 	// defaultTokenTTL is used when the enrollment does not set spec.tokenTTL.
 	// The CRD defaults that field, so this only covers an object written
 	// before the default existed.
 	defaultTokenTTL = 30 * time.Minute
 
-	// transportRetryInterval is how long to wait before looking for the
-	// transport ConfigMap again. Its absence is a deployment step that has not
-	// happened yet, so retrying is worthwhile but not urgent.
+	// transportRetryInterval is how long to wait before looking for the API
+	// server CA again. Its absence is a cluster that has not published the
+	// root CA yet, so retrying is worthwhile but not urgent.
 	transportRetryInterval = time.Minute
 
 	// tokenRenewalMargin is how much of a token's remaining life is treated as
@@ -83,9 +68,70 @@ type ByoHostEnrollmentReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 
-	// TransportConfigMap locates the deployment-level transport description.
-	// Defaults to DefaultTransportConfigMapName in kube-system.
-	TransportConfigMap types.NamespacedName
+	// Transport says how a BYO host reaches this management cluster. Build it
+	// with NewBootstrapTransport, so a bad value stops the manager instead of
+	// every enrollment.
+	Transport BootstrapTransport
+}
+
+// BootstrapTransport is the deployment-level description of how a BYO host
+// reaches the management cluster's API server.
+//
+// It is one description for the whole deployment. The caller creating an
+// enrollment cannot know the endpoint a host dials, and must not be trusted to
+// supply it.
+type BootstrapTransport struct {
+	// APIServerURL is the endpoint a BYO host dials, as https://<host>:<port>.
+	// It must pass TLS through: a proxy that terminates TLS strips the client
+	// certificate the host later presents.
+	APIServerURL string
+
+	// CAData, when set, replaces the in-cluster root CA in the kubeconfig the
+	// host receives.
+	CAData []byte
+}
+
+// NewBootstrapTransport validates the deployment's bootstrap transport
+// settings and reads the CA override from disk.
+//
+// caFile is optional. Leaving it empty makes each reconcile read the cluster's
+// own kube-root-ca.crt instead. Set it when hosts reach the API server through
+// an external endpoint, which kube-root-ca.crt is not documented to verify.
+func NewBootstrapTransport(apiServerURL, caFile string) (BootstrapTransport, error) {
+	if err := ValidateAPIServerURL(apiServerURL); err != nil {
+		return BootstrapTransport{}, err
+	}
+	if caFile == "" {
+		return BootstrapTransport{APIServerURL: apiServerURL}, nil
+	}
+
+	caData, err := os.ReadFile(caFile) // #nosec G304 -- path comes from a controller-manager flag set by the deployment, not by an enrollment
+	if err != nil {
+		return BootstrapTransport{}, fmt.Errorf("read API server CA file %q: %w", caFile, err)
+	}
+	if err := ValidateCABundle(caData); err != nil {
+		return BootstrapTransport{}, fmt.Errorf("API server CA file %q: %w", caFile, err)
+	}
+
+	return BootstrapTransport{
+		APIServerURL: apiServerURL,
+		CAData:       caData,
+	}, nil
+}
+
+// ValidateAPIServerURL checks that rawURL is an absolute https URL with a host.
+func ValidateAPIServerURL(rawURL string) error {
+	if rawURL == "" {
+		return errors.New("API server URL is empty")
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("API server URL %q is not a URL: %w", rawURL, err)
+	}
+	if parsed.Scheme != "https" || parsed.Host == "" {
+		return fmt.Errorf("API server URL must be an https URL with a host, got %q", rawURL)
+	}
+	return nil
 }
 
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=byohostenrollments,verbs=get;list;watch;create;update;patch;delete
@@ -139,24 +185,9 @@ func (r *ByoHostEnrollmentReconciler) reconcileNormal(ctx context.Context, enrol
 			enrollmentNotReadyMutateFn(enrollment, infrav1.InvalidHostNameReason, err.Error()))
 	}
 
-	transportKey := r.TransportConfigMap
-	if transportKey.Name == "" {
-		transportKey.Name = DefaultTransportConfigMapName
-	}
-	if transportKey.Namespace == "" {
-		transportKey.Namespace = metav1.NamespaceSystem
-	}
-
-	var transport *transportConfig
-	configMap := &corev1.ConfigMap{}
-	transportErr := r.Get(ctx, transportKey, configMap)
+	apiServerURL, caData, transportErr := r.resolveTransport(ctx)
 	if transportErr != nil {
-		transportErr = fmt.Errorf("get transport ConfigMap %s: %w", transportKey, transportErr)
-	} else {
-		transport, transportErr = parseTransportConfig(configMap)
-	}
-	if transportErr != nil {
-		logger.Info("Transport configuration is unusable, will retry", "error", transportErr.Error())
+		logger.Info("Bootstrap transport is unusable, will retry", "error", transportErr.Error())
 		markErr := r.patchEnrollment(ctx, enrollment,
 			enrollmentNotReadyMutateFn(enrollment, infrav1.TransportUnavailableReason, transportErr.Error()))
 		if markErr != nil {
@@ -178,8 +209,8 @@ func (r *ByoHostEnrollmentReconciler) reconcileNormal(ctx context.Context, enrol
 	// The kubeconfig the agent uses to request its own client certificate.
 	kubeconfig, err := runtime.Encode(clientcmdlatest.Codec, &clientcmdapi.Config{
 		Clusters: map[string]*clientcmdapi.Cluster{infrav1.DefaultClusterName: {
-			Server:                   transport.apiServerURL,
-			CertificateAuthorityData: transport.caData,
+			Server:                   apiServerURL,
+			CertificateAuthorityData: caData,
 		}},
 		AuthInfos: map[string]*clientcmdapi.AuthInfo{infrav1.DefaultAuth: {Token: token.value}},
 		Contexts: map[string]*clientcmdapi.Context{infrav1.DefaultContext: {
@@ -397,12 +428,6 @@ func (r *ByoHostEnrollmentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-// transportConfig is the validated content of the transport ConfigMap.
-type transportConfig struct {
-	apiServerURL string
-	caData       []byte
-}
-
 // bootstrapToken is a token that is safe to hand to a host: the full token
 // string and the moment it stops working.
 type bootstrapToken struct {
@@ -418,39 +443,41 @@ func enrollmentNotReadyMutateFn(enrollment *infrav1.ByoHostEnrollment, reason, m
 	}
 }
 
-// parseTransportConfig validates the transport ConfigMap's keys.
-func parseTransportConfig(configMap *corev1.ConfigMap) (*transportConfig, error) {
-	apiServerURL := configMap.Data[TransportConfigMapAPIServerURLKey]
-	if apiServerURL == "" {
-		return nil, fmt.Errorf("transport ConfigMap key %q is empty", TransportConfigMapAPIServerURLKey)
+// resolveTransport returns the API server URL and CA bundle to render into a
+// host's kubeconfig.
+//
+// The URL and any CA override are fixed at startup. Without an override the
+// cluster's own kube-root-ca.crt is read on every reconcile, so a rotated root
+// CA reaches new enrollments without restarting the manager.
+func (r *ByoHostEnrollmentReconciler) resolveTransport(ctx context.Context) (apiServerURL string, caData []byte, err error) {
+	if err := ValidateAPIServerURL(r.Transport.APIServerURL); err != nil {
+		return "", nil, err
 	}
-	parsed, err := url.Parse(apiServerURL)
-	if err != nil {
-		return nil, fmt.Errorf("transport ConfigMap key %q is not a URL: %w", TransportConfigMapAPIServerURLKey, err)
-	}
-	if parsed.Scheme != "https" || parsed.Host == "" {
-		return nil, fmt.Errorf("transport ConfigMap key %q must be an https URL with a host, got %q",
-			TransportConfigMapAPIServerURLKey, apiServerURL)
-	}
-
-	caData := configMap.Data[TransportConfigMapCADataKey]
-	if caData == "" {
-		return nil, fmt.Errorf("transport ConfigMap key %q is empty", TransportConfigMapCADataKey)
-	}
-	if err := validateCABundle([]byte(caData)); err != nil {
-		return nil, fmt.Errorf("transport ConfigMap key %q: %w", TransportConfigMapCADataKey, err)
+	if len(r.Transport.CAData) > 0 {
+		return r.Transport.APIServerURL, r.Transport.CAData, nil
 	}
 
-	return &transportConfig{
-		apiServerURL: apiServerURL,
-		caData:       []byte(caData),
-	}, nil
+	key := client.ObjectKey{Namespace: metav1.NamespaceSystem, Name: rootCAConfigMapName}
+	configMap := &corev1.ConfigMap{}
+	if err := r.Get(ctx, key, configMap); err != nil {
+		return "", nil, fmt.Errorf("get ConfigMap %s: %w", key, err)
+	}
+
+	rootCA := configMap.Data[rootCAConfigMapKey]
+	if rootCA == "" {
+		return "", nil, fmt.Errorf("ConfigMap %s key %q is empty", key, rootCAConfigMapKey)
+	}
+	if err := ValidateCABundle([]byte(rootCA)); err != nil {
+		return "", nil, fmt.Errorf("ConfigMap %s key %q: %w", key, rootCAConfigMapKey, err)
+	}
+
+	return r.Transport.APIServerURL, []byte(rootCA), nil
 }
 
-// validateCABundle checks that data is PEM holding at least one parseable
+// ValidateCABundle checks that data is PEM holding at least one parseable
 // certificate. A bundle that only looks like PEM fails on the host, long after
 // it was written, as a TLS error with no obvious cause.
-func validateCABundle(data []byte) error {
+func ValidateCABundle(data []byte) error {
 	found := false
 	rest := data
 	// The loop walks every PEM block in the bundle. pem.Decode signals the end

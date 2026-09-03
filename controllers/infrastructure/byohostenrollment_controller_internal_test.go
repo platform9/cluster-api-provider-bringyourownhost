@@ -15,6 +15,8 @@ import (
 	"encoding/pem"
 	"errors"
 	"math/big"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -51,7 +53,7 @@ const (
 )
 
 // testCAPEM returns a self-signed certificate in PEM form, so the CA
-// validation in parseTransportConfig sees something it can actually parse.
+// validation in ValidateCABundle sees something it can actually parse.
 func testCAPEM(t *testing.T) string {
 	t.Helper()
 
@@ -101,19 +103,28 @@ func testEnrollment() *infrav1.ByoHostEnrollment {
 	}
 }
 
-func testTransportConfigMap(t *testing.T) *corev1.ConfigMap {
+// testRootCAConfigMap builds the kube-root-ca.crt ConfigMap the root CA
+// publisher maintains, carrying a certificate the controller can parse.
+func testRootCAConfigMap(t *testing.T) *corev1.ConfigMap {
 	t.Helper()
 
 	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      DefaultTransportConfigMapName,
+			Name:      rootCAConfigMapName,
 			Namespace: metav1.NamespaceSystem,
 		},
-		Data: map[string]string{
-			TransportConfigMapAPIServerURLKey: testAPIServerURL,
-			TransportConfigMapCADataKey:       testCAPEM(t),
-		},
+		Data: map[string]string{rootCAConfigMapKey: testCAPEM(t)},
 	}
+}
+
+// testCAFile writes data to a PEM file the test owns and returns its path.
+func testCAFile(t *testing.T, data string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "ca.crt")
+	err := os.WriteFile(path, []byte(data), 0o600)
+	require.NoError(t, err)
+	return path
 }
 
 // newTestReconciler builds a reconciler over a fake client seeded with objs.
@@ -141,12 +152,9 @@ func newTestReconcilerWithInterceptor(t *testing.T, funcs *interceptor.Funcs, ob
 	fakeClient := builder.Build()
 
 	return &ByoHostEnrollmentReconciler{
-		Client: fakeClient,
-		Scheme: scheme,
-		TransportConfigMap: types.NamespacedName{
-			Namespace: metav1.NamespaceSystem,
-			Name:      DefaultTransportConfigMapName,
-		},
+		Client:    fakeClient,
+		Scheme:    scheme,
+		Transport: BootstrapTransport{APIServerURL: testAPIServerURL},
 	}, fakeClient
 }
 
@@ -227,12 +235,12 @@ func assertCredentialSecretOwnerReference(t *testing.T, secret *corev1.Secret, e
 
 // assertKubeconfigTransport checks the rendered kubeconfig names the
 // expected server and CA, and carries the enrollment's bootstrap token.
-func assertKubeconfigTransport(t *testing.T, config *clientcmdapi.Config, transportConfigMap *corev1.ConfigMap, tokenID string) {
+func assertKubeconfigTransport(t *testing.T, config *clientcmdapi.Config, wantCA, tokenID string) {
 	t.Helper()
 
 	assert.Equal(t, infrav1.DefaultContext, config.CurrentContext)
 	assert.Equal(t, testAPIServerURL, config.Clusters[infrav1.DefaultClusterName].Server)
-	assert.Equal(t, []byte(transportConfigMap.Data[TransportConfigMapCADataKey]),
+	assert.Equal(t, []byte(wantCA),
 		config.Clusters[infrav1.DefaultClusterName].CertificateAuthorityData)
 	assert.False(t, config.Clusters[infrav1.DefaultClusterName].InsecureSkipTLSVerify)
 	assert.True(t, strings.HasPrefix(config.AuthInfos[infrav1.DefaultAuth].Token, tokenID+"."))
@@ -247,8 +255,8 @@ func assertKubeconfigTransport(t *testing.T, config *clientcmdapi.Config, transp
 // credential Secret and its kubeconfig, and finally the CredentialReady
 // condition.
 func TestReconcileHappyPath(t *testing.T) {
-	transportConfigMap := testTransportConfigMap(t)
-	r, c := newTestReconciler(t, testEnrollment(), transportConfigMap)
+	rootCAConfigMap := testRootCAConfigMap(t)
+	r, c := newTestReconciler(t, testEnrollment(), rootCAConfigMap)
 
 	result, err := r.Reconcile(context.Background(), enrollmentRequest())
 	require.NoError(t, err)
@@ -288,11 +296,11 @@ func TestReconcileHappyPath(t *testing.T) {
 		assertCredentialSecretOwnerReference(t, credentialSecret, enrollment.Name, enrollment.UID)
 	})
 
-	t.Run("kubeconfig names the expected server, SNI and CA", func(t *testing.T) {
+	t.Run("kubeconfig names the flag's server and the cluster root CA", func(t *testing.T) {
 		require.NotEmpty(t, credentialSecret.Data[infrav1.CredentialSecretKubeconfigKey])
 		config, err := clientcmd.Load(credentialSecret.Data[infrav1.CredentialSecretKubeconfigKey])
 		require.NoError(t, err)
-		assertKubeconfigTransport(t, config, transportConfigMap, enrollment.Status.TokenID)
+		assertKubeconfigTransport(t, config, rootCAConfigMap.Data[rootCAConfigMapKey], enrollment.Status.TokenID)
 	})
 
 	t.Run("hostName key matches the enrollment", func(t *testing.T) {
@@ -308,7 +316,7 @@ func TestReconcileHappyPath(t *testing.T) {
 func TestReconcileInvalidHostName(t *testing.T) {
 	enrollment := testEnrollment()
 	enrollment.Name = "web$01"
-	r, c := newTestReconciler(t, enrollment, testTransportConfigMap(t))
+	r, c := newTestReconciler(t, enrollment, testRootCAConfigMap(t))
 
 	key := types.NamespacedName{Namespace: testEnrollmentNamespace, Name: enrollment.Name}
 	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
@@ -324,7 +332,7 @@ func TestReconcileInvalidHostName(t *testing.T) {
 	assert.Equal(t, infrav1.InvalidHostNameReason, conditions.GetReason(got, infrav1.CredentialReady))
 }
 
-func TestReconcileMissingTransportConfigMap(t *testing.T) {
+func TestReconcileMissingRootCAConfigMap(t *testing.T) {
 	r, c := newTestReconciler(t, testEnrollment())
 
 	result, err := r.Reconcile(context.Background(), enrollmentRequest())
@@ -340,49 +348,29 @@ func TestReconcileMissingTransportConfigMap(t *testing.T) {
 	secrets := &corev1.SecretList{}
 	err = c.List(context.Background(), secrets)
 	require.NoError(t, err)
-	assert.Empty(t, secrets.Items, "no credential may be created without a transport")
+	assert.Empty(t, secrets.Items, "no credential may be created without a CA")
 }
 
-func TestReconcileMalformedTransportConfigMap(t *testing.T) {
+func TestReconcileMalformedRootCAConfigMap(t *testing.T) {
 	testCases := []struct {
 		name string
 		data map[string]string
 	}{
 		{
-			name: "no api server url",
-			data: map[string]string{TransportConfigMapCADataKey: "ca"},
+			name: "no ca key",
+			data: map[string]string{"other": "value"},
 		},
 		{
-			name: "api server url is not https",
-			data: map[string]string{
-				TransportConfigMapAPIServerURLKey: "http://vcluster-cp.example.test:443",
-				TransportConfigMapCADataKey:       "ca",
-			},
-		},
-		{
-			name: "api server url has no host",
-			data: map[string]string{
-				TransportConfigMapAPIServerURLKey: "https://",
-				TransportConfigMapCADataKey:       "ca",
-			},
-		},
-		{
-			name: "no ca data",
-			data: map[string]string{TransportConfigMapAPIServerURLKey: testAPIServerURL},
+			name: "ca key is empty",
+			data: map[string]string{rootCAConfigMapKey: ""},
 		},
 		{
 			name: "ca data is not pem",
-			data: map[string]string{
-				TransportConfigMapAPIServerURLKey: testAPIServerURL,
-				TransportConfigMapCADataKey:       "not a certificate",
-			},
+			data: map[string]string{rootCAConfigMapKey: "not a certificate"},
 		},
 		{
 			name: "ca data is pem but not a certificate",
-			data: map[string]string{
-				TransportConfigMapAPIServerURLKey: testAPIServerURL,
-				TransportConfigMapCADataKey:       "-----BEGIN CERTIFICATE-----\nZm9v\n-----END CERTIFICATE-----\n",
-			},
+			data: map[string]string{rootCAConfigMapKey: "-----BEGIN CERTIFICATE-----\nZm9v\n-----END CERTIFICATE-----\n"},
 		},
 	}
 
@@ -390,7 +378,7 @@ func TestReconcileMalformedTransportConfigMap(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			configMap := &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      DefaultTransportConfigMapName,
+					Name:      rootCAConfigMapName,
 					Namespace: metav1.NamespaceSystem,
 				},
 				Data: tc.data,
@@ -408,8 +396,47 @@ func TestReconcileMalformedTransportConfigMap(t *testing.T) {
 	}
 }
 
+// TestReconcileCAOverrideWins covers the flag override: an operator whose
+// hosts reach an external endpoint supplies their own bundle, and the
+// cluster's kube-root-ca.crt must not be used instead.
+func TestReconcileCAOverrideWins(t *testing.T) {
+	rootCAConfigMap := testRootCAConfigMap(t)
+	overrideCA := testCAPEM(t)
+	require.NotEqual(t, rootCAConfigMap.Data[rootCAConfigMapKey], overrideCA)
+
+	r, c := newTestReconciler(t, testEnrollment(), rootCAConfigMap)
+	r.Transport.CAData = []byte(overrideCA)
+
+	_, err := r.Reconcile(context.Background(), enrollmentRequest())
+	require.NoError(t, err)
+
+	enrollment := getEnrollment(t, c)
+	require.NotNil(t, enrollment.Status.CredentialSecretRef)
+	credentialSecret := getCredentialSecret(t, c, testEnrollmentNamespace, enrollment.Status.CredentialSecretRef)
+
+	config, err := clientcmd.Load(credentialSecret.Data[infrav1.CredentialSecretKubeconfigKey])
+	require.NoError(t, err)
+	assertKubeconfigTransport(t, config, overrideCA, enrollment.Status.TokenID)
+}
+
+// TestReconcileWithoutAPIServerURL covers a reconciler built without the
+// startup constructor. It must refuse rather than hand a host a kubeconfig
+// with no server in it.
+func TestReconcileWithoutAPIServerURL(t *testing.T) {
+	r, c := newTestReconciler(t, testEnrollment(), testRootCAConfigMap(t))
+	r.Transport.APIServerURL = ""
+
+	result, err := r.Reconcile(context.Background(), enrollmentRequest())
+	require.NoError(t, err)
+	assert.Equal(t, transportRetryInterval, result.RequeueAfter)
+
+	enrollment := getEnrollment(t, c)
+	assert.Empty(t, enrollment.Status.TokenID)
+	assert.Equal(t, infrav1.TransportUnavailableReason, conditions.GetReason(enrollment, infrav1.CredentialReady))
+}
+
 func TestReconcileIsIdempotent(t *testing.T) {
-	r, c := newTestReconciler(t, testEnrollment(), testTransportConfigMap(t))
+	r, c := newTestReconciler(t, testEnrollment(), testRootCAConfigMap(t))
 
 	_, err := r.Reconcile(context.Background(), enrollmentRequest())
 	require.NoError(t, err)
@@ -480,7 +507,7 @@ func TestReconcileResumesFromIntermediateState(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			r, c := newTestReconciler(t, testEnrollment(), testTransportConfigMap(t))
+			r, c := newTestReconciler(t, testEnrollment(), testRootCAConfigMap(t))
 
 			_, err := r.Reconcile(context.Background(), enrollmentRequest())
 			require.NoError(t, err)
@@ -549,7 +576,7 @@ func TestReconcileReplacesUnusableTokenSecret(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			r, c := newTestReconciler(t, testEnrollment(), testTransportConfigMap(t))
+			r, c := newTestReconciler(t, testEnrollment(), testRootCAConfigMap(t))
 
 			_, err := r.Reconcile(context.Background(), enrollmentRequest())
 			require.NoError(t, err)
@@ -601,7 +628,7 @@ func TestReconcileDelete(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			r, c := newTestReconciler(t, testEnrollment(), testTransportConfigMap(t))
+			r, c := newTestReconciler(t, testEnrollment(), testRootCAConfigMap(t))
 
 			_, err := r.Reconcile(context.Background(), enrollmentRequest())
 			require.NoError(t, err)
@@ -820,62 +847,128 @@ func TestValidateToken(t *testing.T) {
 	}
 }
 
-func TestParseTransportConfig(t *testing.T) {
+// TestNewBootstrapTransport covers the startup check. A bad flag must stop the
+// manager, not leave every enrollment waiting on a condition nobody watches.
+func TestNewBootstrapTransport(t *testing.T) {
 	caPEM := testCAPEM(t)
+	validCAFile := testCAFile(t, caPEM)
+	malformedCAFile := testCAFile(t, "not a certificate")
+	missingCAFile := filepath.Join(t.TempDir(), "absent.crt")
 
 	testCases := []struct {
+		name         string
+		apiServerURL string
+		caFile       string
+		wantCAData   string
+		wantErr      bool
+	}{
+		{
+			name:         "a valid url with no ca file leaves the ca to the cluster",
+			apiServerURL: testAPIServerURL,
+		},
+		{
+			name:         "a valid ca file is loaded as the override",
+			apiServerURL: testAPIServerURL,
+			caFile:       validCAFile,
+			wantCAData:   caPEM,
+		},
+		{
+			name:    "an empty url is refused",
+			wantErr: true,
+		},
+		{
+			name:         "a url that is not https is refused",
+			apiServerURL: "http://vcluster-cp.example.test:443",
+			wantErr:      true,
+		},
+		{
+			name:         "a url with no host is refused",
+			apiServerURL: "https://",
+			wantErr:      true,
+		},
+		{
+			name:         "a url that does not parse is refused",
+			apiServerURL: "https://[::1",
+			wantErr:      true,
+		},
+		{
+			name:         "a ca file that does not exist is refused",
+			apiServerURL: testAPIServerURL,
+			caFile:       missingCAFile,
+			wantErr:      true,
+		},
+		{
+			name:         "a ca file that is not pem is refused",
+			apiServerURL: testAPIServerURL,
+			caFile:       malformedCAFile,
+			wantErr:      true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			transport, err := NewBootstrapTransport(tc.apiServerURL, tc.caFile)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Empty(t, transport.APIServerURL, "a refused configuration must not yield a transport")
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.apiServerURL, transport.APIServerURL)
+			assert.Equal(t, tc.wantCAData, string(transport.CAData))
+		})
+	}
+}
+
+func TestValidateAPIServerURL(t *testing.T) {
+	testCases := []struct {
 		name    string
-		data    map[string]string
+		rawURL  string
 		wantErr bool
 	}{
 		{
-			name: "a complete config map parses",
-			data: map[string]string{
-				TransportConfigMapAPIServerURLKey: testAPIServerURL,
-				TransportConfigMapCADataKey:       caPEM,
-			},
+			name:   "an https url with a host and port",
+			rawURL: testAPIServerURL,
 		},
 		{
-			name:    "no api server url",
-			data:    map[string]string{TransportConfigMapCADataKey: caPEM},
+			name:   "an https url with no port",
+			rawURL: "https://vcluster-cp.example.test",
+		},
+		{
+			name:    "empty",
 			wantErr: true,
 		},
 		{
-			name: "api server url is not https",
-			data: map[string]string{
-				TransportConfigMapAPIServerURLKey: "http://vcluster-cp.example.test:443",
-				TransportConfigMapCADataKey:       caPEM,
-			},
+			name:    "http",
+			rawURL:  "http://vcluster-cp.example.test:443",
 			wantErr: true,
 		},
 		{
-			name:    "no ca data",
-			data:    map[string]string{TransportConfigMapAPIServerURLKey: testAPIServerURL},
+			name:    "no scheme",
+			rawURL:  "vcluster-cp.example.test:443",
 			wantErr: true,
 		},
 		{
-			name: "ca data is not pem",
-			data: map[string]string{
-				TransportConfigMapAPIServerURLKey: testAPIServerURL,
-				TransportConfigMapCADataKey:       "not a certificate",
-			},
+			name:    "no host",
+			rawURL:  "https://",
+			wantErr: true,
+		},
+		{
+			name:    "not a url",
+			rawURL:  "https://[::1",
 			wantErr: true,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			transport, err := parseTransportConfig(&corev1.ConfigMap{Data: tc.data})
+			err := ValidateAPIServerURL(tc.rawURL)
 			if tc.wantErr {
 				require.Error(t, err)
-				assert.Nil(t, transport, "an unusable ConfigMap must not yield a transport")
 				return
 			}
-
 			require.NoError(t, err)
-			require.NotNil(t, transport)
-			assert.Equal(t, testAPIServerURL, transport.apiServerURL)
-			assert.Equal(t, []byte(caPEM), transport.caData)
 		})
 	}
 }
@@ -922,7 +1015,7 @@ func TestValidateCABundle(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateCABundle([]byte(tc.data))
+			err := ValidateCABundle([]byte(tc.data))
 			if tc.wantErr {
 				require.Error(t, err)
 				return
