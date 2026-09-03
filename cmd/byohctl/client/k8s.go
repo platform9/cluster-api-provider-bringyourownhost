@@ -21,6 +21,8 @@ import (
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils"
 	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	"gopkg.in/yaml.v2"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -56,9 +58,12 @@ type K8sClient struct {
 	insecure bool
 }
 
-// Client wraps the Kubernetes clientset and dynamic client.
+// Client wraps the Kubernetes clientset and dynamic client. Clientset is the kubernetes.Interface
+// rather than the concrete *kubernetes.Clientset so tests can substitute k8s.io/client-go's fake
+// clientset, the same way DynamicClient already accepts dynamic.Interface for the fake dynamic
+// client.
 type Client struct {
-	Clientset     *kubernetes.Clientset
+	Clientset     kubernetes.Interface
 	DynamicClient dynamic.Interface
 }
 
@@ -102,6 +107,14 @@ func (c *K8sClient) getNamespace() string {
 	fqdnPrefix := strings.Split(c.fqdn, ".")[0]
 	tenant := strings.ReplaceAll(c.tenant, "_", "-")
 	return fmt.Sprintf("%s-%s-%s", fqdnPrefix, c.domain, tenant)
+}
+
+// Namespace returns the namespace this client puts in a request's URL path before the
+// oidc-proxy rewrites it to the caller's real mapped tenant namespace. It is only ever a
+// guess: callers that need the real namespace have to read it back from a response, as
+// CreateByoHostEnrollment's return value does.
+func (c *K8sClient) Namespace() string {
+	return c.getNamespace()
 }
 
 // GetSecret retrieves a secret from the Kubernetes API
@@ -309,6 +322,76 @@ func (client *Client) DeleteByoHostObject(namespace string) error {
 	}
 
 	return nil
+}
+
+// CreateByoHostEnrollment creates a ByoHostEnrollment named hostName, carrying labels, in
+// namespace. namespace only has to be a plausible guess: the oidc-proxy rewrites the
+// namespace segment of the request to the caller's real mapped tenant namespace, so the
+// namespace the enrollment actually landed in has to be read back from the created
+// object, which is what this method returns.
+func (client *Client) CreateByoHostEnrollment(ctx context.Context, namespace, hostName string, labels map[string]string) (string, error) {
+	byohostenrollmentGVR := schema.GroupVersionResource{
+		Group:    "infrastructure.cluster.x-k8s.io",
+		Version:  "v1beta1",
+		Resource: "byohostenrollments",
+	}
+
+	enrollment := &infrastructurev1beta1.ByoHostEnrollment{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
+			Kind:       "ByoHostEnrollment",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   hostName,
+			Labels: labels,
+		},
+	}
+
+	unstructuredEnrollment, err := runtime.DefaultUnstructuredConverter.ToUnstructured(enrollment)
+	if err != nil {
+		return "", fmt.Errorf("error converting ByoHostEnrollment to unstructured: %v", err)
+	}
+
+	created, err := client.DynamicClient.Resource(byohostenrollmentGVR).Namespace(namespace).
+		Create(ctx, &unstructured.Unstructured{Object: unstructuredEnrollment}, metav1.CreateOptions{})
+	if err != nil {
+		return "", fmt.Errorf("error creating ByoHostEnrollment %s: %v", hostName, err)
+	}
+
+	return created.GetNamespace(), nil
+}
+
+// GetCredentialSecret fetches a host's credential Secret by its exact name. It must never
+// list or watch Secrets: a future narrowing of the tenant role grants "get" on this one
+// Secret name via resourceNames, which does not apply to list or watch, so a caller that
+// listed here would lose access under that grant.
+func (client *Client) GetCredentialSecret(ctx context.Context, namespace, name string) (*corev1.Secret, error) {
+	return client.Clientset.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
+}
+
+// AwaitCredentialSecret polls GetCredentialSecret until the Secret exists or timeout
+// elapses. A "not found" result keeps polling; any other error aborts immediately, since it
+// most likely means something other than reconcile latency is wrong, and continuing to poll
+// would only spend more of the bootstrap token's limited lifetime.
+func (client *Client) AwaitCredentialSecret(ctx context.Context, namespace, name string, pollInterval, timeout time.Duration) (*corev1.Secret, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		secret, err := client.GetCredentialSecret(ctx, namespace, name)
+		if err == nil {
+			return secret, nil
+		}
+		if !apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("error getting credential secret %s/%s: %w", namespace, name, err)
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("timed out after %s waiting for credential secret %s/%s to be created", timeout, namespace, name)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("waiting for credential secret %s/%s: %w", namespace, name, ctx.Err())
+		case <-time.After(pollInterval):
+		}
+	}
 }
 
 // AnnotateMachineObject annotates the machine object with the given annotation

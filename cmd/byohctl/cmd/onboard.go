@@ -5,6 +5,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,6 +19,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v2"
+
+	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/common/hostname"
 )
 
 var (
@@ -250,6 +253,39 @@ func LoadOnboardConfig(path string) (*OnboardConfig, error) {
 	return &cfg, nil
 }
 
+// bootstrapKubeconfigDestPath is where the agent's systemd drop-in points --bootstrap-kubeconfig.
+// Both ways byohctl can produce that file -- an operator-supplied file via --bootstrap-kubeconfig,
+// or a credential Secret from a ByoHostEnrollment this run created -- write to this same path, so
+// the agent does not need to know which one produced its bootstrap credential.
+func bootstrapKubeconfigDestPath() string {
+	return filepath.Join(bootstrapAgentConfDir, "bootstrap-kubeconfig.yaml")
+}
+
+// writeBootstrapKubeconfigFile writes the raw kubeconfig bytes the agent's --bootstrap-kubeconfig
+// flag points at. This is always the last write onboarding does to it: the agent waits for this
+// file to exist before doing anything else (see waitForBootstrapCredential in agent/main.go), so
+// writing it is what lets the agent proceed.
+func writeBootstrapKubeconfigFile(kubeconfig []byte) error {
+	if err := os.MkdirAll(bootstrapAgentConfDir, service.DefaultDirPerms); err != nil {
+		return fmt.Errorf("failed to create %s: %w", bootstrapAgentConfDir, err)
+	}
+	destPath := bootstrapKubeconfigDestPath()
+	if err := os.WriteFile(destPath, kubeconfig, 0o600); err != nil {
+		return fmt.Errorf("failed to write %s: %w", destPath, err)
+	}
+	return nil
+}
+
+// writeNamespaceFile records the tenant namespace the agent should register into, in the file the
+// agent reads once at startup (see resolveNamespace in agent/main.go).
+func writeNamespaceFile(byohDir, namespace string) error {
+	namespaceFile := filepath.Join(byohDir, "namespace")
+	if err := os.WriteFile(namespaceFile, []byte(namespace), service.DefaultFilePerms); err != nil {
+		return fmt.Errorf("failed to save namespace: %w", err)
+	}
+	return nil
+}
+
 // Never writes ~/.byoh/config thus agent's own bootstrap-token-to-certificate exchange
 // runs on first start
 func writeBootstrapCredential(byohDir, bootstrapKubeconfigPath, namespace string) error {
@@ -266,18 +302,62 @@ func writeBootstrapCredential(byohDir, bootstrapKubeconfigPath, namespace string
 			return fmt.Errorf("failed to apply --insecure to bootstrap kubeconfig: %w", err)
 		}
 	}
-	if err := os.MkdirAll(bootstrapAgentConfDir, service.DefaultDirPerms); err != nil {
-		return fmt.Errorf("failed to create %s: %w", bootstrapAgentConfDir, err)
+	if err := writeBootstrapKubeconfigFile(data); err != nil {
+		return err
 	}
-	destPath := filepath.Join(bootstrapAgentConfDir, "bootstrap-kubeconfig.yaml")
-	if err := os.WriteFile(destPath, data, 0o600); err != nil {
-		return fmt.Errorf("failed to write %s: %w", destPath, err)
+	return writeNamespaceFile(byohDir, namespace)
+}
+
+// authenticateWithPlatform9 either hands the operator-supplied bootstrap credential to the agent
+// (the --bootstrap-kubeconfig escape hatch) or authenticates with Platform9, saves the resulting
+// kubeconfig, and confirms regionName is available for the tenant. It returns the client used to
+// authenticate, or nil when the escape hatch was used, since there was nothing to authenticate.
+func authenticateWithPlatform9(ctx context.Context, byohDir string, usingBootstrapKubeconfig bool) (*client.K8sClient, error) {
+	if usingBootstrapKubeconfig {
+		utils.LogDebug("Using bootstrap kubeconfig %s, namespace %s", bootstrapKubeconfigPath, hostNamespace)
+		utils.LogInfo("Handing bootstrap credential to the agent")
+		if err := writeBootstrapCredential(byohDir, bootstrapKubeconfigPath, hostNamespace); err != nil {
+			return nil, fmt.Errorf("failed to write bootstrap credential: %w", err)
+		}
+		return nil, nil
 	}
-	namespaceFile := filepath.Join(byohDir, "namespace")
-	if err := os.WriteFile(namespaceFile, []byte(namespace), service.DefaultFilePerms); err != nil {
-		return fmt.Errorf("failed to save namespace: %w", err)
+
+	utils.LogDebug("Using FQDN: %s, Domain: %s, Tenant: %s", fqdn, domain, tenant)
+
+	utils.LogDebug("Getting authentication token for user %s", username)
+	authClient := client.NewAuthClient(fqdn, clientToken, insecure)
+	token, err := authClient.GetToken(username, password)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get authentication token: %w", err)
 	}
-	return nil
+
+	k8sClient := client.NewK8sClient(fqdn, domain, tenant, token, regionName, insecure)
+
+	utils.LogInfo("Saving kubeconfig from bootstrap secret")
+	if err := k8sClient.SaveKubeConfig("byoh-bootstrap-kc"); err != nil {
+		return nil, fmt.Errorf("failed to save kubeconfig: %w", err)
+	}
+
+	// Check if region where user wants to onboard to is available for this tenant or not.
+	// If not available, roll back the onboarding process.
+	available, regions, err := k8sClient.CheckRegionAvailability(ctx, regionName)
+	if err != nil {
+		if delErr := k8sClient.DeleteSavedKubeconfig(); delErr != nil {
+			utils.LogError("Failed to delete saved kubeconfig while rolling back onboarding process: %v", delErr)
+		}
+		return nil, fmt.Errorf("failed to check region availability, rolling back onboarding process: %w", err)
+	}
+	if !available {
+		if len(regions) > 0 {
+			utils.LogInfo("Available regions: %v", regions)
+		}
+		if delErr := k8sClient.DeleteSavedKubeconfig(); delErr != nil {
+			utils.LogError("Failed to delete saved kubeconfig while rolling back onboarding process: %v", delErr)
+		}
+		return nil, fmt.Errorf("region %s is not available for the tenant, rolling back onboarding process", regionName)
+	}
+
+	return k8sClient, nil
 }
 
 // Helper to merge config values with CLI flags
@@ -356,6 +436,15 @@ func runOnboard(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	// Computed early, alongside the other host-qualification checks above: a host name that
+	// cannot normalize is a hard failure, and failing before Platform9 is contacted leaves
+	// nothing to roll back.
+	hostName, err := computeHostName()
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Advisory only -- not required for correctness, see isNTPSynchronized.
 	if !isNTPSynchronized() {
 		fmt.Println("Warning: this host's clock does not appear to be NTP-synchronized.")
@@ -425,52 +514,13 @@ func runOnboard(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	if usingBootstrapKubeconfig {
-		utils.LogDebug("Using bootstrap kubeconfig %s, namespace %s", bootstrapKubeconfigPath, hostNamespace)
-		utils.LogInfo("Handing bootstrap credential to the agent")
-		if err := writeBootstrapCredential(byohDir, bootstrapKubeconfigPath, hostNamespace); err != nil {
-			utils.LogError("Failed to write bootstrap credential: %v", err)
-			os.Exit(1)
-		}
-	} else {
-		utils.LogDebug("Using FQDN: %s, Domain: %s, Tenant: %s", fqdn, domain, tenant)
-
-		utils.LogDebug("Getting authentication token for user %s", username)
-		authClient := client.NewAuthClient(fqdn, clientToken, insecure)
-		token, err := authClient.GetToken(username, password)
-		if err != nil {
-			utils.LogError("Failed to get authentication token: %v", err)
-			os.Exit(1)
-		}
-
-		k8sClient := client.NewK8sClient(fqdn, domain, tenant, token, regionName, insecure)
-
-		utils.LogInfo("Saving kubeconfig from bootstrap secret")
-		if err := k8sClient.SaveKubeConfig("byoh-bootstrap-kc"); err != nil {
-			utils.LogError("Failed to save kubeconfig: %v", err)
-			os.Exit(1)
-		}
-
-		// Check if region where user wants to onboard to is available for this tenant or not
-		// If not available, roll back the onboarding process
-		available, regions, err := k8sClient.CheckRegionAvailability(cmd.Context(), regionName)
-		if err != nil {
-			utils.LogError("Failed to check region availability, rolling back onboarding process: %v", err)
-			if err := k8sClient.DeleteSavedKubeconfig(); err != nil {
-				utils.LogError("Failed to delete saved kubeconfig while rolling back onboarding process: %v", err)
-			}
-			os.Exit(1)
-		}
-		if !available {
-			utils.LogError("Region %s is not available for the tenant, rolling back onboarding process", regionName)
-			if len(regions) > 0 {
-				utils.LogInfo("Available regions: %v", regions)
-			}
-			if err := k8sClient.DeleteSavedKubeconfig(); err != nil {
-				utils.LogError("Failed to delete saved kubeconfig while rolling back onboarding process: %v", err)
-			}
-			os.Exit(1)
-		}
+	// k8sClient is reused below by the enrollment step after the agent is installed, rather
+	// than re-authenticating with Platform9; it is nil when the --bootstrap-kubeconfig escape
+	// hatch was used, since there was nothing to authenticate.
+	k8sClient, err := authenticateWithPlatform9(cmd.Context(), byohDir, usingBootstrapKubeconfig)
+	if err != nil {
+		utils.LogError("%v", err)
+		os.Exit(1)
 	}
 
 	// Save region name in a temp file in byohDir
@@ -486,6 +536,16 @@ func runOnboard(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	// Save this host's normalized name for the agent to read at startup. Both this file and
+	// the region file above must exist before the agent package is installed below: the
+	// package's after-install script reads the region file at install time, and the agent
+	// reads the hostname file on every start, including a restart of an already-onboarded host.
+	hostNameFile := filepath.Join(byohDir, hostname.FileName)
+	if err := os.WriteFile(hostNameFile, []byte(hostName), service.DefaultFilePerms); err != nil {
+		utils.LogError("Failed to save host name: %v", err)
+		os.Exit(1)
+	}
+
 	// Create packages directory for downloads
 	pkgDir := filepath.Join(byohDir, "packages")
 	if err := os.MkdirAll(pkgDir, service.DefaultDirPerms); err != nil {
@@ -493,11 +553,12 @@ func runOnboard(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// Setup agent (download and install)
+	// Setup agent (download and install), then -- unless the --bootstrap-kubeconfig escape
+	// hatch is in play -- create the host's enrollment and wait for its credential. See
+	// installAndEnroll for why installing has to come first.
 	utils.LogInfo("Setting up BYOH agent")
-	err = service.SetupAgent(pkgDir)
-	if err != nil {
-		utils.LogError("Failed to setup agent: %v", err)
+	if err := installAndEnroll(cmd.Context(), pkgDir, byohDir, hostName, regionName, usingBootstrapKubeconfig, k8sClient); err != nil {
+		utils.LogError("%v", err)
 		os.Exit(1)
 	}
 

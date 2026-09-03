@@ -8,12 +8,19 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	capiv1beta1 "sigs.k8s.io/cluster-api/api/v1beta1"
 )
+
+var byohostenrollmentGVR = schema.GroupVersionResource{
+	Group:    "infrastructure.cluster.x-k8s.io",
+	Version:  "v1beta1",
+	Resource: "byohostenrollments",
+}
 
 const deploymentNameLabel = "cluster.x-k8s.io/deployment-name"
 
@@ -34,6 +41,7 @@ func newTestScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	scheme := runtime.NewScheme()
 	require.NoError(t, capiv1beta1.AddToScheme(scheme))
+	require.NoError(t, infrastructurev1beta1.AddToScheme(scheme))
 	return scheme
 }
 
@@ -176,4 +184,39 @@ func TestScaleDownMachineDeployment_MissingLabel(t *testing.T) {
 	err = c.ScaleDownMachineDeployment(t.Context(), obj, "ns1")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "does not have a machine deployment name")
+}
+
+func TestCreateByoHostEnrollment(t *testing.T) {
+	scheme := newTestScheme(t)
+	dynamicClient := dynamicfake.NewSimpleDynamicClient(scheme)
+	c := &Client{DynamicClient: dynamicClient}
+	labels := map[string]string{"pcd-kaapi.pf9.io/region": "region1"}
+
+	namespace, err := c.CreateByoHostEnrollment(t.Context(), "guessed-ns", "host1", labels)
+	require.NoError(t, err)
+	assert.Equal(t, "guessed-ns", namespace)
+
+	unstructuredObj, err := dynamicClient.Resource(byohostenrollmentGVR).Namespace("guessed-ns").Get(t.Context(), "host1", metav1.GetOptions{})
+	require.NoError(t, err)
+
+	created := &infrastructurev1beta1.ByoHostEnrollment{}
+	err = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredObj.UnstructuredContent(), created)
+	require.NoError(t, err)
+	assert.Equal(t, "host1", created.Name)
+	assert.Equal(t, labels, created.Labels)
+}
+
+func TestCreateByoHostEnrollment_NameConflict(t *testing.T) {
+	scheme := newTestScheme(t)
+	existing := &infrastructurev1beta1.ByoHostEnrollment{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "guessed-ns",
+			Name:      "host1",
+		},
+	}
+	dynamicClient := dynamicfake.NewSimpleDynamicClient(scheme, existing)
+	c := &Client{DynamicClient: dynamicClient}
+
+	_, err := c.CreateByoHostEnrollment(t.Context(), "guessed-ns", "host1", nil)
+	assert.Error(t, err)
 }
