@@ -17,6 +17,12 @@ import (
 // the normalized object name is required.
 type Name string
 
+// FileName is the name of the file under the agent's config directory that
+// holds the host's normalized name. byohctl writes this file and the agent
+// reads it; both must use this declaration instead of a string literal, so
+// the two sides can never disagree on where the file lives.
+const FileName = "hostname"
+
 // Normalize turns a machine's host name into the object name used for that
 // host: lowercase, underscores replaced with hyphens, and a trailing dot
 // removed. Kubernetes object names must be lowercase, and kubelet lowercases
