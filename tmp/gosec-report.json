@@ -1,0 +1,78 @@
+{
+	"Golang errors": {},
+	"Issues": [
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1/byohostenrollment_types.go",
+			"code": "38: \t// the credential Secret could not be written.\n39: \tCredentialGenerateFailedReason = \"CredentialGenerateFailed\" //nolint: gosec // a condition reason, not a credential\n40: )\n",
+			"line": "39",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/test/e2e/e2e_k8s_bundle_registry.go",
+			"code": "169: \n170: \trunCmd := exec.CommandContext(ctx, \"docker\", \"run\", //nolint:gosec // fixed args, no user input\n171: \t\t\"--name\", k8sBundleBuilderContainer,\n172: \t\t\"-e\", \"BUILD_ONLY=1\",\n173: \t\t\"-e\", \"CONTAINERD_VERSION=\"+k8sBundleContainerdVersion,\n174: \t\t\"-e\", \"KUBERNETES_VERSION=\"+kubernetesVersion,\n175: \t\t\"-e\", \"KUBERNETES_MAJOR_VERSION=\"+majorMinor,\n176: \t\t\"-e\", \"CRITOOL_VERSION=\"+critoolVersion,\n177: \t\t\"-e\", \"ARCH=\"+debianArch,\n178: \t\t\"-e\", \"UBUNTU_VERSION=\"+k8sBundleUbuntuVersion,\n179: \t\tk8sBundleBuilderImageTag,\n180: \t)\n181: \tif output, runErr := runCmd.CombinedOutput(); runErr != nil {\n",
+			"line": "170-180",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/agent/main.go",
+			"code": "421: \n422: \tdata, err := os.ReadFile(filepath.Join(configDir, namespaceFileName))\n423: \tif err != nil {\n",
+			"line": "422",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/agent/main.go",
+			"code": "392: \tpath := filepath.Join(configDir, hostname.FileName)\n393: \tdata, err := os.ReadFile(path)\n394: \tif err != nil {\n",
+			"line": "393",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		}
+	],
+	"Stats": {
+		"files": 67,
+		"lines": 11478,
+		"nosec": 18,
+		"found": 4
+	},
+	"GosecVersion": "dev"
+}
