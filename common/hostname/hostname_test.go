@@ -15,9 +15,10 @@ import (
 
 func TestNormalize(t *testing.T) {
 	testCases := []struct {
-		name  string
-		input string
-		want  hostname.Name
+		name    string
+		input   string
+		want    hostname.Name
+		wantErr bool
 	}{
 		{
 			name:  "already a valid object name",
@@ -54,6 +55,51 @@ func TestNormalize(t *testing.T) {
 			input: strings.Repeat("a", 253),
 			want:  hostname.Name(strings.Repeat("a", 253)),
 		},
+		{
+			name:    "empty input",
+			input:   "",
+			wantErr: true,
+		},
+		{
+			name:    "only a dot",
+			input:   ".",
+			wantErr: true,
+		},
+		{
+			name:    "only whitespace",
+			input:   "   ",
+			wantErr: true,
+		},
+		{
+			name:    "embedded space",
+			input:   "web 01",
+			wantErr: true,
+		},
+		{
+			name:    "character normalization cannot fix",
+			input:   "web$01",
+			wantErr: true,
+		},
+		{
+			name:    "leading hyphen",
+			input:   "-web01",
+			wantErr: true,
+		},
+		{
+			name:    "leading underscore becomes a leading hyphen",
+			input:   "_web01",
+			wantErr: true,
+		},
+		{
+			name:    "empty label between dots",
+			input:   "web..01",
+			wantErr: true,
+		},
+		{
+			name:    "one character over the length limit",
+			input:   strings.Repeat("a", 254),
+			wantErr: true,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -61,6 +107,13 @@ func TestNormalize(t *testing.T) {
 			t.Parallel()
 
 			got, err := hostname.Normalize(tc.input)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Empty(t, got)
+				assert.Contains(t, err.Error(), tc.input)
+				return
+			}
+
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, got)
 		})
@@ -76,59 +129,4 @@ func TestNormalizeIsIdempotent(t *testing.T) {
 	second, err := hostname.Normalize(string(first))
 	require.NoError(t, err)
 	assert.Equal(t, first, second)
-}
-
-func TestNormalizeRejects(t *testing.T) {
-	testCases := []struct {
-		name  string
-		input string
-	}{
-		{
-			name:  "empty input",
-			input: "",
-		},
-		{
-			name:  "only a dot",
-			input: ".",
-		},
-		{
-			name:  "only whitespace",
-			input: "   ",
-		},
-		{
-			name:  "embedded space",
-			input: "web 01",
-		},
-		{
-			name:  "character normalization cannot fix",
-			input: "web$01",
-		},
-		{
-			name:  "leading hyphen",
-			input: "-web01",
-		},
-		{
-			name:  "leading underscore becomes a leading hyphen",
-			input: "_web01",
-		},
-		{
-			name:  "empty label between dots",
-			input: "web..01",
-		},
-		{
-			name:  "one character over the length limit",
-			input: strings.Repeat("a", 254),
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			got, err := hostname.Normalize(tc.input)
-			require.Error(t, err)
-			assert.Empty(t, got)
-			assert.Contains(t, err.Error(), tc.input)
-		})
-	}
 }
