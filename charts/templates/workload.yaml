@@ -1835,9 +1835,7 @@ spec:
             - --metrics-addr=127.0.0.1:8080
             - --enable-leader-election
             - --byohostagent-heartbeat-timeout={{ .Values.byohostAgentHeartbeatTimeout | default "120s" }}
-            {{- with .Values.bootstrapAPIServerURL }}
-            - --bootstrap-apiserver-url={{ . }}
-            {{- end }}
+            - --bootstrap-apiserver-url={{ .Values.bootstrapAPIServerURL }}
           command:
             - /manager
           env:
