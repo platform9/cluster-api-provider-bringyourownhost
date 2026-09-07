@@ -8,8 +8,10 @@ resources:
     memory: 250Mi
 byohostAgentHeartbeatTimeout: 120s
 
-# The https endpoint a BYO host dials to reach this management cluster, as
-# https://<host>:<port>. Required: the controller manager refuses to start
-# without it. Must pass TLS through, because a proxy that terminates TLS strips
-# the client certificate the host later presents.
+# Overrides the bootstrap API server endpoint a BYO host dials to reach this
+# management cluster, as https://<host>:<port>. Leave empty on PCD: the
+# controller derives the endpoint from the customer's own FQDN. Set it only
+# where that derivation does not apply. Whatever endpoint is used must pass TLS
+# through, because a proxy that terminates TLS strips the client certificate
+# the host later presents.
 bootstrapAPIServerURL: ""

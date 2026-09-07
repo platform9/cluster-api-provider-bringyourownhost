@@ -69,8 +69,8 @@ type ByoHostEnrollmentReconciler struct {
 	Scheme *runtime.Scheme
 
 	// Transport says how a BYO host reaches this management cluster. Build it
-	// with NewBootstrapTransport, so a bad value stops the manager instead of
-	// every enrollment.
+	// with NewBootstrapTransport, so a malformed value stops the manager
+	// instead of every enrollment.
 	Transport BootstrapTransport
 }
 
@@ -81,7 +81,8 @@ type ByoHostEnrollmentReconciler struct {
 // enrollment cannot know the endpoint a host dials, and must not be trusted to
 // supply it.
 type BootstrapTransport struct {
-	// APIServerURL is the endpoint a BYO host dials, as https://<host>:<port>.
+	// APIServerURL overrides the endpoint a BYO host dials, as
+	// https://<host>:<port>. Empty means the deployment supplied no override.
 	// It must pass TLS through: a proxy that terminates TLS strips the client
 	// certificate the host later presents.
 	APIServerURL string
@@ -94,12 +95,21 @@ type BootstrapTransport struct {
 // NewBootstrapTransport validates the deployment's bootstrap transport
 // settings and reads the CA override from disk.
 //
-// caFile is optional. Leaving it empty makes each reconcile read the cluster's
-// own kube-root-ca.crt instead. Set it when hosts reach the API server through
-// an external endpoint, which kube-root-ca.crt is not documented to verify.
+// Both arguments are optional, and both are overrides.
+//
+// An empty apiServerURL means the deployment named no endpoint, which is the
+// normal case: the controller works the endpoint out from the customer's own
+// FQDN. A non-empty value is checked here rather than per enrollment, so a
+// typo stops the manager with one message.
+//
+// An empty caFile makes each reconcile read the cluster's own
+// kube-root-ca.crt. Set it when hosts reach the API server through an external
+// endpoint, which kube-root-ca.crt is not documented to verify.
 func NewBootstrapTransport(apiServerURL, caFile string) (BootstrapTransport, error) {
-	if err := ValidateAPIServerURL(apiServerURL); err != nil {
-		return BootstrapTransport{}, err
+	if apiServerURL != "" {
+		if err := ValidateAPIServerURL(apiServerURL); err != nil {
+			return BootstrapTransport{}, err
+		}
 	}
 	if caFile == "" {
 		return BootstrapTransport{APIServerURL: apiServerURL}, nil

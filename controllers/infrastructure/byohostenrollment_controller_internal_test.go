@@ -847,8 +847,10 @@ func TestValidateToken(t *testing.T) {
 	}
 }
 
-// TestNewBootstrapTransport covers the startup check. A bad flag must stop the
-// manager, not leave every enrollment waiting on a condition nobody watches.
+// TestNewBootstrapTransport covers the startup check. A malformed flag must
+// stop the manager, not leave every enrollment waiting on a condition nobody
+// watches. An absent flag must not stop it: the endpoint is derived per
+// customer when the deployment names none.
 func TestNewBootstrapTransport(t *testing.T) {
 	caPEM := testCAPEM(t)
 	validCAFile := testCAFile(t, caPEM)
@@ -873,8 +875,12 @@ func TestNewBootstrapTransport(t *testing.T) {
 			wantCAData:   caPEM,
 		},
 		{
-			name:    "an empty url is refused",
-			wantErr: true,
+			name: "an empty url leaves the endpoint to be derived",
+		},
+		{
+			name:       "an empty url still loads a ca override",
+			caFile:     validCAFile,
+			wantCAData: caPEM,
 		},
 		{
 			name:         "a url that is not https is refused",

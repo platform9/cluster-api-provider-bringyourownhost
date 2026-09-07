@@ -90,7 +90,7 @@ func setFlags() {
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.DurationVar(&byohostAgentHeartbeatTimeout, "byohostagent-heartbeat-timeout", DefaultHeartbeatTimeout, "The duration after which the agent is considered to be disconnected.")
 	flag.StringVar(&bootstrapAPIServerURL, "bootstrap-apiserver-url", "",
-		"Required. The https endpoint a BYO host dials to reach this management cluster, as https://<host>:<port>.")
+		"Overrides the https endpoint a BYO host dials to reach this management cluster, as https://<host>:<port>. Defaults to an endpoint derived from the customer's own FQDN.")
 	flag.StringVar(&bootstrapAPIServerCAFile, "bootstrap-apiserver-ca-file", "",
 		"Path to a PEM CA bundle that verifies that endpoint. Defaults to the cluster's own kube-root-ca.crt, which only covers internal endpoints.")
 	flag.Parse()
@@ -216,10 +216,11 @@ func main() {
 	// here for both the controller registrations and mgr.Start.
 	ctx := ctrl.SetupSignalHandler()
 
-	// The bootstrap transport is a deployment property, so a bad value is a
-	// deployment mistake. Checking it here stops the manager with one clear
+	// The bootstrap transport is a deployment property, so a malformed value is
+	// a deployment mistake. Checking it here stops the manager with one clear
 	// message, instead of parking every enrollment on a condition nobody is
-	// watching.
+	// watching. Supplying nothing is not a mistake: the endpoint is then
+	// derived per customer.
 	bootstrapTransport, err := byohcontrollers.NewBootstrapTransport(bootstrapAPIServerURL, bootstrapAPIServerCAFile)
 	if err != nil {
 		setupLog.Error(err, "invalid bootstrap transport configuration")
