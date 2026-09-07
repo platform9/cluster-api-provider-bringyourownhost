@@ -27,6 +27,8 @@ import (
 	"github.com/pkg/errors"
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/cluster-api/test/framework"
+
+	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/common/hostname"
 )
 
 const (
@@ -336,6 +338,26 @@ func (r *ByoHostRunner) copyKubeconfig(config cpConfig, listopt container.ListOp
 	return err
 }
 
+// writeHostNameFile writes the agent's identity file into the container.
+//
+// The agent reads its host name from this file rather than calling os.Hostname(), so without it
+// the agent exits at startup and every spec that waits on it times out. byohctl writes the file
+// on a real host; here the container's own hostname is already the name the specs expect, so it
+// is the value to write.
+func (r *ByoHostRunner) writeHostNameFile(containerID string) error {
+	execCommand, err := r.DockerClient.ContainerExecCreate(r.Context, containerID, container.ExecOptions{
+		AttachStdout: true,
+		AttachStderr: true,
+		Cmd: []string{"sh", "-c",
+			fmt.Sprintf("mkdir -p ${HOME}/.byoh && printf '%%s' %q > ${HOME}/.byoh/%s", r.ByoHostName, hostname.FileName)},
+	})
+	if err != nil {
+		return errors.Wrapf(err, "create exec for writing host name file in container %q", containerID)
+	}
+	return errors.Wrapf(r.DockerClient.ContainerExecStart(r.Context, execCommand.ID, container.ExecStartOptions{}),
+		"write host name file in container %q", containerID)
+}
+
 // SetupByoDockerHost sets up the byohost docker container
 func (r *ByoHostRunner) SetupByoDockerHost() (*container.CreateResponse, error) {
 	var byohost container.CreateResponse
@@ -346,6 +368,7 @@ func (r *ByoHostRunner) SetupByoDockerHost() (*container.CreateResponse, error) 
 	Expect(err).NotTo(HaveOccurred())
 	Expect(r.DockerClient.ContainerStart(r.Context, byohost.ID, container.StartOptions{})).NotTo(HaveOccurred())
 	Expect(r.raiseInotifyInstanceLimit(byohost.ID)).To(Succeed())
+	Expect(r.writeHostNameFile(byohost.ID)).To(Succeed())
 
 	config := cpConfig{
 		sourcePath: r.PathToHostAgentBinary,
