@@ -35,6 +35,7 @@ import (
 	klog "k8s.io/klog/v2"
 	"k8s.io/klog/v2/klogr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	"sigs.k8s.io/cluster-api/util/certs"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -43,49 +44,46 @@ import (
 
 const (
 	// DefaultHeartbeatInterval is how often the agent refreshes its ByoHost
-	// heartbeat timestamp, unless overridden via the --heartbeat-interval flag.
+	// heartbeat timestamp. Overridden via --heartbeat-interval.
 	DefaultHeartbeatInterval = 30 * time.Second
 
-	// DefaultMaxBlockingDuration bounds how long the agent keeps pulsing
-	// heartbeats during a single kubeadm install/join call, unless overridden
-	// via the --max-blocking-duration flag. Comfortably above any legitimate
-	// install or join duration, so it only ever kicks in for a genuinely
-	// wedged call.
+	// DefaultMaxBlockingDuration is the upper bound to how long the agent keeps
+	// pulsing heartbeats during a single kubeadm install/join call. Overridden
+	// via --max-blocking-duration.
 	DefaultMaxBlockingDuration = 30 * time.Minute
 
-	// DefaultExpirationSeconds defines the expiry time for Certificates
-	// which is currently set to 1 year aligned with kubeadm defaults.
-	DefaultExpirationSeconds = 86400 * 365
+	// DefaultRequestedCertExpirationSeconds defines the expiry time for
+	// Certificates, in the seconds unit a CertificateSigningRequest expects.
+	DefaultRequestedCertExpirationSeconds = int64(certs.DefaultCertDuration / time.Second)
 
-	// bootstrapRetryInitialDelay is how long the agent waits before its first retry of the
-	// bootstrap flow, and the value the delay doubles from after that. Lowering it recovers sooner
-	// once an operator fixes the cause, at the cost of more requests against the management cluster
-	// while a host is stuck.
+	// bootstrapRetryInitialDelay is how long the agent waits before its first
+	// retry of a failed attempt. Every subsequent retry backs off exponentially
+	// up to an upper bound, as defined by bootstrapRetryMaxDelay.
 	bootstrapRetryInitialDelay = 5 * time.Second
-	// bootstrapRetryMaxDelay defines how much the retry delay is allowed to double. The
-	// bootstrap token the agent authenticates with defaults to a 30 minute TTL, so a cap
-	// close to that leaves room for only one retry before the token expires. A 10 minute
-	// cap leaves room for several attempts within the token's lifetime.
+
+	// bootstrapRetryMaxDelay is the upper bound to how much the retry delay can
+	// be bumped. By default, the bootstrap token used by the agent has a 30
+	// minute TTL. So an upper bound value here must be used in a way to allow
+	// multiple retry attempts within the token's lifetime.
 	bootstrapRetryMaxDelay = 10 * time.Minute
 
-	// csrApprovalTimeout bounds how long the agent waits for its certificate
-	// request to be approved and issued before giving up on this attempt. The
-	// bootstrap flow retries, so a timeout here costs a retry rather than the
-	// agent's whole run.
+	// csrApprovalTimeout is the upper bound to how long the agent waits for its
+	// certificate request to be approved and issued before giving up on this
+	// attempt.
 	csrApprovalTimeout = 5 * time.Minute
 
 	// bootstrapCredentialPollInterval is how often the agent checks whether the
-	// bootstrap kubeconfig file has appeared. It is a fixed interval rather than
-	// retryWithBackoff's doubling delay: that backoff exists to slow down repeated
-	// failures against the management cluster, but a bootstrap kubeconfig that has
-	// not been written yet is not a failure to back off from, it is an ordering
-	// race between the agent starting and byohctl finishing the host's enrollment.
-	// A short, constant interval notices the file soon after it lands instead of
-	// idling through a delay that has already grown large.
+	// bootstrap kubeconfig file has been saved to disk.
+	//
+	// NOTE: This is a fixed delay instead of an exponential backoff because we
+	// only expect a ordering race between the agent starting and byohctl
+	// finishing up the host's enrollment. An exponential backoff here will
+	// unnecessarily delay the agent from reconciling the latest config from
+	// disk.
 	bootstrapCredentialPollInterval = 2 * time.Second
 
 	// namespaceFileName is the file under the agent's config directory holding the
-	// tenant namespace byohctl learns only after it creates the host's enrollment,
+	// tenant namespace. byohctl learns only after it creates the host's enrollment,
 	// which happens after the agent is already installed. See resolveNamespace for
 	// how this interacts with the --namespace flag.
 	namespaceFileName = "namespace"
@@ -177,7 +175,7 @@ func setupflags() {
 	klog.ClearLogger()
 
 	flag.StringVar(&namespace, "namespace", "default", "Namespace in the management cluster where you would like to register this host")
-	flag.Int64Var(&certExpiryDuration, "certExpiryDuration", DefaultExpirationSeconds, "Duration (in seconds) for the expiration of the host certificates")
+	flag.Int64Var(&certExpiryDuration, "certExpiryDuration", DefaultRequestedCertExpirationSeconds, "Duration (in seconds) for the expiration of the host certificates")
 	flag.Var(&labels, "label", "labels to attach to the ByoHost CR in the form labelname=labelVal for e.g. '--label site=apac --label cores=2'")
 	flag.StringVar(&metricsbindaddress, "metricsbindaddress", ":8080", "metricsbindaddress is the TCP address that the controller should bind to for serving prometheus metrics.It can be set to \"0\" to disable the metrics serving")
 	flag.StringVar(&downloadpath, "downloadpath", "/var/lib/byoh/bundles", "File System path to keep the downloads")
@@ -274,13 +272,13 @@ func setupHostReconciler(ctx context.Context, mgr ctrl.Manager, k8sClient client
 	return nil
 }
 
-func handleBootstrapFlow(ctx context.Context, logger logr.Logger, hostName string) error {
+func handleBootstrapFlow(ctx context.Context, logger logr.Logger, hostName, namespace string) error {
 	logger.Info("initiated bootstrap kubeconfig flow")
 	bootstrapClientConfig, err := registration.LoadRESTClientConfig(bootstrapKubeConfig)
 	if err != nil {
 		return fmt.Errorf("client config load failed: %v", err)
 	}
-	byohCSR, err := registration.NewByohCSR(bootstrapClientConfig, logger, certExpiryDuration)
+	byohCSR, err := registration.NewByohCSR(bootstrapClientConfig, logger, certExpiryDuration, namespace)
 	if err != nil {
 		return fmt.Errorf("ByohCSR intialization failed: %v", err)
 	}
@@ -317,10 +315,10 @@ func retryWithBackoff(ctx context.Context, logger logr.Logger, initialDelay, max
 	}
 }
 
-func certificateRotation(ctx context.Context, logger logr.Logger, hostName string, config *rest.Config) error {
+func certificateRotation(ctx context.Context, logger logr.Logger, hostName, namespace string, config *rest.Config) error {
 	var pollDuration = 5 * time.Second
 	for {
-		if err := certRotation(ctx, logger, hostName, config); err != nil {
+		if err := certRotation(ctx, logger, hostName, namespace, config); err != nil {
 			return err
 		}
 		// Poll after every few seconds
@@ -328,7 +326,7 @@ func certificateRotation(ctx context.Context, logger logr.Logger, hostName strin
 	}
 }
 
-func certRotation(ctx context.Context, logger logr.Logger, hostName string, config *rest.Config) error {
+func certRotation(ctx context.Context, logger logr.Logger, hostName, namespace string, config *rest.Config) error {
 	block, _ := pem.Decode(config.CertData)
 	if block == nil || block.Type != "CERTIFICATE" {
 		logger.Info("failed to decode PEM block containing certificate")
@@ -347,7 +345,7 @@ func certRotation(ctx context.Context, logger logr.Logger, hostName string, conf
 	// https://github.com/kubernetes-sigs/cluster-api/blob/main/docs/proposals/20210222-kubelet-authentication.md#kubelet-authenticator-flow
 	if time.Now().After(cert.NotAfter.Add(totalTimeCert / -5)) {
 		logger.Info("certificate expiration time left is less than 20%, renewing")
-		if err = handleBootstrapFlow(ctx, logger, hostName); err != nil {
+		if err = handleBootstrapFlow(ctx, logger, hostName, namespace); err != nil {
 			logger.Error(err, "bootstrap flow failed")
 		}
 	} else {
@@ -463,7 +461,7 @@ func waitForBootstrapCredential(ctx context.Context, logger logr.Logger, path st
 // nothing to exchange. Otherwise it first waits for the bootstrap kubeconfig file itself to exist,
 // since the agent can start before byohctl finishes writing it, then retries the CSR exchange with
 // backoff.
-func ensureBootstrapCredential(ctx context.Context, logger logr.Logger, hostName, byohConfigPath string) error {
+func ensureBootstrapCredential(ctx context.Context, logger logr.Logger, hostName, namespace, byohConfigPath string) error {
 	_, err := os.Stat(byohConfigPath)
 	if bootstrapKubeConfig == "" || !errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -478,7 +476,7 @@ func ensureBootstrapCredential(ctx context.Context, logger logr.Logger, hostName
 	// it burns through the systemd start limit and leaves the agent in a state where it is not
 	// running on the host at all.
 	return retryWithBackoff(ctx, logger, bootstrapRetryInitialDelay, bootstrapRetryMaxDelay, func() error {
-		return handleBootstrapFlow(ctx, logger, hostName)
+		return handleBootstrapFlow(ctx, logger, hostName, namespace)
 	})
 }
 
@@ -515,7 +513,7 @@ func main() {
 	// An error here means either the host is already onboarded (byohConfigPath exists, so
 	// ensureBootstrapCredential is a no-op), we received a shutdown signal, or we failed to
 	// bootstrap the host within bootstrapRetryMaxDelay.
-	if err = ensureBootstrapCredential(ctx, logger, hostName, registration.GetBYOHConfigPath()); err != nil {
+	if err = ensureBootstrapCredential(ctx, logger, hostName, namespace, registration.GetBYOHConfigPath()); err != nil {
 		logger.Error(err, "bootstrap flow abandoned")
 		return
 	}
@@ -535,7 +533,7 @@ func main() {
 	// FIXME: This needs to be auto detected and not behind a feature flag.
 	if os.Getenv("CERTIFICATE_ROTATION") == "true" {
 		go func() {
-			err = certificateRotation(ctx, logger, hostName, config)
+			err = certificateRotation(ctx, logger, hostName, namespace, config)
 			if err != nil {
 				logger.Error(err, "certificate rotation failed")
 				return

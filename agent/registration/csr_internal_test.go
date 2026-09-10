@@ -10,6 +10,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 var _ = Describe("Registration", func() {
@@ -60,12 +61,20 @@ users:
 			Expect(err).ShouldNot(HaveOccurred())
 			restConfig, err := LoadRESTClientConfig(fileboot.Name())
 			Expect(err).ShouldNot(HaveOccurred())
-			err = writeKubeconfigFromBootstrapping(restConfig, filekubeconfig.Name(), []byte("cert-data"), []byte("key-data"))
+			err = writeKubeconfigFromBootstrapping(restConfig, filekubeconfig.Name(), "tenant-a", []byte("cert-data"), []byte("key-data"))
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(filekubeconfig.Name()).To(BeARegularFile())
 			content, err := os.ReadFile(filekubeconfig.Name())
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(content).ShouldNot(BeEmpty())
+
+			written, err := clientcmd.LoadFromFile(filekubeconfig.Name())
+			Expect(err).ShouldNot(HaveOccurred())
+			currentContext, ok := written.Contexts[written.CurrentContext]
+			Expect(ok).To(BeTrue())
+			Expect(currentContext.Namespace).To(Equal("tenant-a"))
+			Expect(currentContext.Namespace).ToNot(Equal("default"))
+
 			err = os.RemoveAll(fileDir)
 			Expect(err).ToNot(HaveOccurred())
 		})

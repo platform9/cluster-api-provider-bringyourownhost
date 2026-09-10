@@ -21,6 +21,7 @@ import (
 	certv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2/klogr"
 )
 
@@ -61,6 +62,7 @@ func approveAndIssue(ctx context.Context, hostName, certData string) {
 var _ = Describe("CSR Registration", func() {
 	var (
 		hostName           = "test-host"
+		namespace          = "tenant-a"
 		fileDir            string
 		certExpiryDuration = int64((time.Hour * 24).Seconds())
 	)
@@ -138,7 +140,7 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 		})
 
 		It("should return error if hostname is invalid", func(ctx SpecContext) {
-			CSRRegistrar, err := registration.NewByohCSR(cfg, logr.Discard(), certExpiryDuration)
+			CSRRegistrar, err := registration.NewByohCSR(cfg, logr.Discard(), certExpiryDuration, namespace)
 			Expect(err).ShouldNot(HaveOccurred())
 			_, err = CSRRegistrar.RequestBYOHClientCert(ctx, "")
 			Expect(err).To(MatchError("hostname is not valid"))
@@ -163,7 +165,7 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 			Expect(restConfig).To(BeNil())
 		})
 		It("should create csr if bootstrap kubeconfig is valid", func(ctx SpecContext) {
-			CSRRegistrar, err := registration.NewByohCSR(cfg, logr.Discard(), certExpiryDuration)
+			CSRRegistrar, err := registration.NewByohCSR(cfg, logr.Discard(), certExpiryDuration, namespace)
 			Expect(err).ShouldNot(HaveOccurred())
 			_, err = CSRRegistrar.RequestBYOHClientCert(ctx, hostName)
 			Expect(err).NotTo(HaveOccurred())
@@ -186,7 +188,7 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 		})
 
 		It("should timeout if the CSR is not approved", func(ctx SpecContext) {
-			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
+			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration, namespace) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
 			err = CSRRegistrar.BootstrapKubeconfig(ctx, hostName, 5*time.Second)
 			Expect(err).Should(HaveOccurred())
@@ -210,7 +212,7 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 			}()
 
 			registration.ConfigPath = filepath.Join(blockingFile.Name(), "config")
-			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
+			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration, namespace) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
 			err = CSRRegistrar.BootstrapKubeconfig(ctx, hostName, 5*time.Second)
 			Expect(err).Should(HaveOccurred())
@@ -219,12 +221,32 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 		})
 		It("should create kubeconfig if csr is approved", func(ctx SpecContext) {
 			go approveAndIssue(ctx, hostName, testCert)
-			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
+			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration, namespace) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
 			err = CSRRegistrar.BootstrapKubeconfig(ctx, hostName, 5*time.Second)
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(registration.ConfigPath).To(BeARegularFile())
 			Expect(os.Remove(registration.ConfigPath)).ShouldNot(HaveOccurred())
+		})
+		It("should write the resolved namespace, not \"default\", into the kubeconfig's current context", func(ctx SpecContext) {
+			go approveAndIssue(ctx, hostName, testCert)
+			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration, namespace) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
+			Expect(err).ShouldNot(HaveOccurred())
+			err = CSRRegistrar.BootstrapKubeconfig(ctx, hostName, 5*time.Second)
+			Expect(err).ShouldNot(HaveOccurred())
+
+			written, err := clientcmd.LoadFromFile(registration.ConfigPath)
+			Expect(err).ShouldNot(HaveOccurred())
+			currentContext, ok := written.Contexts[written.CurrentContext]
+			Expect(ok).To(BeTrue())
+			Expect(currentContext.Namespace).To(Equal(namespace))
+			Expect(currentContext.Namespace).ToNot(Equal("default"))
+
+			Expect(os.Remove(registration.ConfigPath)).ShouldNot(HaveOccurred())
+		})
+		It("should reject an empty namespace instead of defaulting the kubeconfig", func() {
+			_, err := registration.NewByohCSR(cfg, logr.Discard(), certExpiryDuration, "")
+			Expect(err).To(MatchError(ContainSubstring("namespace must not be empty")))
 		})
 	})
 	Context("When GetBYOHConfigPath is called", func() {

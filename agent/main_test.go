@@ -337,7 +337,7 @@ func TestCertRotation(t *testing.T) {
 			var messages []string
 			logger := recordingLogger(&messages)
 
-			err := certRotation(t.Context(), logger, "test-host", &rest.Config{
+			err := certRotation(t.Context(), logger, "test-host", "test-namespace", &rest.Config{
 				TLSClientConfig: rest.TLSClientConfig{CertData: tc.certData},
 			})
 
@@ -676,7 +676,7 @@ func TestEnsureBootstrapCredential(t *testing.T) {
 		writeErr := os.WriteFile(byohConfigPath, []byte("existing"), 0o600)
 		require.NoError(t, writeErr)
 
-		err := ensureBootstrapCredential(t.Context(), logr.Discard(), "test-host", byohConfigPath)
+		err := ensureBootstrapCredential(t.Context(), logr.Discard(), "test-host", "test-namespace", byohConfigPath)
 
 		require.NoError(t, err)
 	})
@@ -688,7 +688,7 @@ func TestEnsureBootstrapCredential(t *testing.T) {
 
 		byohConfigPath := filepath.Join(t.TempDir(), "config")
 
-		err := ensureBootstrapCredential(t.Context(), logr.Discard(), "test-host", byohConfigPath)
+		err := ensureBootstrapCredential(t.Context(), logr.Discard(), "test-host", "test-namespace", byohConfigPath)
 
 		require.NoError(t, err)
 	})
@@ -709,7 +709,7 @@ func TestEnsureBootstrapCredential(t *testing.T) {
 		// handleBootstrapFlow, that call would fail immediately on the missing file instead
 		// of blocking on it, and this would return well before the deadline.
 		start := time.Now()
-		err := ensureBootstrapCredential(ctx, logr.Discard(), "test-host", byohConfigPath)
+		err := ensureBootstrapCredential(ctx, logr.Discard(), "test-host", "test-namespace", byohConfigPath)
 		elapsed := time.Since(start)
 
 		require.ErrorIs(t, err, context.DeadlineExceeded)

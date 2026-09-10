@@ -82,10 +82,17 @@ type ByohCSR struct {
 	configPath            string
 	logger                logr.Logger
 	expiryDuration        time.Duration
+	namespace             string
 }
 
-// NewByohCSR returns a ByohCSR instance
-func NewByohCSR(bootstrapClientConfig *restclient.Config, logger logr.Logger, expiryDurationInSeconds int64) (*ByohCSR, error) {
+// NewByohCSR returns a ByohCSR instance. namespace is the tenant namespace this host registers
+// into; it is written as-is into the current context of the kubeconfig BootstrapKubeconfig
+// produces, so an empty value is rejected here rather than silently defaulting the kubeconfig to
+// the wrong namespace later.
+func NewByohCSR(bootstrapClientConfig *restclient.Config, logger logr.Logger, expiryDurationInSeconds int64, namespace string) (*ByohCSR, error) {
+	if namespace == "" {
+		return nil, errors.New("namespace must not be empty when initializing the bootstrap CSR flow")
+	}
 	bootstrapClient, err := clientset.NewForConfig(bootstrapClientConfig)
 	if err != nil {
 		return nil, err
@@ -96,6 +103,7 @@ func NewByohCSR(bootstrapClientConfig *restclient.Config, logger logr.Logger, ex
 		configPath:            GetBYOHConfigPath(),
 		logger:                logger,
 		expiryDuration:        time.Duration(expiryDurationInSeconds) * time.Second,
+		namespace:             namespace,
 	}, nil
 }
 
@@ -119,7 +127,7 @@ func (bcsr *ByohCSR) BootstrapKubeconfig(ctx context.Context, hostName string, c
 
 	// FIXME: This function needs to be a method on the ByohCSR struct so that we don't need to pass
 	// bcsr's attributes like this.
-	err = writeKubeconfigFromBootstrapping(bcsr.bootstrapClientConfig, bcsr.configPath, certData, bcsr.PrivateKey)
+	err = writeKubeconfigFromBootstrapping(bcsr.bootstrapClientConfig, bcsr.configPath, bcsr.namespace, certData, bcsr.PrivateKey)
 	if err != nil {
 		return err
 	}
@@ -362,8 +370,10 @@ func LoadRESTClientConfig(kubeconfigPath string) (*restclient.Config, error) {
 }
 
 // writeKubeconfigFromBootstrapping will write the new kubeconfig fetching
-// some details from bootstrap client config and using key/cert details
-func writeKubeconfigFromBootstrapping(bootstrapClientConfig *restclient.Config, kubeconfigPath string, certData, keyData []byte) error {
+// some details from bootstrap client config and using key/cert details.
+// namespace becomes the current context's namespace, which is what byohctl's
+// teardown commands later read to find the host's tenant namespace.
+func writeKubeconfigFromBootstrapping(bootstrapClientConfig *restclient.Config, kubeconfigPath, namespace string, certData, keyData []byte) error {
 	// Get the CA data from the bootstrap client config.
 	caFile, caData := bootstrapClientConfig.CAFile, []byte{}
 	if caFile == "" {
@@ -388,7 +398,7 @@ func writeKubeconfigFromBootstrapping(bootstrapClientConfig *restclient.Config, 
 		Contexts: map[string]*clientcmdapi.Context{"default-context": {
 			Cluster:   "default-cluster",
 			AuthInfo:  "default-auth",
-			Namespace: "default",
+			Namespace: namespace,
 		}},
 		CurrentContext: "default-context",
 	}

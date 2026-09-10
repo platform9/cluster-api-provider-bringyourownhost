@@ -791,7 +791,7 @@ var _ = Describe("Agent Unit Tests", func() {
 
 			_, err = bootstrapKubeConf.Write(testbootstrapKubeconfigInvalid)
 			Expect(err).NotTo(HaveOccurred())
-			err = handleBootstrapFlow(ctx, klogr.New(), "test-host") //nolint: staticcheck // klogr predates the textlogger migration; see main.go
+			err = handleBootstrapFlow(ctx, klogr.New(), "test-host", "test-namespace") //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).Should(HaveOccurred())
 			Expect(err.Error()).Should(ContainSubstring("client config load failed"))
 		})
@@ -818,7 +818,7 @@ users:
 `)
 			_, err = bootstrapKubeConf.Write(testbootstrapKubeconfigValid)
 			Expect(err).NotTo(HaveOccurred())
-			err = handleBootstrapFlow(ctx, klogr.New(), "") //nolint: staticcheck // klogr predates the textlogger migration; see main.go
+			err = handleBootstrapFlow(ctx, klogr.New(), "", "test-namespace") //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).Should(HaveOccurred())
 			Expect(err.Error()).Should(ContainSubstring("kubeconfig generation failed: hostname is not valid"))
 		})
@@ -864,7 +864,7 @@ users:
 			var config *restclient.Config
 			config, err = registration.LoadRESTClientConfig(bootstrapKubeConfig)
 			Expect(err).NotTo(HaveOccurred())
-			err = certRotation(ctx, klogr.New(), "test-host", config) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
+			err = certRotation(ctx, klogr.New(), "test-host", "test-namespace", config) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
 		})
 		It("should return if certificate needs rotation", func(ctx SpecContext) {
@@ -895,7 +895,7 @@ users:
 			var config *restclient.Config
 			config, err = registration.LoadRESTClientConfig(bootstrapKubeConfig)
 			Expect(err).NotTo(HaveOccurred())
-			err = certRotation(ctx, klogr.New(), "test-host", config) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
+			err = certRotation(ctx, klogr.New(), "test-host", "test-namespace", config) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
 		})
 	})
