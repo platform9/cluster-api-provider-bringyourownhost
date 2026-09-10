@@ -263,7 +263,6 @@ func bootstrapKubeconfigDestPath() string {
 	return filepath.Join(bootstrapAgentConfDir, "bootstrap-kubeconfig.yaml")
 }
 
-// FIXME CLAUDE: Needs dedicated tests.
 // writeBootstrapKubeconfigFile writes the raw kubeconfig bytes the agent's --bootstrap-kubeconfig
 // flag points at. This is always the last write onboarding does to it: the agent waits for this
 // file to exist before doing anything else (see waitForBootstrapCredential in agent/main.go), so
@@ -279,7 +278,6 @@ func writeBootstrapKubeconfigFile(kubeconfig []byte) error {
 	return nil
 }
 
-// FIXME CLAUDE: needs dedicated tests.
 // writeNamespaceFile records the tenant namespace the agent should register into, in the file the
 // agent reads once at startup (see resolveNamespace in agent/main.go).
 func writeNamespaceFile(byohDir, namespace string) error {
@@ -318,9 +316,13 @@ func writeBootstrapCredential(byohDir, bootstrapKubeconfigPath, namespace string
 // a mock serer to serve as the auth endpoint.
 //
 // authenticateWithPlatform9 either hands the operator-supplied bootstrap credential to the agent
-// (the --bootstrap-kubeconfig escape hatch) or authenticates with Platform9, saves the resulting
-// kubeconfig, and confirms regionName is available for the tenant. It returns the client used to
-// authenticate, or nil when the escape hatch was used, since there was nothing to authenticate.
+// (the --bootstrap-kubeconfig escape hatch) or authenticates with Platform9 and confirms
+// regionName is available for the tenant. It returns the client used to authenticate, or nil when
+// the escape hatch was used, since there was nothing to authenticate.
+//
+// It deliberately leaves no kubeconfig behind on the host. The agent skips its whole
+// bootstrap-token-to-certificate exchange when ~/.byoh/config exists, so writing one here would
+// break the enrollment the rest of onboarding sets up.
 func authenticateWithPlatform9(ctx context.Context, byohDir string, usingBootstrapKubeconfig bool) (*client.K8sClient, error) {
 	if usingBootstrapKubeconfig {
 		utils.LogDebug("Using bootstrap kubeconfig %s, namespace %s", bootstrapKubeconfigPath, hostNamespace)
@@ -342,28 +344,18 @@ func authenticateWithPlatform9(ctx context.Context, byohDir string, usingBootstr
 
 	k8sClient := client.NewK8sClient(fqdn, domain, tenant, token, regionName, insecure)
 
-	utils.LogInfo("Saving kubeconfig from bootstrap secret")
-	if err := k8sClient.SaveKubeConfig("byoh-bootstrap-kc"); err != nil {
-		return nil, fmt.Errorf("failed to save kubeconfig: %w", err)
-	}
-
 	// Check if region where user wants to onboard to is available for this tenant or not.
-	// If not available, roll back the onboarding process.
+	// Nothing has been written to the host at this point, so a rejected region leaves the host
+	// as it was found and there is nothing to undo.
 	available, regions, err := k8sClient.CheckRegionAvailability(ctx, regionName)
 	if err != nil {
-		if delErr := k8sClient.DeleteSavedKubeconfig(); delErr != nil {
-			utils.LogError("Failed to delete saved kubeconfig while rolling back onboarding process: %v", delErr)
-		}
-		return nil, fmt.Errorf("failed to check region availability, rolling back onboarding process: %w", err)
+		return nil, fmt.Errorf("failed to check region availability: %w", err)
 	}
 	if !available {
 		if len(regions) > 0 {
 			utils.LogInfo("Available regions: %v", regions)
 		}
-		if delErr := k8sClient.DeleteSavedKubeconfig(); delErr != nil {
-			utils.LogError("Failed to delete saved kubeconfig while rolling back onboarding process: %v", delErr)
-		}
-		return nil, fmt.Errorf("region %s is not available for the tenant, rolling back onboarding process", regionName)
+		return nil, fmt.Errorf("region %s is not available for the tenant", regionName)
 	}
 
 	return k8sClient, nil
@@ -571,7 +563,8 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	// hatch is in play -- create the host's enrollment and wait for its credential. See
 	// installAndEnroll for why installing has to come first.
 	utils.LogInfo("Setting up BYOH agent")
-	if err := installAndEnroll(cmd.Context(), pkgDir, byohDir, hostName, regionName, usingBootstrapKubeconfig, k8sClient); err != nil {
+	if err := installAndEnroll(cmd.Context(), pkgDir, byohDir, hostName, regionName,
+		usingBootstrapKubeconfig, k8sClient, service.SetupAgent, enrollHost); err != nil {
 		utils.LogError("%v", err)
 		os.Exit(1)
 	}
@@ -585,9 +578,6 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	utils.LogSuccess("   - Agent service logs: %s", service.ByohAgentLogPath)
 	utils.LogSuccess("   - Check service status: sudo systemctl status pf9-byohost-agent.service")
 }
-
-// FIXME CLAUDE: Nothing in enroll.go file demands its own file. Own file only if its a sub-command.
-// Keep files where funcs / vars are first used. Moved everything below from enroll.go to onboard.go.
 
 // FIXME CLAUDE: Why can't these be passed in as args instead? That way tests
 // can set what they want without this weird package level variable override.
@@ -614,17 +604,6 @@ var (
 // cmd/byohctl/cmd/onboard.go.
 var osHostname = os.Hostname
 
-// FIXME CLAUDE: same as above.
-// setupAgent and enrollHostFunc are variables so tests can verify installAndEnroll's ordering
-// without actually installing a package or reaching a cluster. getK8sClient is a variable so
-// tests can point enrollHost at a fake dynamic client and clientset instead of a real
-// kubeconfig file on disk.
-var (
-	setupAgent     = service.SetupAgent
-	enrollHostFunc = enrollHost
-	getK8sClient   = client.GetK8sClient
-)
-
 // computeHostName turns this machine's reported host name into the object name used for it
 // on the management cluster. Failing here is a hard, early stop: a host name that cannot
 // normalize would otherwise surface only much later, as a certificate common name the
@@ -643,14 +622,22 @@ func computeHostName() (hostname.Name, error) {
 	return name, nil
 }
 
+// enrollFunc is the shape of enrollHost. installAndEnroll takes it, and the agent install step,
+// as parameters so a test can observe their ordering without installing a package or reaching a
+// cluster.
+type enrollFunc func(ctx context.Context, k8sClient *client.K8sClient, byohDir string, hostName hostname.Name, regionName string) error
+
 // installAndEnroll installs the agent package, then -- unless an operator-supplied bootstrap
 // kubeconfig is already in play -- creates the host's enrollment and waits for its credential.
 // Installing first matters: the package pull and install are the slowest steps in onboarding,
 // so doing them before the credential exists means neither one spends any of the bootstrap
 // token's limited lifetime.
-func installAndEnroll(ctx context.Context, pkgDir, byohDir string, hostName hostname.Name, regionName string, usingBootstrapKubeconfig bool, k8sClient *client.K8sClient) error {
-	// FIXME CLAUDE: See this hides the actual call and makes this harder to read.
-	if err := setupAgent(pkgDir); err != nil {
+func installAndEnroll(
+	ctx context.Context, pkgDir, byohDir string, hostName hostname.Name, regionName string,
+	usingBootstrapKubeconfig bool, k8sClient *client.K8sClient,
+	installAgent func(pkgDir string) error, enroll enrollFunc,
+) error {
+	if err := installAgent(pkgDir); err != nil {
 		return fmt.Errorf("failed to setup agent: %w", err)
 	}
 
@@ -658,35 +645,27 @@ func installAndEnroll(ctx context.Context, pkgDir, byohDir string, hostName host
 		return nil
 	}
 
-	return enrollHostFunc(ctx, k8sClient, byohDir, hostName, regionName)
+	return enroll(ctx, k8sClient, byohDir, hostName, regionName)
 }
 
-// FIXME CLAUDE: skill:unslop this comment. The note about ordering is useful. But reduce verbosity.
-// enrollHost creates a ByoHostEnrollment for hostName, labeled with the region, then waits
-// for the credential Secret it produces and writes that credential out as the agent's
-// bootstrap kubeconfig.
+// enrollHost creates a ByoHostEnrollment for hostName, labeled with the region, waits for the
+// credential Secret it produces, and writes that credential out as the agent's bootstrap
+// kubeconfig.
 //
-// Order matters here. The namespace file is written as soon as the enrollment's real
-// namespace is known, strictly before the credential Secret is polled for, and the
-// kubeconfig file is written last, once the Secret is in hand and cross-checked. The agent
-// reads the namespace file once at startup and separately blocks on the kubeconfig file
-// appearing (see resolveNamespace and waitForBootstrapCredential in agent/main.go); writing
-// the kubeconfig first would let the agent start against the wrong namespace and never
-// notice, since it does not re-read the namespace file afterwards.
+// The write order is load-bearing. The namespace file goes out as soon as the enrollment's
+// real namespace is known, before the Secret is polled for; the kubeconfig file goes out last.
+// The agent reads the namespace file once at startup and separately blocks on the kubeconfig
+// file appearing (resolveNamespace and waitForBootstrapCredential in agent/main.go), so writing
+// the kubeconfig first would let it start against the wrong namespace and never notice.
 //
-// A failure after the enrollment is created leaves that enrollment behind rather than
-// deleting it. Retrying onboarding would create a second ByoHostEnrollment for the same host
-// name, which the API server's name conflict already rejects on its own, so deleting the
-// first one here would not make a retry succeed, only remove a record of what was attempted.
+// A failure after the enrollment is created leaves that enrollment behind. Retrying onboarding
+// would create a second ByoHostEnrollment for the same host name, which the API server rejects
+// on the name conflict anyway, so deleting the first one buys nothing and loses the record of
+// what was attempted.
 func enrollHost(ctx context.Context, k8sClient *client.K8sClient, byohDir string, hostName hostname.Name, regionName string) error {
-	mgmtClient, err := getK8sClient(service.KubeconfigFilePath)
-	if err != nil {
-		return fmt.Errorf("error creating Kubernetes client: %v", err)
-	}
-
 	utils.LogInfo("Creating enrollment for host %s", hostName)
 	labels := map[string]string{service.PcdKaapiRegionKey: regionName}
-	namespace, err := mgmtClient.CreateByoHostEnrollment(ctx, k8sClient.Namespace(), string(hostName), labels)
+	namespace, err := k8sClient.CreateByoHostEnrollment(ctx, k8sClient.Namespace(), string(hostName), labels)
 	if err != nil {
 		return fmt.Errorf("failed to create host enrollment: %w", err)
 	}
@@ -698,7 +677,7 @@ func enrollHost(ctx context.Context, k8sClient *client.K8sClient, byohDir string
 
 	secretName := string(hostName) + infrav1beta1.CredentialSecretNameSuffix
 	utils.LogInfo("Waiting for credential secret %s", secretName)
-	secret, err := mgmtClient.AwaitCredentialSecret(ctx, namespace, secretName, credentialPollInterval, credentialPollTimeout)
+	secret, err := k8sClient.AwaitCredentialSecret(ctx, namespace, secretName, credentialPollInterval, credentialPollTimeout)
 	if err != nil {
 		return fmt.Errorf("failed to fetch credential secret: %w", err)
 	}

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/term"
 )
@@ -475,6 +476,44 @@ func TestWriteBootstrapCredentialMissingSource(t *testing.T) {
 
 	err := writeBootstrapCredential(byohDir, filepath.Join(t.TempDir(), "does-not-exist.yaml"), "test-tenant-ns")
 	require.Error(t, err)
+}
+
+func TestWriteNamespaceFile(t *testing.T) {
+	byohDir := t.TempDir()
+
+	err := writeNamespaceFile(byohDir, "tenant-real-ns")
+	require.NoError(t, err)
+
+	written, err := os.ReadFile(filepath.Join(byohDir, "namespace"))
+	require.NoError(t, err)
+	assert.Equal(t, "tenant-real-ns", string(written))
+}
+
+func TestWriteNamespaceFileMissingDir(t *testing.T) {
+	err := writeNamespaceFile(filepath.Join(t.TempDir(), "not-created"), "tenant-real-ns")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to save namespace")
+}
+
+// TestWriteBootstrapKubeconfigFile covers the drop-in directory not existing yet, which is the
+// normal case on a host that has never been onboarded.
+func TestWriteBootstrapKubeconfigFile(t *testing.T) {
+	origConfDir := bootstrapAgentConfDir
+	bootstrapAgentConfDir = filepath.Join(t.TempDir(), "pf9-byohost-agent.service.d")
+	t.Cleanup(func() { bootstrapAgentConfDir = origConfDir })
+
+	const kubeconfigContent = "apiVersion: v1\nkind: Config\n"
+	err := writeBootstrapKubeconfigFile([]byte(kubeconfigContent))
+	require.NoError(t, err)
+
+	written, err := os.ReadFile(bootstrapKubeconfigDestPath())
+	require.NoError(t, err)
+	assert.Equal(t, kubeconfigContent, string(written))
+
+	// The file carries a bootstrap credential, so it must not be world- or group-readable.
+	info, err := os.Stat(bootstrapKubeconfigDestPath())
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }
 
 func TestBootstrapKubeconfigMutuallyExclusiveWithPlatform9Flags(t *testing.T) {
