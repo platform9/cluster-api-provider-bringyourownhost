@@ -969,7 +969,7 @@ func TestValidateAPIServerURL(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := ValidateAPIServerURL(tc.rawURL)
+			err := validateAPIServerURL(tc.rawURL)
 			if tc.wantErr {
 				require.Error(t, err)
 				return
@@ -1021,7 +1021,7 @@ func TestValidateCABundle(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := ValidateCABundle([]byte(tc.data))
+			err := validateCABundle([]byte(tc.data))
 			if tc.wantErr {
 				require.Error(t, err)
 				return
@@ -1244,6 +1244,11 @@ func TestEnsureBootstrapTokenRecordsTokenIDBeforeSecret(t *testing.T) {
 	assert.Equal(t, getEnrollment(t, c).Status.TokenID, tokenIDAtSecretCreate)
 }
 
+// FIXME CLAUDE: Use table driven test for TestPatchEnrollment tests. Use a
+// dedicated assertFn as arg if required. Remove repetition. Keep tests simple.
+// If the result is complicated, at least use a t.Run for each test. But not top
+// level tests like this. Applies to other such violations in this gh stack as
+// well.
 func TestPatchEnrollment(t *testing.T) {
 	r, c := newTestReconciler(t, testEnrollment())
 	enrollment := getEnrollment(t, c)

@@ -134,12 +134,14 @@ func (r *ByoAdmissionReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
+	// FIXME CLAUDE: Inline r.validate here. No need for that 3 line func.
 	denial, err := r.validate(ctx, csr)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
 	if denial != nil {
 		logger.Info("Denying CSR", "object", req.NamespacedName, "reason", denial.reason, "message", denial.message)
+		// FIXME CLAUDE: Inline this func's code. Do this in a an if-else block so we set the conditions conditionally and the updateapproval method is only called once outside the if-else.
 		if err := r.setCSRCondition(ctx, csr, certv1.CertificateDenied, denial.reason, denial.message); err != nil {
 			return reconcile.Result{}, err
 		}

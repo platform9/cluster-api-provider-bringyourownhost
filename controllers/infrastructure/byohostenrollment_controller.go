@@ -107,7 +107,7 @@ type BootstrapTransport struct {
 // endpoint, which kube-root-ca.crt is not documented to verify.
 func NewBootstrapTransport(apiServerURL, caFile string) (BootstrapTransport, error) {
 	if apiServerURL != "" {
-		if err := ValidateAPIServerURL(apiServerURL); err != nil {
+		if err := validateAPIServerURL(apiServerURL); err != nil {
 			return BootstrapTransport{}, err
 		}
 	}
@@ -119,7 +119,7 @@ func NewBootstrapTransport(apiServerURL, caFile string) (BootstrapTransport, err
 	if err != nil {
 		return BootstrapTransport{}, fmt.Errorf("read API server CA file %q: %w", caFile, err)
 	}
-	if err := ValidateCABundle(caData); err != nil {
+	if err := validateCABundle(caData); err != nil {
 		return BootstrapTransport{}, fmt.Errorf("API server CA file %q: %w", caFile, err)
 	}
 
@@ -127,21 +127,6 @@ func NewBootstrapTransport(apiServerURL, caFile string) (BootstrapTransport, err
 		APIServerURL: apiServerURL,
 		CAData:       caData,
 	}, nil
-}
-
-// ValidateAPIServerURL checks that rawURL is an absolute https URL with a host.
-func ValidateAPIServerURL(rawURL string) error {
-	if rawURL == "" {
-		return errors.New("API server URL is empty")
-	}
-	parsed, err := url.Parse(rawURL)
-	if err != nil {
-		return fmt.Errorf("API server URL %q is not a URL: %w", rawURL, err)
-	}
-	if parsed.Scheme != "https" || parsed.Host == "" {
-		return fmt.Errorf("API server URL must be an https URL with a host, got %q", rawURL)
-	}
-	return nil
 }
 
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=byohostenrollments,verbs=get;list;watch;create;update;patch;delete
@@ -173,6 +158,7 @@ func (r *ByoHostEnrollmentReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return r.reconcileDelete(ctx, enrollment)
 	}
 
+	// FIXME CLAUDE: skill:unslop this comment.
 	// The finalizer is persisted before anything is created, so there is no
 	// window in which a token Secret exists with nothing obliged to remove it.
 	if !controllerutil.ContainsFinalizer(enrollment, infrav1.EnrollmentFinalizer) {
@@ -186,6 +172,7 @@ func (r *ByoHostEnrollmentReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	return r.reconcileNormal(ctx, enrollment)
 }
 
+// FIXME CLAUDE: needs dedicated tests.
 func (r *ByoHostEnrollmentReconciler) reconcileNormal(ctx context.Context, enrollment *infrav1.ByoHostEnrollment) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
@@ -296,6 +283,8 @@ func (r *ByoHostEnrollmentReconciler) reconcileDelete(ctx context.Context, enrol
 				Namespace: metav1.NamespaceSystem,
 			},
 		}
+
+		// FIXME CLAUDE: do not silently hide deletion of a token that already does not exist. log that as a warning if apierrors.IsnotFound is seen here.
 		if err := r.Delete(ctx, tokenSecret); err != nil && !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, fmt.Errorf("delete bootstrap token Secret %s: %w", tokenSecret.Name, err)
 		}
@@ -445,6 +434,7 @@ type bootstrapToken struct {
 	expiresAt time.Time
 }
 
+// FIXME CLAUDE: needs dedicated unit tests. Also, can this be a variable instead?
 // enrollmentNotReadyMutateFn records why no usable credential exists yet.
 func enrollmentNotReadyMutateFn(enrollment *infrav1.ByoHostEnrollment, reason, message string) func() {
 	return func() {
@@ -453,6 +443,7 @@ func enrollmentNotReadyMutateFn(enrollment *infrav1.ByoHostEnrollment, reason, m
 	}
 }
 
+// FIXME CLAUDE: Need dedicated unit tests.
 // resolveTransport returns the API server URL and CA bundle to render into a
 // host's kubeconfig.
 //
@@ -460,7 +451,7 @@ func enrollmentNotReadyMutateFn(enrollment *infrav1.ByoHostEnrollment, reason, m
 // cluster's own kube-root-ca.crt is read on every reconcile, so a rotated root
 // CA reaches new enrollments without restarting the manager.
 func (r *ByoHostEnrollmentReconciler) resolveTransport(ctx context.Context) (apiServerURL string, caData []byte, err error) {
-	if err := ValidateAPIServerURL(r.Transport.APIServerURL); err != nil {
+	if err := validateAPIServerURL(r.Transport.APIServerURL); err != nil {
 		return "", nil, err
 	}
 	if len(r.Transport.CAData) > 0 {
@@ -477,17 +468,32 @@ func (r *ByoHostEnrollmentReconciler) resolveTransport(ctx context.Context) (api
 	if rootCA == "" {
 		return "", nil, fmt.Errorf("ConfigMap %s key %q is empty", key, rootCAConfigMapKey)
 	}
-	if err := ValidateCABundle([]byte(rootCA)); err != nil {
+	if err := validateCABundle([]byte(rootCA)); err != nil {
 		return "", nil, fmt.Errorf("ConfigMap %s key %q: %w", key, rootCAConfigMapKey, err)
 	}
 
 	return r.Transport.APIServerURL, []byte(rootCA), nil
 }
 
-// ValidateCABundle checks that data is PEM holding at least one parseable
+// validateAPIServerURL checks that rawURL is an absolute https URL with a host.
+func validateAPIServerURL(rawURL string) error {
+	if rawURL == "" {
+		return errors.New("API server URL is empty")
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("API server URL %q is not a URL: %w", rawURL, err)
+	}
+	if parsed.Scheme != "https" || parsed.Host == "" {
+		return fmt.Errorf("API server URL must be an https URL with a host, got %q", rawURL)
+	}
+	return nil
+}
+
+// validateCABundle checks that data is PEM holding at least one parseable
 // certificate. A bundle that only looks like PEM fails on the host, long after
 // it was written, as a TLS error with no obvious cause.
-func ValidateCABundle(data []byte) error {
+func validateCABundle(data []byte) error {
 	found := false
 	rest := data
 	// The loop walks every PEM block in the bundle. pem.Decode signals the end

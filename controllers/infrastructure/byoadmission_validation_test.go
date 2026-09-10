@@ -5,6 +5,9 @@
 // the package itself rather than in the external test package.
 package controllers //nolint: testpackage // exercises unexported validation helpers
 
+// FIXME CLAUDE: Do not create dedicated test files like this. This belongs in
+// byoadmission_controller_test.go itself. Same for other such files that you've created in this gh stack.
+
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
