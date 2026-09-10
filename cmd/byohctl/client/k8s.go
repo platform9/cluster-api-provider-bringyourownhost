@@ -684,18 +684,45 @@ func (client *Client) WaitForMachineRefToBeUnset(ctx context.Context, byoHost *i
 	}
 }
 
-// CheckRegionAvailability checks if the region is available for the tenant
+// CheckRegionAvailability reports whether regionName is one of the regions the tenant may
+// use, reading the region-config ConfigMap through the oidc-proxy with the bearer token.
+// When the region is not available the tenant's full region list comes back, so the caller
+// can tell the operator which regions do exist.
 func (c *K8sClient) CheckRegionAvailability(ctx context.Context, regionName string) (bool, []string, error) {
-	// Create a client from the kubeconfig
-	client, err := GetK8sClient(service.KubeconfigFilePath)
+	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
+	defer cancel()
+
+	namespace := c.getNamespace()
+	endpoint := fmt.Sprintf("https://%s/oidc-proxy/%s/%s/api/v1/namespaces/%s/configmaps/region-config",
+		c.fqdn, namespace, c.regionName, namespace)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return false, nil, fmt.Errorf("error creating Kubernetes client: %v", err)
+		return false, nil, utils.LogErrorf("error creating request: %v", err)
 	}
 
-	// Get the region configmap from the management cluster from the tenant namespace
-	regionConfigMap, err := client.Clientset.CoreV1().ConfigMaps(c.getNamespace()).Get(ctx, "region-config", metav1.GetOptions{})
+	req.Header.Add("Authorization", "Bearer "+c.bearerToken)
+
+	resp, err := c.client.Do(req)
 	if err != nil {
-		return false, nil, fmt.Errorf("error getting region configmap: %v", err)
+		return false, nil, utils.LogErrorf("error making request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false, nil, utils.LogErrorf("error reading response: %v", err)
+	}
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return false, nil, utils.LogErrorf("error getting region configmap (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	// corev1.ConfigMap decodes a body without apiVersion and kind, which
+	// unstructured.Unstructured rejects.
+	var regionConfigMap corev1.ConfigMap
+	if err := json.Unmarshal(body, &regionConfigMap); err != nil {
+		return false, nil, utils.LogErrorf("error parsing region configmap: %v", err)
 	}
 
 	// Check if the given region is available for the tenant

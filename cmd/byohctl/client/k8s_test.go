@@ -539,3 +539,80 @@ func TestK8sClientAwaitCredentialSecret(t *testing.T) {
 	})
 }
 
+func TestK8sClientCheckRegionAvailability(t *testing.T) {
+	testCases := []struct {
+		name            string
+		status          int
+		respBody        string
+		wantAvailable   bool
+		wantRegions     []string
+		wantErrContains string
+	}{
+		{
+			name:          "region is in the list",
+			status:        http.StatusOK,
+			respBody:      `{"metadata":{"name":"region-config"},"data":{"regions":"region-one\n region \nregion-three"}}`,
+			wantAvailable: true,
+		},
+		{
+			name:          "region is absent and the full list comes back",
+			status:        http.StatusOK,
+			respBody:      `{"metadata":{"name":"region-config"},"data":{"regions":"region-one\nregion-two"}}`,
+			wantAvailable: false,
+			wantRegions:   []string{"region-one", "region-two"},
+		},
+		{
+			name:            "regions key missing",
+			status:          http.StatusOK,
+			respBody:        `{"metadata":{"name":"region-config"},"data":{"other":"value"}}`,
+			wantErrContains: "does not have regions key",
+		},
+		{
+			name:            "forbidden surfaces the status and body",
+			status:          http.StatusForbidden,
+			respBody:        `{"message":"configmaps is forbidden"}`,
+			wantErrContains: "configmaps is forbidden",
+		},
+		{
+			name:            "malformed response body",
+			status:          http.StatusOK,
+			respBody:        "not json at all",
+			wantErrContains: "error parsing region configmap",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotMethod, gotPath, gotAuth string
+
+			client := newTestK8sClient(t, func(w http.ResponseWriter, r *http.Request) {
+				gotMethod = r.Method
+				gotPath = r.URL.Path
+				gotAuth = r.Header.Get("Authorization")
+
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, writeErr := io.WriteString(w, tc.respBody)
+				assert.NoError(t, writeErr)
+			})
+
+			available, regions, err := client.CheckRegionAvailability(context.Background(), "region")
+
+			namespace := client.Namespace()
+			wantPath := fmt.Sprintf("/oidc-proxy/%s/region/api/v1/namespaces/%s/configmaps/region-config", namespace, namespace)
+			assert.Equal(t, http.MethodGet, gotMethod)
+			assert.Equal(t, wantPath, gotPath)
+			assert.Equal(t, "Bearer test-token", gotAuth)
+
+			if tc.wantErrContains != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErrContains)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantAvailable, available)
+			assert.Equal(t, tc.wantRegions, regions)
+		})
+	}
+}
