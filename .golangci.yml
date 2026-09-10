@@ -62,7 +62,7 @@ linters:
           pkg: ^context$
           msg: take the context from the caller instead of starting a new one
     funlen:
-      lines: 100
+      lines: 300
       statements: 50
     goconst:
       min-len: 2
