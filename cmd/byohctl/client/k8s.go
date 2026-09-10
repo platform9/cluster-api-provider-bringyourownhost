@@ -4,6 +4,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -158,6 +159,143 @@ func (c *K8sClient) GetSecret(secretName string) (*types.Secret, error) {
 
 	utils.LogSuccess("Successfully retrieved secret")
 	return &secret, nil
+}
+
+// CreateByoHostEnrollment creates a ByoHostEnrollment named hostName, carrying labels, in
+// namespace. namespace only has to be a plausible guess: the oidc-proxy rewrites the
+// namespace segment of the request to the caller's real mapped tenant namespace, so the
+// namespace the enrollment actually landed in has to be read back from the created
+// object, which is what this method returns.
+func (c *K8sClient) CreateByoHostEnrollment(ctx context.Context, namespace, hostName string, labels map[string]string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
+	defer cancel()
+
+	utils.LogInfo("Creating ByoHostEnrollment '%s'", hostName)
+
+	enrollment := &infrastructurev1beta1.ByoHostEnrollment{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
+			Kind:       "ByoHostEnrollment",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   hostName,
+			Labels: labels,
+		},
+	}
+
+	payload, err := json.Marshal(enrollment)
+	if err != nil {
+		return "", utils.LogErrorf("error encoding ByoHostEnrollment %s: %v", hostName, err)
+	}
+
+	endpoint := fmt.Sprintf("https://%s/oidc-proxy/%s/%s/apis/infrastructure.cluster.x-k8s.io/v1beta1/namespaces/%s/byohostenrollments",
+		c.fqdn, namespace, c.regionName, namespace)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return "", utils.LogErrorf("error creating request: %v", err)
+	}
+
+	req.Header.Add("Authorization", "Bearer "+c.bearerToken)
+	req.Header.Add("Content-Type", "application/json")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", utils.LogErrorf("error making request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", utils.LogErrorf("error reading response: %v", err)
+	}
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return "", utils.LogErrorf("error creating ByoHostEnrollment %s (status %d): %s", hostName, resp.StatusCode, string(body))
+	}
+
+	// Only metadata is needed, and PartialObjectMetadata decodes it without insisting the
+	// response carries apiVersion and kind the way unstructured.Unstructured does.
+	var created metav1.PartialObjectMetadata
+	if err := json.Unmarshal(body, &created); err != nil {
+		return "", utils.LogErrorf("error parsing ByoHostEnrollment %s: %v", hostName, err)
+	}
+
+	utils.LogSuccess("Successfully created ByoHostEnrollment '%s'", hostName)
+	return created.Namespace, nil
+}
+
+// GetCredentialSecret fetches a host's credential Secret by its exact name. It must never
+// list or watch Secrets: a future narrowing of the tenant role grants "get" on this one
+// Secret name via resourceNames, which does not apply to list or watch, so a caller that
+// listed here would lose access under that grant.
+//
+// A 404 comes back as an apierrors.NewNotFound error so callers can tell "not created yet"
+// apart from a real failure with apierrors.IsNotFound.
+func (c *K8sClient) GetCredentialSecret(ctx context.Context, namespace, name string) (*corev1.Secret, error) {
+	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
+	defer cancel()
+
+	endpoint := fmt.Sprintf("https://%s/oidc-proxy/%s/%s/api/v1/namespaces/%s/secrets/%s",
+		c.fqdn, namespace, c.regionName, namespace, name)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, utils.LogErrorf("error creating request: %v", err)
+	}
+
+	req.Header.Add("Authorization", "Bearer "+c.bearerToken)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, utils.LogErrorf("error making request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, utils.LogErrorf("error reading response: %v", err)
+	}
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, apierrors.NewNotFound(corev1.Resource("secrets"), name)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, utils.LogErrorf("error getting secret %s/%s (status %d): %s", namespace, name, resp.StatusCode, string(body))
+	}
+
+	var secret corev1.Secret
+	if err := json.Unmarshal(body, &secret); err != nil {
+		return nil, utils.LogErrorf("error parsing secret %s/%s: %v", namespace, name, err)
+	}
+
+	return &secret, nil
+}
+
+// AwaitCredentialSecret polls GetCredentialSecret until the Secret exists or timeout
+// elapses. A "not found" result keeps polling; any other error aborts immediately, since it
+// most likely means something other than reconcile latency is wrong, and continuing to poll
+// would only spend more of the bootstrap token's limited lifetime.
+func (c *K8sClient) AwaitCredentialSecret(ctx context.Context, namespace, name string, pollInterval, timeout time.Duration) (*corev1.Secret, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		secret, err := c.GetCredentialSecret(ctx, namespace, name)
+		if err == nil {
+			return secret, nil
+		}
+		if !apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("error getting credential secret %s/%s: %w", namespace, name, err)
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("timed out after %s waiting for credential secret %s/%s to be created", timeout, namespace, name)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("waiting for credential secret %s/%s: %w", namespace, name, ctx.Err())
+		case <-time.After(pollInterval):
+		}
+	}
 }
 
 // SaveKubeConfig saves the kubeconfig from the secret to the user's BYOH directory

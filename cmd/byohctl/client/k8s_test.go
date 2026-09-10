@@ -1,19 +1,27 @@
 package client
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/types"
 )
@@ -306,3 +314,228 @@ func TestAgentLogOutput(t *testing.T) {
 		t.Errorf("Agent log file doesn't exist at expected path: %s", agentLogPath)
 	}
 }
+
+// newTestK8sClient returns a K8sClient whose requests reach an httptest TLS server running
+// handler. The HTTP client comes from the server so it trusts the server's self-signed
+// certificate, which is what lets the client's own https:// URLs be exercised unchanged.
+func newTestK8sClient(t *testing.T, handler http.HandlerFunc) *K8sClient {
+	t.Helper()
+
+	ts := httptest.NewTLSServer(handler)
+	t.Cleanup(ts.Close)
+
+	client := NewK8sClient(strings.TrimPrefix(ts.URL, "https://"), "test-domain", "test-tenant", "test-token", "region", false)
+	client.client = ts.Client()
+	return client
+}
+
+func TestK8sClientCreateByoHostEnrollment(t *testing.T) {
+	const (
+		wantPath = "/oidc-proxy/tenant-ns/region/apis/infrastructure.cluster.x-k8s.io/v1beta1/namespaces/tenant-ns/byohostenrollments"
+		hostName = "host1"
+	)
+
+	testCases := []struct {
+		name            string
+		status          int
+		respBody        string
+		wantNamespace   string
+		wantErrContains string
+	}{
+		{
+			name:          "created returns the namespace the API server assigned",
+			status:        http.StatusCreated,
+			respBody:      `{"apiVersion":"infrastructure.cluster.x-k8s.io/v1beta1","kind":"ByoHostEnrollment","metadata":{"name":"host1","namespace":"real-tenant-ns"}}`,
+			wantNamespace: "real-tenant-ns",
+		},
+		{
+			name:            "forbidden surfaces the status and body",
+			status:          http.StatusForbidden,
+			respBody:        `{"message":"byohostenrollments is forbidden"}`,
+			wantErrContains: "byohostenrollments is forbidden",
+		},
+		{
+			name:            "conflict surfaces the status and body",
+			status:          http.StatusConflict,
+			respBody:        `{"message":"byohostenrollments \"host1\" already exists"}`,
+			wantErrContains: "already exists",
+		},
+		{
+			name:            "malformed response body",
+			status:          http.StatusCreated,
+			respBody:        "not json at all",
+			wantErrContains: "error parsing ByoHostEnrollment",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotMethod, gotPath, gotAuth string
+			var gotBody []byte
+
+			client := newTestK8sClient(t, func(w http.ResponseWriter, r *http.Request) {
+				gotMethod = r.Method
+				gotPath = r.URL.Path
+				gotAuth = r.Header.Get("Authorization")
+				gotBody, _ = io.ReadAll(r.Body)
+
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, writeErr := io.WriteString(w, tc.respBody)
+				assert.NoError(t, writeErr)
+			})
+
+			labels := map[string]string{"byoh.pf9.io/role": "worker"}
+			namespace, err := client.CreateByoHostEnrollment(context.Background(), "tenant-ns", hostName, labels)
+
+			assert.Equal(t, http.MethodPost, gotMethod)
+			assert.Equal(t, wantPath, gotPath)
+			assert.Equal(t, "Bearer test-token", gotAuth)
+
+			var sent map[string]any
+			unmarshalErr := json.Unmarshal(gotBody, &sent)
+			require.NoError(t, unmarshalErr)
+			assert.Equal(t, "infrastructure.cluster.x-k8s.io/v1beta1", sent["apiVersion"])
+			assert.Equal(t, "ByoHostEnrollment", sent["kind"])
+			metadata, ok := sent["metadata"].(map[string]any)
+			require.True(t, ok, "request body has no metadata object")
+			assert.Equal(t, hostName, metadata["name"])
+			assert.Equal(t, map[string]any{"byoh.pf9.io/role": "worker"}, metadata["labels"])
+
+			if tc.wantErrContains != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErrContains)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantNamespace, namespace)
+		})
+	}
+}
+
+func TestK8sClientGetCredentialSecret(t *testing.T) {
+	t.Run("secret exists", func(t *testing.T) {
+		var gotPath, gotAuth string
+
+		client := newTestK8sClient(t, func(w http.ResponseWriter, r *http.Request) {
+			gotPath = r.URL.Path
+			gotAuth = r.Header.Get("Authorization")
+
+			w.Header().Set("Content-Type", "application/json")
+			encodeErr := json.NewEncoder(w).Encode(&corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "tenant-ns",
+					Name:      "host1-bootstrap",
+				},
+				Data: map[string][]byte{
+					"hostName":   []byte("host1"),
+					"kubeconfig": []byte("apiVersion: v1\nkind: Config\n"),
+				},
+			})
+			assert.NoError(t, encodeErr)
+		})
+
+		secret, err := client.GetCredentialSecret(context.Background(), "tenant-ns", "host1-bootstrap")
+		require.NoError(t, err)
+
+		assert.Equal(t, "/oidc-proxy/tenant-ns/region/api/v1/namespaces/tenant-ns/secrets/host1-bootstrap", gotPath)
+		assert.Equal(t, "Bearer test-token", gotAuth)
+		assert.Equal(t, "host1-bootstrap", secret.Name)
+		assert.Equal(t, []byte("host1"), secret.Data["hostName"])
+	})
+
+	t.Run("missing secret is reported as NotFound", func(t *testing.T) {
+		client := newTestK8sClient(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		})
+
+		_, err := client.GetCredentialSecret(context.Background(), "tenant-ns", "host1-bootstrap")
+		require.Error(t, err)
+		assert.True(t, apierrors.IsNotFound(err), "expected an apierrors NotFound, got %v", err)
+	})
+
+	t.Run("other statuses are plain errors", func(t *testing.T) {
+		client := newTestK8sClient(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			_, writeErr := io.WriteString(w, `{"message":"secrets is forbidden"}`)
+			assert.NoError(t, writeErr)
+		})
+
+		_, err := client.GetCredentialSecret(context.Background(), "tenant-ns", "host1-bootstrap")
+		require.Error(t, err)
+		assert.False(t, apierrors.IsNotFound(err))
+		assert.Contains(t, err.Error(), "secrets is forbidden")
+	})
+}
+
+func TestK8sClientAwaitCredentialSecret(t *testing.T) {
+	t.Run("returns once the secret appears", func(t *testing.T) {
+		// The Secret only shows up after this many not-found polls.
+		const notFoundPolls = 2
+
+		var calls atomic.Int32
+
+		client := newTestK8sClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if calls.Add(1) <= notFoundPolls {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			encodeErr := json.NewEncoder(w).Encode(&corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "tenant-ns",
+					Name:      "host1-bootstrap",
+				},
+			})
+			assert.NoError(t, encodeErr)
+		})
+
+		secret, err := client.AwaitCredentialSecret(context.Background(), "tenant-ns", "host1-bootstrap", 5*time.Millisecond, 2*time.Second)
+		require.NoError(t, err)
+		assert.Equal(t, "host1-bootstrap", secret.Name)
+		assert.Equal(t, int32(notFoundPolls+1), calls.Load())
+	})
+
+	t.Run("aborts on a non-NotFound error", func(t *testing.T) {
+		var calls atomic.Int32
+
+		client := newTestK8sClient(t, func(w http.ResponseWriter, r *http.Request) {
+			calls.Add(1)
+			w.WriteHeader(http.StatusForbidden)
+			_, writeErr := io.WriteString(w, `{"message":"secrets is forbidden"}`)
+			assert.NoError(t, writeErr)
+		})
+
+		_, err := client.AwaitCredentialSecret(context.Background(), "tenant-ns", "host1-bootstrap", 5*time.Millisecond, 2*time.Second)
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), "timed out")
+		assert.Equal(t, int32(1), calls.Load())
+	})
+
+	t.Run("times out when the secret never appears", func(t *testing.T) {
+		client := newTestK8sClient(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		})
+
+		_, err := client.AwaitCredentialSecret(context.Background(), "tenant-ns", "host1-bootstrap", 5*time.Millisecond, 30*time.Millisecond)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "timed out")
+	})
+
+	t.Run("honours context cancellation", func(t *testing.T) {
+		client := newTestK8sClient(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		})
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		_, err := client.AwaitCredentialSecret(ctx, "tenant-ns", "host1-bootstrap", 5*time.Millisecond, 2*time.Second)
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), "timed out")
+		// LogErrorf flattens the error chain with %v, so the cause is only in the message.
+		assert.Contains(t, err.Error(), "context canceled")
+	})
+}
+
