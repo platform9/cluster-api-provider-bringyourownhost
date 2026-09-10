@@ -36,7 +36,7 @@ const (
 
 	// CredentialGenerateFailedReason is set on CredentialReady when the token or
 	// the credential Secret could not be written.
-	CredentialGenerateFailedReason = "CredentialGenerateFailed" //nolint: gosec // a condition reason, not a credential
+	CredentialGenerateFailedReason = "CredentialGenerateFailed" // #nosec G101 -- a condition reason, not a credential
 )
 
 // Constants describing the artifacts a ByoHostEnrollment produces.
