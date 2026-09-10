@@ -20,6 +20,7 @@ import (
 	"golang.org/x/term"
 	"gopkg.in/yaml.v2"
 
+	infrav1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/common/hostname"
 )
 
@@ -253,6 +254,7 @@ func LoadOnboardConfig(path string) (*OnboardConfig, error) {
 	return &cfg, nil
 }
 
+// FIXME CLAUDE: One time use func. Get rid of it. use filepath.join directly at source.
 // bootstrapKubeconfigDestPath is where the agent's systemd drop-in points --bootstrap-kubeconfig.
 // Both ways byohctl can produce that file -- an operator-supplied file via --bootstrap-kubeconfig,
 // or a credential Secret from a ByoHostEnrollment this run created -- write to this same path, so
@@ -261,6 +263,7 @@ func bootstrapKubeconfigDestPath() string {
 	return filepath.Join(bootstrapAgentConfDir, "bootstrap-kubeconfig.yaml")
 }
 
+// FIXME CLAUDE: Needs dedicated tests.
 // writeBootstrapKubeconfigFile writes the raw kubeconfig bytes the agent's --bootstrap-kubeconfig
 // flag points at. This is always the last write onboarding does to it: the agent waits for this
 // file to exist before doing anything else (see waitForBootstrapCredential in agent/main.go), so
@@ -276,6 +279,7 @@ func writeBootstrapKubeconfigFile(kubeconfig []byte) error {
 	return nil
 }
 
+// FIXME CLAUDE: needs dedicated tests.
 // writeNamespaceFile records the tenant namespace the agent should register into, in the file the
 // agent reads once at startup (see resolveNamespace in agent/main.go).
 func writeNamespaceFile(byohDir, namespace string) error {
@@ -308,6 +312,11 @@ func writeBootstrapCredential(byohDir, bootstrapKubeconfigPath, namespace string
 	return writeNamespaceFile(byohDir, namespace)
 }
 
+// FIXME CLAUDE: Poor choice of name. Platform9 happens to be using byohctl +
+// BYOH. that's the entity. Instead a name like authenticateWithManagementPlane
+// or something similar. or something like GetMgmtClient. Authenticating is the task. The function needs to be named based on what it does and returns?. Also needs dedicated unit tests. Use
+// a mock serer to serve as the auth endpoint.
+//
 // authenticateWithPlatform9 either hands the operator-supplied bootstrap credential to the agent
 // (the --bootstrap-kubeconfig escape hatch) or authenticates with Platform9, saves the resulting
 // kubeconfig, and confirms regionName is available for the tenant. It returns the client used to
@@ -553,6 +562,11 @@ func runOnboard(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	// FIXME CLAUDE: This comment is evidence that we should split install and
+	// enroll instead into two funcs. And which means just inline the
+	// installAndEnroll code here anyway. Then this edge case behaviour is not
+	// hidden inside the method func's definition.
+	//
 	// Setup agent (download and install), then -- unless the --bootstrap-kubeconfig escape
 	// hatch is in play -- create the host's enrollment and wait for its credential. See
 	// installAndEnroll for why installing has to come first.
@@ -570,4 +584,139 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	utils.LogSuccess("BYOH Agent Service logs are available at:")
 	utils.LogSuccess("   - Agent service logs: %s", service.ByohAgentLogPath)
 	utils.LogSuccess("   - Check service status: sudo systemctl status pf9-byohost-agent.service")
+}
+
+// FIXME CLAUDE: Nothing in enroll.go file demands its own file. Own file only if its a sub-command.
+// Keep files where funcs / vars are first used. Moved everything below from enroll.go to onboard.go.
+
+// FIXME CLAUDE: Why can't these be passed in as args instead? That way tests
+// can set what they want without this weird package level variable override.
+// Also, as a design pattern, this is very bad. Never define variables so that
+// you can override them in tests. (eg: in other places you've set funcs to a
+// variable and overriding it in tests). This is generally a bad design smell.
+// credentialPollInterval and credentialPollTimeout are variables, not constants, so tests can
+// shrink them and exercise the timeout path without actually waiting on it.
+var (
+	// credentialPollInterval is how often byohctl checks for the credential Secret a
+	// ByoHostEnrollment produces. The credential is created within a single controller
+	// reconcile, so a short interval notices it soon after without hammering the API.
+	credentialPollInterval = 2 * time.Second
+
+	// credentialPollTimeout bounds the wait for that Secret. It is a small fraction of the
+	// bootstrap token's default 30 minute life, so a stuck reconcile is reported quickly
+	// instead of silently spending most of the token's usable window, while still being
+	// generous enough to absorb a controller restart or a brief apiserver hiccup.
+	credentialPollTimeout = 2 * time.Minute
+)
+
+// FIXME CLAUDE: Similar to above. Never do this.
+// osHostname is a variable so tests can replace it with a mock, same pattern as osReadFile in
+// cmd/byohctl/cmd/onboard.go.
+var osHostname = os.Hostname
+
+// FIXME CLAUDE: same as above.
+// setupAgent and enrollHostFunc are variables so tests can verify installAndEnroll's ordering
+// without actually installing a package or reaching a cluster. getK8sClient is a variable so
+// tests can point enrollHost at a fake dynamic client and clientset instead of a real
+// kubeconfig file on disk.
+var (
+	setupAgent     = service.SetupAgent
+	enrollHostFunc = enrollHost
+	getK8sClient   = client.GetK8sClient
+)
+
+// computeHostName turns this machine's reported host name into the object name used for it
+// on the management cluster. Failing here is a hard, early stop: a host name that cannot
+// normalize would otherwise surface only much later, as a certificate common name the
+// approver refuses.
+func computeHostName() (hostname.Name, error) {
+	raw, err := osHostname()
+	if err != nil {
+		return "", fmt.Errorf("failed to read this host's name: %w", err)
+	}
+
+	name, err := hostname.Normalize(raw)
+	if err != nil {
+		return "", fmt.Errorf("failed to normalize this host's name: %w", err)
+	}
+
+	return name, nil
+}
+
+// installAndEnroll installs the agent package, then -- unless an operator-supplied bootstrap
+// kubeconfig is already in play -- creates the host's enrollment and waits for its credential.
+// Installing first matters: the package pull and install are the slowest steps in onboarding,
+// so doing them before the credential exists means neither one spends any of the bootstrap
+// token's limited lifetime.
+func installAndEnroll(ctx context.Context, pkgDir, byohDir string, hostName hostname.Name, regionName string, usingBootstrapKubeconfig bool, k8sClient *client.K8sClient) error {
+	// FIXME CLAUDE: See this hides the actual call and makes this harder to read.
+	if err := setupAgent(pkgDir); err != nil {
+		return fmt.Errorf("failed to setup agent: %w", err)
+	}
+
+	if usingBootstrapKubeconfig {
+		return nil
+	}
+
+	return enrollHostFunc(ctx, k8sClient, byohDir, hostName, regionName)
+}
+
+// FIXME CLAUDE: skill:unslop this comment. The note about ordering is useful. But reduce verbosity.
+// enrollHost creates a ByoHostEnrollment for hostName, labeled with the region, then waits
+// for the credential Secret it produces and writes that credential out as the agent's
+// bootstrap kubeconfig.
+//
+// Order matters here. The namespace file is written as soon as the enrollment's real
+// namespace is known, strictly before the credential Secret is polled for, and the
+// kubeconfig file is written last, once the Secret is in hand and cross-checked. The agent
+// reads the namespace file once at startup and separately blocks on the kubeconfig file
+// appearing (see resolveNamespace and waitForBootstrapCredential in agent/main.go); writing
+// the kubeconfig first would let the agent start against the wrong namespace and never
+// notice, since it does not re-read the namespace file afterwards.
+//
+// A failure after the enrollment is created leaves that enrollment behind rather than
+// deleting it. Retrying onboarding would create a second ByoHostEnrollment for the same host
+// name, which the API server's name conflict already rejects on its own, so deleting the
+// first one here would not make a retry succeed, only remove a record of what was attempted.
+func enrollHost(ctx context.Context, k8sClient *client.K8sClient, byohDir string, hostName hostname.Name, regionName string) error {
+	mgmtClient, err := getK8sClient(service.KubeconfigFilePath)
+	if err != nil {
+		return fmt.Errorf("error creating Kubernetes client: %v", err)
+	}
+
+	utils.LogInfo("Creating enrollment for host %s", hostName)
+	labels := map[string]string{service.PcdKaapiRegionKey: regionName}
+	namespace, err := mgmtClient.CreateByoHostEnrollment(ctx, k8sClient.Namespace(), string(hostName), labels)
+	if err != nil {
+		return fmt.Errorf("failed to create host enrollment: %w", err)
+	}
+	utils.LogSuccess("Created host enrollment in namespace %s", namespace)
+
+	if err := writeNamespaceFile(byohDir, namespace); err != nil {
+		return err
+	}
+
+	secretName := string(hostName) + infrav1beta1.CredentialSecretNameSuffix
+	utils.LogInfo("Waiting for credential secret %s", secretName)
+	secret, err := mgmtClient.AwaitCredentialSecret(ctx, namespace, secretName, credentialPollInterval, credentialPollTimeout)
+	if err != nil {
+		return fmt.Errorf("failed to fetch credential secret: %w", err)
+	}
+
+	secretHostName := string(secret.Data[infrav1beta1.CredentialSecretHostNameKey])
+	if secretHostName != string(hostName) {
+		return fmt.Errorf("credential secret %s is for host %q, not %q", secretName, secretHostName, hostName)
+	}
+
+	kubeconfig, ok := secret.Data[infrav1beta1.CredentialSecretKubeconfigKey]
+	if !ok {
+		return fmt.Errorf("credential secret %s has no %s key", secretName, infrav1beta1.CredentialSecretKubeconfigKey)
+	}
+
+	if err := writeBootstrapKubeconfigFile(kubeconfig); err != nil {
+		return err
+	}
+
+	utils.LogSuccess("Wrote bootstrap credential for host %s", hostName)
+	return nil
 }
