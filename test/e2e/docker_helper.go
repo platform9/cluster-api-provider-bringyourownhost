@@ -39,6 +39,11 @@ const (
 	kubeconfigFileMode os.FileMode = 0600
 )
 
+// shellExec builds the argv that runs script through the container's shell.
+func shellExec(script string) []string {
+	return []string{"sh", "-c", script}
+}
+
 // getEnvOrDefault returns the value of the given environment variable, or def if unset/empty.
 func getEnvOrDefault(key, def string) string {
 	if v := os.Getenv(key); v != "" {
@@ -277,7 +282,7 @@ func (r *ByoHostRunner) copyKubeconfig(config cpConfig, listopt container.ListOp
 				AttachStdin:  false,
 				AttachStdout: true,
 				AttachStderr: true,
-				Cmd:          []string{"sh", "-c", "echo ${HOME}"},
+				Cmd:          shellExec("echo ${HOME}"),
 			})
 			Expect(err).ShouldNot(HaveOccurred())
 			resp, err := r.DockerClient.ContainerExecAttach(r.Context, execCommand.ID, container.ExecAttachOptions{})
@@ -291,7 +296,7 @@ func (r *ByoHostRunner) copyKubeconfig(config cpConfig, listopt container.ListOp
 				AttachStdin:  false,
 				AttachStdout: true,
 				AttachStderr: true,
-				Cmd:          []string{"sh", "-c", "mkdir ${HOME}/.byoh"},
+				Cmd:          shellExec("mkdir ${HOME}/.byoh"),
 			})
 			Expect(err).ShouldNot(HaveOccurred())
 			err = r.DockerClient.ContainerExecStart(r.Context, execCommand.ID, container.ExecStartOptions{})
@@ -348,8 +353,7 @@ func (r *ByoHostRunner) writeHostNameFile(containerID string) error {
 	execCommand, err := r.DockerClient.ContainerExecCreate(r.Context, containerID, container.ExecOptions{
 		AttachStdout: true,
 		AttachStderr: true,
-		Cmd: []string{"sh", "-c",
-			fmt.Sprintf("mkdir -p ${HOME}/.byoh && printf '%%s' %q > ${HOME}/.byoh/%s", r.ByoHostName, hostname.FileName)},
+		Cmd:          shellExec(fmt.Sprintf("mkdir -p ${HOME}/.byoh && printf '%%s' %q > ${HOME}/.byoh/%s", r.ByoHostName, hostname.FileName)),
 	})
 	if err != nil {
 		return errors.Wrapf(err, "create exec for writing host name file in container %q", containerID)
