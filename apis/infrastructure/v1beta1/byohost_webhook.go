@@ -85,7 +85,9 @@ func (v *ByoHostValidator) handleCreateUpdate(req *admission.Request) admission.
 	// match the target ByoHost — an agent must not create or update another agent's host.
 
 	// FIXME: We only support token based kubeconfig for now. cert based flow needs a redesign. Disable it for now to allow host onboarding for the time being.
-	// NOTE: When you're fixing this, see the tests that were skipped as part of the commit that disabled this check.
+	// Restoring the check must restore these two expectations: a create and an update from
+	// "byoh:host:host2" targeting a ByoHost named "host1" are both denied, with the message
+	// "byoh:host:host2 cannot create/update resource host1".
 	//
 	// if len(substrs) >= 3 && !strings.Contains(byoHost.Name, substrs[2]) {
 	// 	return admission.Denied(fmt.Sprintf("%s cannot create/update resource %s", userName, byoHost.Name))
