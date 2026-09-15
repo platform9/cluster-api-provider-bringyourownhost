@@ -5,7 +5,9 @@
 package v1beta1
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -18,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -35,8 +38,10 @@ const (
 // bootstrap kubeconfig and has nothing to do with these objects.
 const testNamespace = "default"
 
-// newByoHostValidator builds a validator over a fake client seeded with objs.
-func newByoHostValidator(t *testing.T, objs ...client.Object) *ByoHostValidator {
+// newByoHostValidator builds a validator over a fake client seeded with objs. A
+// non-nil getErr makes every Get fail with that error instead of reaching the
+// fake client, which is how the table exercises an unreachable apiserver.
+func newByoHostValidator(t *testing.T, getErr error, objs ...client.Object) *ByoHostValidator {
 	t.Helper()
 
 	scheme := runtime.NewScheme()
@@ -46,6 +51,14 @@ func newByoHostValidator(t *testing.T, objs ...client.Object) *ByoHostValidator 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(objs...).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if getErr != nil {
+					return getErr
+				}
+				return c.Get(ctx, key, obj, opts...)
+			},
+		}).
 		Build()
 
 	return &ByoHostValidator{
@@ -95,12 +108,14 @@ func TestByoHostValidator_Handle_Delete(t *testing.T) {
 	testCases := []struct {
 		name       string
 		machineRef *corev1.ObjectReference
+		getErr     error
 		wantAllow  bool
 		wantMsg    string
 	}{
 		{
 			name:       "no MachineRef assigned",
 			machineRef: nil,
+			getErr:     nil,
 			wantAllow:  true,
 			wantMsg:    "",
 		},
@@ -112,14 +127,44 @@ func TestByoHostValidator_Handle_Delete(t *testing.T) {
 				Name:       byoMachine.Name,
 				APIVersion: testAPIVersion,
 			},
+			getErr:    nil,
 			wantAllow: false,
 			wantMsg:   "cannot delete ByoHost when MachineRef is assigned",
+		},
+		{
+			// A dangling MachineRef must not pin the ByoHost forever, so a NotFound
+			// on the referenced ByoMachine is a deliberate allow.
+			name: "MachineRef assigned to a ByoMachine that does not exist",
+			machineRef: &corev1.ObjectReference{
+				Kind:       "ByoMachine",
+				Namespace:  testNamespace,
+				Name:       "missing-byomachine",
+				APIVersion: testAPIVersion,
+			},
+			getErr:    nil,
+			wantAllow: true,
+			wantMsg:   "",
+		},
+		{
+			// Any Get failure other than NotFound is treated as "the ByoMachine may
+			// still exist", so the delete is denied rather than allowed on an unknown
+			// state.
+			name: "MachineRef lookup fails with an error other than NotFound",
+			machineRef: &corev1.ObjectReference{
+				Kind:       "ByoMachine",
+				Namespace:  testNamespace,
+				Name:       byoMachine.Name,
+				APIVersion: testAPIVersion,
+			},
+			getErr:    errors.New("apiserver unreachable"),
+			wantAllow: false,
+			wantMsg:   "cannot delete ByoHost when byomachine exists",
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			v := newByoHostValidator(t, byoMachine)
+			v := newByoHostValidator(t, tc.getErr, byoMachine)
 
 			req := newByoHostDeleteRequest(t, tc.machineRef)
 
@@ -197,6 +242,17 @@ func TestByoHostValidator_Handle_CreateUpdate(t *testing.T) {
 			wantMsg:   "",
 		},
 		{
+			// "user@localhost" has no dot-separated TLD, so the email-like regex does
+			// not match and the username falls through to the segment count. This row
+			// pins where the regex stops matching.
+			name:      "email-like username without a TLD is denied",
+			operation: admissionv1.Update,
+			userName:  "user@localhost",
+			hostName:  defaultHostName,
+			wantAllow: false,
+			wantMsg:   "user@localhost is not a valid agent username",
+		},
+		{
 			name:      "username with no host segment skips the ownership check",
 			operation: admissionv1.Create,
 			userName:  "byoh:host",
@@ -226,7 +282,7 @@ func TestByoHostValidator_Handle_CreateUpdate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			require.NotEmpty(t, tc.operation, "operation must be set, otherwise Handle falls through to its default allow branch")
 
-			v := newByoHostValidator(t)
+			v := newByoHostValidator(t, nil)
 
 			byoHost := &ByoHost{
 				TypeMeta: metav1.TypeMeta{
