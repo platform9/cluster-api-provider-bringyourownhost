@@ -1,4 +1,5 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package v1beta1
@@ -8,7 +9,6 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
-	"strings"
 
 	v1 "k8s.io/api/admission/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -74,24 +74,29 @@ func (v *ByoHostValidator) handleCreateUpdate(req *admission.Request) admission.
 		return admission.Allowed("")
 	}
 
-	substrs := strings.Split(userName, ":")
-
-	if len(substrs) < 2 { //nolint: mnd
-		return admission.Denied(fmt.Sprintf("%s is not a valid agent username", userName))
+	// FIXME CLAUDE: This comment is redundant with the doc for
+	// HostNameFromIdentity. Keep them focused instead of repeating info. The
+	// docstring of the func is for expectations of the func and its usage.
+	// Inline commentary is implementation detail.
+	//
+	// A host certificate's common name carries the host it may act as, so the
+	// name is read from the authenticated identity and never from the request
+	// body. Segments are compared whole: a substring match would let a
+	// certificate for "worker-1" act on "worker-10".
+	hostName, err := HostNameFromIdentity(userName)
+	if err != nil {
+		return admission.Denied(fmt.Sprintf("%s is not a valid agent username: %s", userName, err.Error()))
 	}
 
-	// An agent's username encodes the host it owns as the third colon-separated segment
-	// (format: byoh:host:<hostname>). Reject requests where the encoded host does not
-	// match the target ByoHost — an agent must not create or update another agent's host.
+	if hostName != byoHost.Name {
+		return admission.Denied(fmt.Sprintf("%s cannot create/update resource %s", userName, byoHost.Name))
+	}
 
-	// FIXME: We only support token based kubeconfig for now. cert based flow needs a redesign. Disable it for now to allow host onboarding for the time being.
-	// Restoring the check must restore these two expectations: a create and an update from
-	// "byoh:host:host2" targeting a ByoHost named "host1" are both denied, with the message
-	// "byoh:host:host2 cannot create/update resource host1".
-	//
-	// if len(substrs) >= 3 && !strings.Contains(byoHost.Name, substrs[2]) {
-	// 	return admission.Denied(fmt.Sprintf("%s cannot create/update resource %s", userName, byoHost.Name))
-	// }
+	// On create the object must already carry the requester's identity, which
+	// the stamping webhook wrote. A mismatch means the stamp was bypassed.
+	if req.Operation == v1.Create && byoHost.Spec.Identity != userName {
+		return admission.Denied(fmt.Sprintf("%s cannot create resource %s with identity %q", userName, byoHost.Name, byoHost.Spec.Identity))
+	}
 
 	return admission.Allowed("")
 }

@@ -5,122 +5,262 @@ package v1beta1
 
 import (
 	"context"
-	b64 "encoding/base64"
-	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"k8s.io/apimachinery/pkg/util/validation/field"
+
+	admissionv1 "k8s.io/api/admission/v1"
+	authenticationv1 "k8s.io/api/authentication/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
-const wantAPIServerFormatDetail = "APIServer is not of the format https://hostname:port"
+const (
+	testRequester = "admin@example.com"
+	testHostName  = "coke-worker-1"
+)
 
-func TestValidateAPIServer(t *testing.T) {
-	tests := []struct {
-		name       string
-		apiServer  string
-		wantDetail string
-	}{
-		{"empty", "", "APIServer field cannot be empty"},
-		{"invalid URL", "htt p://test.com", "APIServer URL is not valid"},
-		{"missing scheme", "abc.com", wantAPIServerFormatDetail},
-		{"missing hostname", "https://test-server", wantAPIServerFormatDetail},
-		{"missing port", "https://test.com", wantAPIServerFormatDetail},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r := &BootstrapKubeconfig{Spec: BootstrapKubeconfigSpec{APIServer: tt.apiServer}}
-
-			err := r.validateAPIServer()
-			require.Error(t, err)
-
-			var fieldErr *field.Error
-			require.True(t, errors.As(err, &fieldErr), "expected a *field.Error, got %T", err)
-			assert.Equal(t, field.ErrorTypeInvalid, fieldErr.Type)
-			assert.Equal(t, "spec.apiserver", fieldErr.Field)
-			assert.Equal(t, tt.apiServer, fieldErr.BadValue)
-			assert.Equal(t, tt.wantDetail, fieldErr.Detail)
-		})
-	}
-
-	t.Run("valid", func(t *testing.T) {
-		r := &BootstrapKubeconfig{Spec: BootstrapKubeconfigSpec{APIServer: "https://abc.com:1234"}}
-		assert.NoError(t, r.validateAPIServer())
+func defaultingContext(username string) context.Context {
+	return admission.NewContextWithRequest(context.Background(), admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Create,
+			UserInfo:  authenticationv1.UserInfo{Username: username},
+		},
 	})
 }
 
-func TestValidateCAData(t *testing.T) {
-	invalidCAData := "test-ca-data"
-	nonPEMData := b64.StdEncoding.EncodeToString([]byte(invalidCAData))
-
-	tests := []struct {
-		name       string
-		caData     string
-		wantDetail string
+func TestBootstrapKubeconfigDefaulter_CreatedBy(t *testing.T) {
+	testCases := []struct {
+		name     string
+		supplied string
 	}{
-		{"empty", "", "CertificateAuthorityData field cannot be empty"},
-		{"not base64", invalidCAData, "cannot base64 decode CertificateAuthorityData"},
-		{"not PEM encoded", nonPEMData, "CertificateAuthorityData is not PEM encoded"},
+		{
+			name:     "empty createdBy is filled from the requester",
+			supplied: "",
+		},
+		{
+			name:     "a body-supplied createdBy is overwritten, so a caller cannot claim another identity",
+			supplied: "someone-else@example.com",
+		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r := &BootstrapKubeconfig{Spec: BootstrapKubeconfigSpec{CertificateAuthorityData: tt.caData}}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			obj := &BootstrapKubeconfig{
+				Spec: BootstrapKubeconfigSpec{
+					HostName:  testHostName,
+					CreatedBy: tc.supplied,
+				},
+			}
 
-			err := r.validateCAData()
-			require.Error(t, err)
+			d := &BootstrapKubeconfigDefaulter{}
+			err := d.Default(defaultingContext(testRequester), obj)
+			require.NoError(t, err)
 
-			var fieldErr *field.Error
-			require.True(t, errors.As(err, &fieldErr), "expected a *field.Error, got %T", err)
-			assert.Equal(t, field.ErrorTypeInvalid, fieldErr.Type)
-			assert.Equal(t, "spec.caData", fieldErr.Field)
-			assert.Equal(t, tt.caData, fieldErr.BadValue)
-			assert.Equal(t, tt.wantDetail, fieldErr.Detail)
+			assert.Equal(t, testRequester, obj.Spec.CreatedBy)
 		})
 	}
 }
 
-func TestValidateCreateUpdateDelete(t *testing.T) {
-	valid := &BootstrapKubeconfig{Spec: BootstrapKubeconfigSpec{
-		APIServer:                "https://abc.com:1234",
-		CertificateAuthorityData: b64.StdEncoding.EncodeToString([]byte("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----")),
-	}}
-	invalid := &BootstrapKubeconfig{Spec: BootstrapKubeconfigSpec{APIServer: ""}}
+func TestBootstrapKubeconfigDefaulter_TokenExpiresAt(t *testing.T) {
+	t.Run("an absent expiry is defaulted", func(t *testing.T) {
+		obj := &BootstrapKubeconfig{Spec: BootstrapKubeconfigSpec{HostName: testHostName}}
 
-	ctx := context.Background()
+		d := &BootstrapKubeconfigDefaulter{}
+		err := d.Default(defaultingContext(testRequester), obj)
+		require.NoError(t, err)
 
-	_, err := valid.ValidateCreate(ctx, valid)
-	require.NoError(t, err)
-	_, err = invalid.ValidateCreate(ctx, invalid)
-	require.Error(t, err)
+		require.NotNil(t, obj.Spec.TokenExpiresAt)
+		assert.WithinDuration(t, time.Now().Add(DefaultTokenExpiry), obj.Spec.TokenExpiresAt.Time, time.Minute)
+	})
 
-	_, err = valid.ValidateUpdate(ctx, invalid, valid)
-	require.NoError(t, err)
-	_, err = invalid.ValidateUpdate(ctx, valid, invalid)
-	require.Error(t, err)
+	t.Run("a supplied expiry is left alone, and the validator bounds it instead", func(t *testing.T) {
+		supplied := metav1.NewTime(time.Now().Add(10 * time.Minute))
+		obj := &BootstrapKubeconfig{
+			Spec: BootstrapKubeconfigSpec{
+				HostName:       testHostName,
+				TokenExpiresAt: &supplied,
+			},
+		}
 
-	_, err = valid.ValidateDelete(ctx, valid)
-	require.NoError(t, err)
-	_, err = invalid.ValidateDelete(ctx, invalid)
-	require.NoError(t, err)
+		d := &BootstrapKubeconfigDefaulter{}
+		err := d.Default(defaultingContext(testRequester), obj)
+		require.NoError(t, err)
+
+		require.NotNil(t, obj.Spec.TokenExpiresAt)
+		assert.Equal(t, supplied.Time, obj.Spec.TokenExpiresAt.Time)
+	})
+
+	t.Run("a request without admission context is an error, not a silent empty creator", func(t *testing.T) {
+		obj := &BootstrapKubeconfig{Spec: BootstrapKubeconfigSpec{HostName: testHostName}}
+
+		d := &BootstrapKubeconfigDefaulter{}
+		err := d.Default(context.Background(), obj)
+		require.Error(t, err)
+		assert.Empty(t, obj.Spec.CreatedBy)
+	})
 }
 
-func TestValidateCreateUpdateDeleteRejectWrongType(t *testing.T) {
-	r := &BootstrapKubeconfig{}
-	wrongType := &BootstrapKubeconfigList{}
-	ctx := context.Background()
+func TestBootstrapKubeconfig_validateHostName(t *testing.T) {
+	testCases := []struct {
+		name     string
+		hostName string
+		wantErr  string
+	}{
+		{
+			name:     "a normalized host name is accepted",
+			hostName: "coke-worker-1",
+		},
+		{
+			name:     "an empty host name is rejected",
+			hostName: "",
+			wantErr:  "cannot be empty",
+		},
+		{
+			name:     "an unnormalized host name is rejected rather than rewritten",
+			hostName: "Coke_Worker_1",
+			wantErr:  "not normalized",
+		},
+		{
+			name:     "a host name that cannot normalize at all is rejected",
+			hostName: "coke worker 1",
+			wantErr:  "not a valid object name",
+		},
+	}
 
-	_, err := r.ValidateCreate(ctx, wrongType)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "expected a BootstrapKubeconfig but got a")
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			obj := &BootstrapKubeconfig{Spec: BootstrapKubeconfigSpec{HostName: tc.hostName}}
 
-	_, err = r.ValidateUpdate(ctx, r, wrongType)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "expected a BootstrapKubeconfig but got a")
+			err := obj.validateHostName()
 
-	_, err = r.ValidateDelete(ctx, wrongType)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "expected a BootstrapKubeconfig but got a")
+			if tc.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
+
+func TestBootstrapKubeconfig_validateTokenExpiresAt(t *testing.T) {
+	now := time.Now()
+
+	testCases := []struct {
+		name      string
+		expiresAt *metav1.Time
+		wantErr   bool
+	}{
+		{
+			name:      "no expiry is accepted, the defaulter fills it in",
+			expiresAt: nil,
+		},
+		{
+			name:      "an expiry inside the window is accepted",
+			expiresAt: ptrTime(now.Add(DefaultTokenExpiry)),
+		},
+		{
+			name:      "an expiry beyond the window is rejected",
+			expiresAt: ptrTime(now.Add(MaxTokenExpiryWindow + time.Minute)),
+			wantErr:   true,
+		},
+		{
+			name:      "an expiry far in the future is rejected, so a caller cannot ask for a token that never dies",
+			expiresAt: ptrTime(now.AddDate(1, 0, 0)),
+			wantErr:   true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			obj := &BootstrapKubeconfig{
+				Spec: BootstrapKubeconfigSpec{TokenExpiresAt: tc.expiresAt},
+			}
+
+			err := obj.validateTokenExpiresAt(now)
+
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
+}
+
+func TestValidateImmutableFields(t *testing.T) {
+	expiry := metav1.NewTime(time.Now().Add(DefaultTokenExpiry))
+	base := func() *BootstrapKubeconfig {
+		return &BootstrapKubeconfig{
+			Spec: BootstrapKubeconfigSpec{
+				HostName:       testHostName,
+				CreatedBy:      testRequester,
+				TokenExpiresAt: &expiry,
+			},
+		}
+	}
+
+	testCases := []struct {
+		name    string
+		mutate  func(*BootstrapKubeconfig)
+		wantErr string
+	}{
+		{
+			name:   "an unchanged spec is accepted",
+			mutate: func(_ *BootstrapKubeconfig) {},
+		},
+		{
+			name:    "changing the host name is rejected",
+			mutate:  func(o *BootstrapKubeconfig) { o.Spec.HostName = "coke-worker-2" },
+			wantErr: "hostName is immutable",
+		},
+		{
+			name:    "changing the creator is rejected, so the credential grant cannot be redirected",
+			mutate:  func(o *BootstrapKubeconfig) { o.Spec.CreatedBy = "someone-else@example.com" },
+			wantErr: "createdBy is immutable",
+		},
+		{
+			name: "extending the expiry is rejected, so a live token's life cannot be stretched",
+			mutate: func(o *BootstrapKubeconfig) {
+				later := metav1.NewTime(expiry.Add(time.Hour))
+				o.Spec.TokenExpiresAt = &later
+			},
+			wantErr: "tokenExpiresAt is immutable",
+		},
+		{
+			name:    "clearing the expiry is rejected",
+			mutate:  func(o *BootstrapKubeconfig) { o.Spec.TokenExpiresAt = nil },
+			wantErr: "tokenExpiresAt is immutable",
+		},
+		{
+			name:    "changing an unrelated field is accepted",
+			mutate:  func(o *BootstrapKubeconfig) { o.Spec.InsecureSkipTLSVerify = true },
+			wantErr: "",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			oldObj := base()
+			newObj := base()
+			tc.mutate(newObj)
+
+			err := validateImmutableFields(oldObj, newObj)
+
+			if tc.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
+
+func ptrTime(t time.Time) *metav1.Time {
+	mt := metav1.NewTime(t)
+	return &mt
 }

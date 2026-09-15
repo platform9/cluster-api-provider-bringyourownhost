@@ -28,8 +28,8 @@ const (
 	testByoHostKind  = "ByoHost"
 	testAPIVersion   = "infrastructure.cluster.x-k8s.io/v1beta1"
 	defaultHostName  = "host1"
-	byohHostOneUser  = "byoh:host:host1"
-	byohHostTwoUser  = "byoh:host:host2"
+	byohHostOneUser  = "byoh:host:host1:x7k2p"
+	byohHostTwoUser  = "byoh:host:host2:x7k2p"
 	unauthorizedUser = "unauthorized-user"
 )
 

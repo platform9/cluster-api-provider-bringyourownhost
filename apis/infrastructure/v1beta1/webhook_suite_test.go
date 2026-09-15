@@ -114,6 +114,10 @@ var _ = BeforeSuite(func() {
 		Decoder: admission.NewDecoder(mgr.GetScheme()),
 	}})
 
+	mgr.GetWebhookServer().Register("/mutate-infrastructure-cluster-x-k8s-io-v1beta1-byohost", &webhook.Admission{Handler: &byohv1beta1.ByoHostIdentityStamper{
+		Decoder: admission.NewDecoder(mgr.GetScheme()),
+	}})
+
 	err = (&byohv1beta1.BootstrapKubeconfig{}).SetupWebhookWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 
