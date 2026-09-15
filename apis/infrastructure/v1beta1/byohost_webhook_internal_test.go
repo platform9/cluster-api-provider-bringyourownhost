@@ -5,19 +5,22 @@
 package v1beta1
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"testing"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
 	admissionv1 "k8s.io/api/admission/v1"
 	v1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -25,318 +28,277 @@ const (
 	testByoHostKind  = "ByoHost"
 	testAPIVersion   = "infrastructure.cluster.x-k8s.io/v1beta1"
 	defaultHostName  = "host1"
-	unauthorizedUser = "unauthorized-user"
-	byohHostTwoUser  = "byoh:host:host2"
 	byohHostOneUser  = "byoh:host:host1"
+	byohHostTwoUser  = "byoh:host:host2"
+	unauthorizedUser = "unauthorized-user"
 )
 
-var _ = Describe("ByohostWebhook/Unit", func() {
-	schema := runtime.NewScheme()
-	err := AddToScheme(schema)
-	Expect(err).NotTo(HaveOccurred())
-	decoder := admission.NewDecoder(schema)
-	byoMachine := &ByoMachine{
-		ObjectMeta: metav1.ObjectMeta{Name: "byomachine1", Namespace: DefaultNamespace},
-	}
-	fakeClient := fake.NewClientBuilder().WithScheme(schema).WithObjects(byoMachine).Build()
-	v := &ByoHostValidator{
-		Client:  fakeClient,
-		Decoder: decoder,
-	}
-	Context("When ByoHost gets a create request", func() {
-		var (
-			byoHost    *ByoHost
-			byoHostRaw []byte
-		)
-		BeforeEach(func() {
-			byoHost = &ByoHost{
-				TypeMeta: metav1.TypeMeta{
-					Kind:       testByoHostKind,
-					APIVersion: testAPIVersion,
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      defaultHostName,
-					Namespace: DefaultNamespace,
-				},
-				Spec: ByoHostSpec{},
-			}
-			byoHostRaw, err = json.Marshal(byoHost)
-			Expect(err).ShouldNot(HaveOccurred())
-		})
-		It("Should reject create request from invalid user", func(ctx SpecContext) {
-			Skip("feature not implemented yet")
-			admissionRequest := admissionv1.AdmissionRequest{
-				Operation: admissionv1.Create,
-				UserInfo:  v1.UserInfo{Username: unauthorizedUser},
-				Object: runtime.RawExtension{
-					Raw:    byoHostRaw,
-					Object: byoHost,
-				},
-			}
-			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
-			Expect(resp.AdmissionResponse.Allowed).To(Equal(false))
-			Expect(resp.AdmissionResponse.Result.Message).To(Equal(fmt.Sprintf("%s is not a valid agent username", unauthorizedUser)))
-		})
-		It("Should reject request from another agent user in the group", func(ctx SpecContext) {
-			Skip("feature not implemented yet")
-			admissionRequest := admissionv1.AdmissionRequest{
-				Operation: admissionv1.Create,
-				UserInfo:  v1.UserInfo{Username: byohHostTwoUser},
-				Object: runtime.RawExtension{
-					Raw:    byoHostRaw,
-					Object: byoHost,
-				},
-			}
-			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
-			Expect(resp.AdmissionResponse.Allowed).To(Equal(false))
-			Expect(resp.AdmissionResponse.Result.Message).To(Equal(fmt.Sprintf("%s cannot create/update resource %s", byohHostTwoUser, defaultHostName)))
-		})
-		It("Should allow request from the valid agent user", func(ctx SpecContext) {
-			admissionRequest := admissionv1.AdmissionRequest{
-				Operation: admissionv1.Create,
-				UserInfo:  v1.UserInfo{Username: byohHostOneUser},
-				Object: runtime.RawExtension{
-					Raw:    byoHostRaw,
-					Object: byoHost,
-				},
-			}
-			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
-			Expect(resp.AdmissionResponse.Allowed).To(Equal(true))
-		})
-	})
+// testNamespace defines the namespace where the objects in test are created.
+const testNamespace = "default"
 
-	Context("When ByoHost gets an update request", func() {
-		var (
-			byoHost    *ByoHost
-			byoHostRaw []byte
-		)
-		BeforeEach(func() {
-			byoHost = &ByoHost{
-				TypeMeta: metav1.TypeMeta{
-					Kind:       testByoHostKind,
-					APIVersion: testAPIVersion,
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      defaultHostName,
-					Namespace: DefaultNamespace,
-				},
-				Spec: ByoHostSpec{},
-			}
-			byoHostRaw, err = json.Marshal(byoHost)
-			Expect(err).ShouldNot(HaveOccurred())
-		})
-		It("Should reject update request from invalid user", func(ctx SpecContext) {
-			admissionRequest := admissionv1.AdmissionRequest{
-				Operation: admissionv1.Update,
-				UserInfo:  v1.UserInfo{Username: unauthorizedUser},
-				Object: runtime.RawExtension{
-					Raw:    byoHostRaw,
-					Object: byoHost,
-				},
-			}
-			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
-			Expect(resp.AdmissionResponse.Allowed).To(Equal(false))
-			Expect(resp.AdmissionResponse.Result.Message).To(Equal(fmt.Sprintf("%s is not a valid agent username", unauthorizedUser)))
-		})
-		It("Should allow update request from manager", func(ctx SpecContext) {
-			admissionRequest := admissionv1.AdmissionRequest{
-				Operation: admissionv1.Update,
-				UserInfo:  v1.UserInfo{Username: byohSystemManagerServiceAccount},
-				Object: runtime.RawExtension{
-					Raw:    byoHostRaw,
-					Object: byoHost,
-				},
-			}
-			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
-			Expect(resp.AdmissionResponse.Allowed).To(Equal(true))
-		})
-		It("Should allow update request from email-like user", func(ctx SpecContext) {
-			admissionRequest := admissionv1.AdmissionRequest{
-				Operation: admissionv1.Update,
-				UserInfo:  v1.UserInfo{Username: "user@example.com"},
-				Object: runtime.RawExtension{
-					Raw:    byoHostRaw,
-					Object: byoHost,
-				},
-			}
-			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
-			Expect(resp.AdmissionResponse.Allowed).To(Equal(true))
-		})
-		It("should reject the update request from users who are not like email", func(ctx SpecContext) {
-			admissionRequest := admissionv1.AdmissionRequest{
-				Operation: admissionv1.Update,
-				UserInfo:  v1.UserInfo{Username: unauthorizedUser},
-				Object: runtime.RawExtension{
-					Raw:    byoHostRaw,
-					Object: byoHost,
-				},
-			}
-			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
-			Expect(resp.AdmissionResponse.Allowed).To(Equal(false))
-			Expect(resp.AdmissionResponse.Result.Message).To(Equal(fmt.Sprintf("%s is not a valid agent username", unauthorizedUser)))
-		})
+// newFakeByoHostValidator builds a validator over a fake client seeded with objs.
+func newFakeByoHostValidator(t *testing.T, getErr error, objs ...client.Object) *ByoHostValidator {
+	t.Helper()
 
-		It("Should reject request from another agent user in the group", func(ctx SpecContext) {
-			Skip("feature not implemented yet")
-			admissionRequest := admissionv1.AdmissionRequest{
-				Operation: admissionv1.Update,
-				UserInfo:  v1.UserInfo{Username: byohHostTwoUser},
-				Object: runtime.RawExtension{
-					Raw:    byoHostRaw,
-					Object: byoHost,
-				},
-			}
-			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
-			Expect(resp.AdmissionResponse.Allowed).To(Equal(false))
-			Expect(resp.AdmissionResponse.Result.Message).To(Equal(fmt.Sprintf("%s cannot create/update resource %s", byohHostTwoUser, defaultHostName)))
-		})
-		It("Should allow request from the valid agent user", func(ctx SpecContext) {
-			admissionRequest := admissionv1.AdmissionRequest{
-				Operation: admissionv1.Update,
-				UserInfo:  v1.UserInfo{Username: byohHostOneUser},
-				Object: runtime.RawExtension{
-					Raw:    byoHostRaw,
-					Object: byoHost,
-				},
-			}
-			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
-			Expect(resp.AdmissionResponse.Allowed).To(Equal(true))
-		})
-	})
-	Context("When ByoHost gets an delete request", func() {
-		var (
-			byoHost    *ByoHost
-			byoHostRaw []byte
-		)
-		BeforeEach(func() {
-			byoHost = &ByoHost{
-				TypeMeta: metav1.TypeMeta{
-					Kind:       testByoHostKind,
-					APIVersion: testAPIVersion,
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      defaultHostName,
-					Namespace: DefaultNamespace,
-				},
-				Spec: ByoHostSpec{},
-			}
-			byoHostRaw, err = json.Marshal(byoHost)
-			Expect(err).ShouldNot(HaveOccurred())
-		})
-		It("Should allow delete request from any user", func(ctx SpecContext) {
-			admissionRequest := admissionv1.AdmissionRequest{
-				Operation: admissionv1.Delete,
-				UserInfo:  v1.UserInfo{Username: "random-user"},
-				OldObject: runtime.RawExtension{
-					Raw:    byoHostRaw,
-					Object: byoHost,
-				},
-			}
-			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
-			Expect(resp.AdmissionResponse.Allowed).To(Equal(true))
-		})
-		It("Should reject delete request if status.MachineRef is not nil", func(ctx SpecContext) {
-			byoHost.Status.MachineRef = &corev1.ObjectReference{
-				Kind:       "ByoMachine",
-				Namespace:  DefaultNamespace,
-				Name:       "byomachine1",
-				APIVersion: byoHost.APIVersion,
-			}
-			byoHostRaw, err = json.Marshal(byoHost)
-			Expect(err).ShouldNot(HaveOccurred())
-			admissionRequest := admissionv1.AdmissionRequest{
-				Operation: admissionv1.Delete,
-				UserInfo:  v1.UserInfo{Username: "random-user"},
-				OldObject: runtime.RawExtension{
-					Raw:    byoHostRaw,
-					Object: byoHost,
-				},
-			}
-			resp := v.Handle(ctx, admission.Request{AdmissionRequest: admissionRequest})
-			Expect(resp.AdmissionResponse.Allowed).To(Equal(false))
-			Expect(resp.AdmissionResponse.Result.Message).To(Equal("cannot delete ByoHost when MachineRef is assigned"))
-		})
-	})
-})
-
-func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 	scheme := runtime.NewScheme()
 	err := AddToScheme(scheme)
 	require.NoError(t, err)
-	decoder := admission.NewDecoder(scheme)
 
-	v := &ByoHostValidator{Decoder: decoder}
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(objs...).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if getErr != nil {
+					return getErr
+				}
+				return c.Get(ctx, key, obj, opts...)
+			},
+		}).
+		Build()
+
+	return &ByoHostValidator{
+		Client:  fakeClient,
+		Decoder: admission.NewDecoder(scheme),
+	}
+}
+
+func TestByoHostValidator_handleDelete(t *testing.T) {
+	byoMachine := &ByoMachine{
+		ObjectMeta: metav1.ObjectMeta{Name: "byomachine1", Namespace: testNamespace},
+	}
 
 	testCases := []struct {
-		name      string
-		userName  string
-		hostName  string // ByoHost.Name; defaults to "host1" when empty
-		wantAllow bool
-		wantMsg   string
+		name       string
+		machineRef *corev1.ObjectReference
+		getErr     error
+		wantAllow  bool
+		wantMsg    string
 	}{
 		{
-			name:      "byoh-system manager service account bypasses the ownership check",
-			userName:  byohSystemManagerServiceAccount,
-			wantAllow: true,
+			name:       "no MachineRef assigned",
+			machineRef: nil,
+			getErr:     nil,
+			wantAllow:  true,
+			wantMsg:    "",
 		},
 		{
-			name:      "kaapi manager service account bypasses the ownership check",
-			userName:  kaapiManagerServiceAccount,
-			wantAllow: true,
-		},
-		{
-			name:      "email-like username bypasses the ownership check",
-			userName:  "user@example.com",
-			wantAllow: true,
-		},
-		{
-			name:      "username with fewer than 2 segments is rejected before the ownership check runs",
-			userName:  unauthorizedUser,
+			name: "MachineRef assigned to an existing ByoMachine",
+			machineRef: &corev1.ObjectReference{
+				Kind:       "ByoMachine",
+				Namespace:  testNamespace,
+				Name:       byoMachine.Name,
+				APIVersion: testAPIVersion,
+			},
+			getErr:    nil,
 			wantAllow: false,
-			wantMsg:   "unauthorized-user is not a valid agent username",
+			wantMsg:   "cannot delete ByoHost when MachineRef is assigned",
 		},
 		{
-			name:      "username with no host segment skips the ownership check",
-			userName:  "byoh:host",
+			// A dangling MachineRef must not pin the ByoHost forever, so a NotFound
+			// on the referenced ByoMachine is a deliberate allow.
+			name: "MachineRef assigned to a ByoMachine that does not exist",
+			machineRef: &corev1.ObjectReference{
+				Kind:       "ByoMachine",
+				Namespace:  testNamespace,
+				Name:       "missing-byomachine",
+				APIVersion: testAPIVersion,
+			},
+			getErr:    nil,
 			wantAllow: true,
+			wantMsg:   "",
 		},
 		{
-			name:      "agent encoding a different host is denied",
-			userName:  byohHostTwoUser,
-			wantAllow: true, // FIXME: This test should fail when we fix the check.
-			wantMsg:   "byoh:host:host2 cannot create/update resource host1",
-		},
-		{
-			name:      "agent encoding the target host is allowed",
-			userName:  byohHostOneUser,
-			wantAllow: true,
-		},
-		{
-			name:      "ownership check matches by substring containment, not exact equality",
-			userName:  byohHostOneUser,
-			hostName:  "host12",
-			wantAllow: true,
+			// Any Get failure other than NotFound is treated as "the ByoMachine may
+			// still exist", so the delete is denied rather than allowed on an unknown
+			// state.
+			name: "MachineRef lookup fails with an error other than NotFound",
+			machineRef: &corev1.ObjectReference{
+				Kind:       "ByoMachine",
+				Namespace:  testNamespace,
+				Name:       byoMachine.Name,
+				APIVersion: testAPIVersion,
+			},
+			getErr:    errors.New("apiserver unreachable"),
+			wantAllow: false,
+			wantMsg:   "apiserver unreachable",
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			hostName := tc.hostName
-			if hostName == "" {
-				hostName = defaultHostName
-			}
+			v := newFakeByoHostValidator(t, tc.getErr, byoMachine)
+
 			byoHost := &ByoHost{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       testByoHostKind,
+					APIVersion: testAPIVersion,
+				},
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      hostName,
-					Namespace: DefaultNamespace,
+					Name:      defaultHostName,
+					Namespace: testNamespace,
+				},
+				Status: ByoHostStatus{
+					MachineRef: tc.machineRef,
 				},
 			}
 			byoHostRaw, err := json.Marshal(byoHost)
 			require.NoError(t, err)
 
-			req := &admission.Request{
+			req := admission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
-					UserInfo: v1.UserInfo{Username: tc.userName},
+					Operation: admissionv1.Delete,
+					UserInfo:  v1.UserInfo{Username: "random-user"},
+					OldObject: runtime.RawExtension{
+						Raw:    byoHostRaw,
+						Object: byoHost,
+					},
+				},
+			}
+
+			resp := v.Handle(t.Context(), req)
+
+			assert.Equal(t, tc.wantAllow, resp.Allowed)
+			assert.Equal(t, tc.wantMsg, resp.Result.Message)
+		})
+	}
+}
+
+func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
+	testCases := []struct {
+		name      string
+		operation admissionv1.Operation
+		userName  string
+		hostName  string
+		wantAllow bool
+		wantMsg   string
+	}{
+		{
+			name:      "create allowed from a valid agent username",
+			operation: admissionv1.Create,
+			userName:  byohHostOneUser,
+			hostName:  defaultHostName,
+			wantAllow: true,
+			wantMsg:   "",
+		},
+		{
+			name:      "update allowed from a valid agent username",
+			operation: admissionv1.Update,
+			userName:  byohHostOneUser,
+			hostName:  defaultHostName,
+			wantAllow: true,
+			wantMsg:   "",
+		},
+		{
+			name:      "create denied from a username with fewer than 2 segments",
+			operation: admissionv1.Create,
+			userName:  unauthorizedUser,
+			hostName:  defaultHostName,
+			wantAllow: false,
+			wantMsg:   unauthorizedUser + " is not a valid agent username",
+		},
+		{
+			name:      "update denied from a username with fewer than 2 segments",
+			operation: admissionv1.Update,
+			userName:  unauthorizedUser,
+			hostName:  defaultHostName,
+			wantAllow: false,
+			wantMsg:   unauthorizedUser + " is not a valid agent username",
+		},
+		// BEGIN NOTE: The ideal behavior we're testing here is that manager
+		// service accounts are in the allowlist. But today this test will
+		// still pass even if they're not in the allowlist because we don't
+		// actually check for the number of colon separated segments.
+		{
+
+			name:      "byoh-system manager service account is allowed",
+			operation: admissionv1.Update,
+			userName:  byohSystemManagerServiceAccount,
+			hostName:  defaultHostName,
+			wantAllow: true,
+			wantMsg:   "",
+		},
+		{
+			name:      "kaapi manager service account is allowed",
+			operation: admissionv1.Update,
+			userName:  kaapiManagerServiceAccount,
+			hostName:  defaultHostName,
+			wantAllow: true,
+			wantMsg:   "",
+		},
+		// END NOTE
+		{
+			name:      "email-like username is allowed",
+			operation: admissionv1.Update,
+			userName:  "user@example.com",
+			hostName:  defaultHostName,
+			wantAllow: true,
+			wantMsg:   "",
+		},
+		{
+			name:      "email-like username without a TLD is denied",
+			operation: admissionv1.Update,
+			userName:  "user@localhost",
+			hostName:  defaultHostName,
+			wantAllow: false,
+			wantMsg:   "user@localhost is not a valid agent username",
+		},
+		{
+			name:      "username with no host segment is allowed",
+			operation: admissionv1.Create,
+			userName:  "byoh:host",
+			hostName:  defaultHostName,
+			wantAllow: true,
+			wantMsg:   "",
+		},
+		{
+			// NOTE: The host-ownership check is commented out in the webhook
+			// while only token-based kubeconfigs are supported, so an agent
+			// encoding a different host is still allowed through. This test
+			// will fail once the check is enabled.
+			name:      "agent encoding a different host is allowed",
+			operation: admissionv1.Create,
+			userName:  byohHostTwoUser,
+			hostName:  defaultHostName,
+			wantAllow: true,
+			wantMsg:   "",
+		},
+		{
+			// NOTE: Similar to above, but tests that a partial match of a
+			// hostname is allowed ("host12" contains "host1"). The test will
+			// also fail once the check is enabled.
+			name:      "host name containing the encoded host is allowed",
+			operation: admissionv1.Create,
+			userName:  byohHostOneUser,
+			hostName:  "host12",
+			wantAllow: true,
+			wantMsg:   "",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NotEmpty(t, tc.operation, "operation must be set, otherwise Handle falls through to its default allow branch")
+
+			v := newFakeByoHostValidator(t, nil)
+
+			byoHost := &ByoHost{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       testByoHostKind,
+					APIVersion: testAPIVersion,
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      tc.hostName,
+					Namespace: testNamespace,
+				},
+			}
+			byoHostRaw, err := json.Marshal(byoHost)
+			require.NoError(t, err)
+
+			req := admission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Operation: tc.operation,
+					UserInfo:  v1.UserInfo{Username: tc.userName},
 					Object: runtime.RawExtension{
 						Raw:    byoHostRaw,
 						Object: byoHost,
@@ -344,12 +306,10 @@ func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 				},
 			}
 
-			resp := v.handleCreateUpdate(req)
+			resp := v.Handle(t.Context(), req)
 
-			require.Equal(t, tc.wantAllow, resp.Allowed)
-			if !tc.wantAllow {
-				require.Equal(t, tc.wantMsg, resp.Result.Message)
-			}
+			assert.Equal(t, tc.wantAllow, resp.Allowed)
+			assert.Equal(t, tc.wantMsg, resp.Result.Message)
 		})
 	}
 }

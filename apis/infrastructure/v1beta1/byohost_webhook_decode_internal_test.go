@@ -67,7 +67,7 @@ func TestHandleCreateUpdate_DecodesFromRawOnly(t *testing.T) {
 
 	byoHost := &ByoHost{
 		TypeMeta:   metav1.TypeMeta{Kind: testByoHostKind, APIVersion: testAPIVersion},
-		ObjectMeta: metav1.ObjectMeta{Name: defaultHostName, Namespace: DefaultNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: defaultHostName, Namespace: testNamespace},
 	}
 	raw, err := json.Marshal(byoHost)
 	require.NoError(t, err)
