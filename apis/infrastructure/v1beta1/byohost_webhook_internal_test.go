@@ -218,7 +218,11 @@ func TestByoHostValidator_Handle_CreateUpdate(t *testing.T) {
 			wantMsg:   unauthorizedUser + " is not a valid agent username",
 		},
 		{
-			name:      "byoh-system manager service account bypasses the ownership check",
+			// The manager allowlist short-circuits to allow, but so does every other
+			// username with at least two colon-separated segments while the ownership
+			// check below it stays disabled. These two rows do not pin allowlist
+			// membership yet. They will once the check is restored.
+			name:      "byoh-system manager service account is allowed",
 			operation: admissionv1.Update,
 			userName:  byohSystemManagerServiceAccount,
 			hostName:  defaultHostName,
@@ -226,7 +230,7 @@ func TestByoHostValidator_Handle_CreateUpdate(t *testing.T) {
 			wantMsg:   "",
 		},
 		{
-			name:      "kaapi manager service account bypasses the ownership check",
+			name:      "kaapi manager service account is allowed",
 			operation: admissionv1.Update,
 			userName:  kaapiManagerServiceAccount,
 			hostName:  defaultHostName,
@@ -234,7 +238,9 @@ func TestByoHostValidator_Handle_CreateUpdate(t *testing.T) {
 			wantMsg:   "",
 		},
 		{
-			name:      "email-like username bypasses the ownership check",
+			// "user@example.com" splits into a single colon segment, so without the
+			// email-like regex it would be denied on the segment count.
+			name:      "email-like username bypasses the segment-count denial",
 			operation: admissionv1.Update,
 			userName:  "user@example.com",
 			hostName:  defaultHostName,
@@ -261,7 +267,11 @@ func TestByoHostValidator_Handle_CreateUpdate(t *testing.T) {
 			wantMsg:   "",
 		},
 		{
-			name:      "agent encoding a different host is denied",
+			// The host-ownership check is commented out in the webhook while only
+			// token-based kubeconfigs are supported, so an agent encoding a
+			// different host is still allowed through. This row pins that
+			// behavior and will flip to denied when the check is restored.
+			name:      "agent encoding a different host is still allowed",
 			operation: admissionv1.Create,
 			userName:  byohHostTwoUser,
 			hostName:  defaultHostName,
@@ -269,7 +279,11 @@ func TestByoHostValidator_Handle_CreateUpdate(t *testing.T) {
 			wantMsg:   "",
 		},
 		{
-			name:      "ownership check matches by substring containment, not exact equality",
+			// No ownership check runs today, so a host name that merely contains the
+			// encoded host is allowed like any other. This becomes a real containment
+			// check once the commented-out ownership check is restored, where
+			// "host12" still matches "host1" because the check uses strings.Contains.
+			name:      "host name containing the encoded host is allowed",
 			operation: admissionv1.Create,
 			userName:  byohHostOneUser,
 			hostName:  "host12",
