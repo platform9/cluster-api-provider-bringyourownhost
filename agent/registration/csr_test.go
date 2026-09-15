@@ -5,6 +5,7 @@
 package registration_test
 
 import (
+	"context"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
@@ -24,6 +25,68 @@ import (
 )
 
 const csrApprovedMsg = "approved"
+
+// simulateByoAdmissionController approves the host's CSR and issues a certificate
+// for it, the way the ByoAdmission controller would. It sends exactly one value on
+// the returned channel before it exits: nil once the certificate is issued, or the
+// reason it gave up, so a spec can both wait for it and see what went wrong. A
+// canceled context is one of those reasons, since it means the certificate was
+// never issued.
+func simulateByoAdmissionController(ctx context.Context, hostName, cert string) <-chan error {
+	done := make(chan error, 1)
+
+	go func() {
+		defer GinkgoRecover()
+
+		csrClient := k8sClientSet.CertificatesV1().CertificateSigningRequests()
+		csrName := fmt.Sprintf(registration.ByohCSRNameFormat, hostName)
+
+		ticker := time.NewTicker(time.Millisecond * 100)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				done <- fmt.Errorf("gave up approving the CSR for %q: %w", hostName, ctx.Err())
+				return
+			case <-ticker.C:
+			}
+
+			// A failed Get means the host has not created its CSR yet, so keep polling.
+			byohCSR, err := csrClient.Get(ctx, csrName, metav1.GetOptions{})
+			if err != nil {
+				continue
+			}
+			byohCSR.Status.Conditions = append(byohCSR.Status.Conditions, certv1.CertificateSigningRequestCondition{
+				Type:    certv1.CertificateApproved,
+				Reason:  csrApprovedMsg,
+				Message: csrApprovedMsg,
+				Status:  corev1.ConditionTrue,
+			})
+			_, err = csrClient.UpdateApproval(ctx, csrName, byohCSR, metav1.UpdateOptions{})
+			if err != nil {
+				done <- fmt.Errorf("approve the CSR for %q: %w", hostName, err)
+				return
+			}
+
+			byohCSR, err = csrClient.Get(ctx, csrName, metav1.GetOptions{})
+			if err != nil {
+				done <- fmt.Errorf("re-read the approved CSR for %q: %w", hostName, err)
+				return
+			}
+			byohCSR.Status.Certificate = []byte(cert)
+			_, err = csrClient.UpdateStatus(ctx, byohCSR, metav1.UpdateOptions{})
+			if err != nil {
+				done <- fmt.Errorf("issue the certificate for %q: %w", hostName, err)
+				return
+			}
+			done <- nil
+			return
+		}
+	}()
+
+	return done
+}
 
 var _ = Describe("CSR Registration", func() {
 	var (
@@ -176,29 +239,11 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 			Expect(os.Remove(registration.TmpPrivateKey)).ShouldNot(HaveOccurred())
 		})
 		It("should return error if not able to write kubeconfig", func(ctx SpecContext) {
-			// Simulate ByoAdmission Controller
-			go func() {
-				for {
-					time.Sleep(time.Millisecond * 100)
-					byohCSR, err := k8sClientSet.CertificatesV1().CertificateSigningRequests().Get(ctx, fmt.Sprintf(registration.ByohCSRNameFormat, hostName), metav1.GetOptions{})
-					if err != nil {
-						continue
-					}
-					byohCSR.Status.Conditions = append(byohCSR.Status.Conditions, certv1.CertificateSigningRequestCondition{
-						Type:    certv1.CertificateApproved,
-						Reason:  csrApprovedMsg,
-						Message: csrApprovedMsg,
-						Status:  corev1.ConditionTrue,
-					})
-					_, err = k8sClientSet.CertificatesV1().CertificateSigningRequests().UpdateApproval(ctx, fmt.Sprintf(registration.ByohCSRNameFormat, hostName), byohCSR, metav1.UpdateOptions{})
-					Expect(err).ShouldNot(HaveOccurred())
-					byohCSR, err = k8sClientSet.CertificatesV1().CertificateSigningRequests().Get(ctx, fmt.Sprintf(registration.ByohCSRNameFormat, hostName), metav1.GetOptions{})
-					Expect(err).ShouldNot(HaveOccurred())
-					byohCSR.Status.Certificate = []byte(testCert)
-					_, err = k8sClientSet.CertificatesV1().CertificateSigningRequests().UpdateStatus(ctx, byohCSR, metav1.UpdateOptions{})
-					Expect(err).ShouldNot(HaveOccurred())
-					return
-				}
+			admissionDone := simulateByoAdmissionController(ctx, hostName, testCert)
+			defer func() {
+				var admissionErr error
+				Eventually(admissionDone, time.Second*5).Should(Receive(&admissionErr))
+				Expect(admissionErr).ShouldNot(HaveOccurred())
 			}()
 			// A regular file can't be descended into as a directory component, so this
 			// deterministically fails writing the kubeconfig regardless of whether the
@@ -223,29 +268,11 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 			Expect(os.Remove(registration.TmpPrivateKey)).ShouldNot(HaveOccurred())
 		})
 		It("should create kubeconfig if csr is approved", func(ctx SpecContext) {
-			// Simulate ByoAdmission Controller
-			go func() {
-				for {
-					time.Sleep(time.Millisecond * 100)
-					byohCSR, err := k8sClientSet.CertificatesV1().CertificateSigningRequests().Get(ctx, fmt.Sprintf(registration.ByohCSRNameFormat, hostName), metav1.GetOptions{})
-					if err != nil {
-						continue
-					}
-					byohCSR.Status.Conditions = append(byohCSR.Status.Conditions, certv1.CertificateSigningRequestCondition{
-						Type:    certv1.CertificateApproved,
-						Reason:  csrApprovedMsg,
-						Message: csrApprovedMsg,
-						Status:  corev1.ConditionTrue,
-					})
-					_, err = k8sClientSet.CertificatesV1().CertificateSigningRequests().UpdateApproval(ctx, fmt.Sprintf(registration.ByohCSRNameFormat, hostName), byohCSR, metav1.UpdateOptions{})
-					Expect(err).ShouldNot(HaveOccurred())
-					byohCSR, err = k8sClientSet.CertificatesV1().CertificateSigningRequests().Get(ctx, fmt.Sprintf(registration.ByohCSRNameFormat, hostName), metav1.GetOptions{})
-					Expect(err).ShouldNot(HaveOccurred())
-					byohCSR.Status.Certificate = []byte(testCert)
-					_, err = k8sClientSet.CertificatesV1().CertificateSigningRequests().UpdateStatus(ctx, byohCSR, metav1.UpdateOptions{})
-					Expect(err).ShouldNot(HaveOccurred())
-					return
-				}
+			admissionDone := simulateByoAdmissionController(ctx, hostName, testCert)
+			defer func() {
+				var admissionErr error
+				Eventually(admissionDone, time.Second*5).Should(Receive(&admissionErr))
+				Expect(admissionErr).ShouldNot(HaveOccurred())
 			}()
 			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
