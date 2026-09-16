@@ -123,7 +123,12 @@ jobs:
     - name: Run e2e tests
       env:
         SKIP_BUILD: ${{ github.event_name != 'workflow_dispatch' && '1' || '' }}
-      run: yes | GINKGO_NODES=5 make test-e2e
+      # test-e2e's own cluster-templates-e2e prerequisite builds bin/kustomize
+      # before ginkgo runs, but the cluster-api test framework looks for
+      # "kustomize" on $PATH. Add ./bin to PATH.
+      run: |
+        export PATH="$PWD/bin:$PATH"
+        yes | GINKGO_NODES=5 make test-e2e
 
     - name: Upload e2e artifacts
       if: failure()
