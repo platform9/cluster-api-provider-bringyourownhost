@@ -128,7 +128,7 @@ jobs:
       # "kustomize" on $PATH. Add ./bin to PATH.
       run: |
         export PATH="$PWD/bin:$PATH"
-        yes | GINKGO_NODES=5 make test-e2e
+        yes | GINKGO_NODES=3 make test-e2e
 
     - name: Upload e2e artifacts
       if: failure()
