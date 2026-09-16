@@ -29,7 +29,7 @@ permissions:
 jobs:
   e2e:
     if: ${{ !github.event.pull_request.draft }}
-    runs-on: ubuntu-22.04
+    runs-on: [self-hosted, e2e]
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
