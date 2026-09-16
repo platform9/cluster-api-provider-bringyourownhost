@@ -38,6 +38,9 @@ jobs:
       with:
         fetch-depth: 0
 
+    - name: Ensure self-hosted runner prerequisites are installed
+      run: bash .ci/ensure-e2e-runner-prereqs.sh
+
     - name: Wait for controller manager image build
       if: ${{ github.event_name != 'workflow_dispatch' }}
       id: wait
