@@ -29,7 +29,7 @@ permissions:
 jobs:
   e2e:
     if: ${{ !github.event.pull_request.draft }}
-    runs-on: ubuntu-22.04
+    runs-on: [self-hosted, e2e]
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -37,6 +37,9 @@ jobs:
       uses: actions/checkout@v3
       with:
         fetch-depth: 0
+
+    - name: Ensure self-hosted runner prerequisites are installed
+      run: bash .ci/ensure-e2e-runner-prereqs.sh
 
     - name: Wait for controller manager image build
       if: ${{ github.event_name != 'workflow_dispatch' }}
@@ -94,11 +97,13 @@ jobs:
         go-version-file: go.mod
         cache: true
 
-    - name: turn off swap
+    - name: Turn off swap
       run: sudo swapoff -a
 
     - name: Set netfilter conntrack max
-      run: sudo sysctl -w net.netfilter.nf_conntrack_max=131072
+      run: |
+        sudo modprobe nf_conntrack
+        sudo sysctl -w net.netfilter.nf_conntrack_max=131072
 
     # The byohctl e2e spec serves this branch's own agent bundle from build/pf9-byohost/debsrc/,
     # normally the artifact downloaded above. build-agent-bundle.yml has no workflow_dispatch
@@ -118,7 +123,12 @@ jobs:
     - name: Run e2e tests
       env:
         SKIP_BUILD: ${{ github.event_name != 'workflow_dispatch' && '1' || '' }}
-      run: yes | GINKGO_NODES=3 make test-e2e
+      # test-e2e's own cluster-templates-e2e prerequisite builds bin/kustomize
+      # before ginkgo runs, but the cluster-api test framework looks for
+      # "kustomize" on $PATH. Add ./bin to PATH.
+      run: |
+        export PATH="$PWD/bin:$PATH"
+        yes | GINKGO_NODES=3 make test-e2e
 
     - name: Upload e2e artifacts
       if: failure()
