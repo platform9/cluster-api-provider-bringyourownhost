@@ -94,11 +94,13 @@ jobs:
         go-version-file: go.mod
         cache: true
 
-    - name: turn off swap
+    - name: Turn off swap
       run: sudo swapoff -a
 
     - name: Set netfilter conntrack max
-      run: sudo sysctl -w net.netfilter.nf_conntrack_max=131072
+      run: |
+        sudo modprobe nf_conntrack
+        sudo sysctl -w net.netfilter.nf_conntrack_max=131072
 
     # The byohctl e2e spec serves this branch's own agent bundle from build/pf9-byohost/debsrc/,
     # normally the artifact downloaded above. build-agent-bundle.yml has no workflow_dispatch
