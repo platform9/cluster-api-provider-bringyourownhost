@@ -1,0 +1,169 @@
+# Copyright 2026 Platform9, Inc. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Dynamic, PICT-driven e2e matrix. Deliberately workflow_dispatch-only for
+# now, not a default PR/push gate -- this exists to measure real job count
+# and wall-clock against test/e2e/pict/generated-matrix.tsv's 10 cases
+# before deciding whether/how it replaces the single-case e2e/packaging
+# jobs in e2e.yml.
+
+name: e2e-matrix
+
+on:
+  # TEMPORARY, for this PR's own review only: workflow_dispatch can't
+  # dispatch a workflow that doesn't exist on the default branch yet, so
+  # there's no way to get a real execution of a brand-new workflow_dispatch
+  # workflow before it merges except by triggering it some other way once.
+  # Remove this pull_request trigger again before merging -- see the plan
+  # this PR is part of for why workflow_dispatch-only is the intended,
+  # permanent state.
+  pull_request: {}
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  generate-matrix:
+    runs-on: ubuntu-22.04
+    outputs:
+      matrix: ${{ steps.generate.outputs.matrix }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Generate matrix from PICT output
+        id: generate
+        run: bash .ci/generate-e2e-matrix.sh test/e2e/pict/generated-matrix.tsv
+
+  # Builds the controller manager image and the agent .deb bundle once,
+  # shared by every matrix case below via artifacts -- the same pattern
+  # e2e.yml already uses across build-controller-manager.yml/
+  # build-agent-bundle.yml, just within this one workflow since those two
+  # don't trigger on workflow_dispatch.
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build controller manager image
+        run: bash .ci/build-controller-manager.sh
+
+      - name: Save controller manager image artifact
+        run: |
+          TAG=$(make tag)
+          docker save "quay.io/platform9/cluster-api-provider-bringyourownhost/controller-manager:${TAG}" -o controller-manager-image.tar
+
+      - name: Upload controller manager image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: controller-manager-image
+          path: controller-manager-image.tar
+          retention-days: 1
+
+      - name: Install fpm build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ruby ruby-dev rubygems build-essential
+          sudo gem install --no-document fpm
+
+      - name: Build agent .deb bundle
+        run: make build-host-agent-deb
+
+      - name: Upload agent bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-bundle-deb
+          path: build/pf9-byohost/debsrc/
+          retention-days: 1
+
+  test:
+    name: test (${{ matrix.label }})
+    needs: [ generate-matrix, build ]
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.generate-matrix.outputs.matrix) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download controller manager image artifact
+        if: ${{ matrix.suite == 'e2e' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: controller-manager-image
+          path: .
+
+      - name: Load controller manager image
+        if: ${{ matrix.suite == 'e2e' }}
+        run: |
+          docker load -i controller-manager-image.tar
+          TAG=$(make tag)
+          IMAGE=quay.io/platform9/cluster-api-provider-bringyourownhost/controller-manager
+          docker tag "${IMAGE}:${TAG}" "${IMAGE}:dev"
+
+      - name: Download agent bundle artifact
+        if: ${{ matrix.suite == 'e2e' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: agent-bundle-deb
+          path: build/pf9-byohost/debsrc
+
+      - name: turn off swap
+        run: sudo swapoff -a
+
+      - name: Set netfilter conntrack max
+        run: sudo sysctl -w net.netfilter.nf_conntrack_max=131072
+
+      - name: Install rpmbuild
+        if: ${{ matrix.suite == 'packaging' }}
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
+      - name: Install fpm build dependencies
+        if: ${{ matrix.suite == 'packaging' }}
+        run: |
+          sudo apt-get install -y --no-install-recommends ruby ruby-dev rubygems build-essential
+          sudo gem install --no-document fpm
+
+      - name: Run e2e scenario
+        if: ${{ matrix.suite == 'e2e' }}
+        env:
+          SKIP_BUILD: "1"
+          GINKGO_FOCUS: ${{ matrix.ginkgo_focus }}
+          KUBERNETES_VERSION: ${{ matrix.kubernetes_version }}
+          E2E_K8S_VERSION_FROM: ${{ matrix.e2e_k8s_version_from }}
+          E2E_K8S_VERSION_TO: ${{ matrix.e2e_k8s_version_to }}
+        run: yes | GINKGO_NODES=1 make test-e2e
+
+      - name: Run packaging scenario
+        if: ${{ matrix.suite == 'packaging' }}
+        env:
+          PACKAGING_GINKGO_FOCUS: ${{ matrix.ginkgo_focus }}
+        run: make test-packaging
+
+      - name: Upload e2e artifacts
+        if: ${{ failure() && matrix.suite == 'e2e' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts-${{ matrix.scenario }}
+          path: _artifacts/
+          retention-days: 5
