@@ -6,7 +6,7 @@ replace github.com/insomniacslk/dhcp => github.com/harvester/dhcp v0.0.0-2022042
 
 require (
 	github.com/docker/docker v28.0.2+incompatible
-	github.com/docker/go-connections v0.5.0
+	github.com/docker/go-connections v0.8.1
 	github.com/docker/go-units v0.5.0
 	github.com/go-logr/logr v1.4.4
 	github.com/jackpal/gateway v1.2.0
