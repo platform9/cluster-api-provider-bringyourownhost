@@ -22,7 +22,7 @@ func teardownByoHosts(ctx context.Context, dockerClient *client.Client, hosts []
 			err := dockerClient.ContainerStop(ctx, host.ContainerID, container.StopOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
-			err = dockerClient.ContainerRemove(ctx, host.ContainerID, container.RemoveOptions{})
+			err = dockerClient.ContainerRemove(ctx, host.ContainerID, container.RemoveOptions{RemoveVolumes: true})
 			Expect(err).NotTo(HaveOccurred())
 		}
 

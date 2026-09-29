@@ -130,7 +130,7 @@ var _ = Describe("When a host onboards via byohctl using a bootstrap kubeconfig,
 			if err := dockerClient.ContainerStop(ctx, byohostContainer.ID, container.StopOptions{}); err != nil {
 				Showf("error stopping container %s: %v", byohostContainer.ID, err)
 			}
-			if err := dockerClient.ContainerRemove(ctx, byohostContainer.ID, container.RemoveOptions{}); err != nil {
+			if err := dockerClient.ContainerRemove(ctx, byohostContainer.ID, container.RemoveOptions{RemoveVolumes: true}); err != nil {
 				Showf("error removing container %s: %v", byohostContainer.ID, err)
 			}
 		}
