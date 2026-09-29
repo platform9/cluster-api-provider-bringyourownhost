@@ -27,6 +27,18 @@ permissions:
   actions: read
 
 jobs:
+  probe-runners:
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: read
+    steps:
+    - name: List self-hosted runners with GITHUB_TOKEN
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh api "repos/${{ github.repository }}/actions/runners" \
+          --jq '.runners[] | {name, status, busy, labels: [.labels[].name]}'
+
   e2e:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: [self-hosted, e2e]
