@@ -116,7 +116,7 @@ func (v *ByoHostValidator) handleDelete(ctx context.Context, req *admission.Requ
 			if apierrors.IsNotFound(err) {
 				return admission.Allowed("")
 			}
-			return admission.Denied("cannot delete ByoHost when byomachine exists")
+			return admission.Errored(http.StatusInternalServerError, err)
 		}
 
 		return admission.Denied("cannot delete ByoHost when MachineRef is assigned")
