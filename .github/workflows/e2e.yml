@@ -41,6 +41,9 @@ jobs:
     - name: Ensure self-hosted runner prerequisites are installed
       run: bash .ci/ensure-e2e-runner-prereqs.sh
 
+    - name: Clean runner docker state
+      run: bash .ci/clean-e2e-runner-docker.sh
+
     - name: Wait for controller manager image build
       if: ${{ github.event_name != 'workflow_dispatch' }}
       id: wait
@@ -137,6 +140,10 @@ jobs:
         name: e2e-artifacts
         path: _artifacts/
         retention-days: 5
+
+    - name: Clean runner docker state (post)
+      if: always()
+      run: bash .ci/clean-e2e-runner-docker.sh
 
   packaging:
     if: ${{ !github.event.pull_request.draft }}
