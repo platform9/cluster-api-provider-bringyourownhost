@@ -155,6 +155,15 @@ spec:
                   required:
                     - version
                   type: object
+                identity:
+                  description: |-
+                    Identity is the certificate identity currently valid for this host, in
+                    the form byoh:host:<hostName>:<suffix>. The admission webhook sets it
+                    from the authenticated requester when the host is created, never from
+                    the request body, and rejects any later change. Renewal is authorized
+                    against it, so a certificate whose identity no longer matches cannot
+                    renew even while it is still cryptographically valid.
+                  type: string
                 installationSecret:
                   description: |-
                     InstallationSecret is an optional reference to InstallationSecret
@@ -1528,13 +1537,36 @@ spec:
                 certificate-authority-data:
                   description: CertificateAuthorityData contains PEM-encoded certificate authority certificates.
                   type: string
+                createdBy:
+                  description: |-
+                    CreatedBy is the authenticated identity that created this object. The
+                    mutating webhook overwrites whatever the request body carried, so a
+                    caller cannot claim to be someone else. The grant that scopes the
+                    credential Secret's read binds to it.
+                  type: string
+                hostName:
+                  description: |-
+                    HostName is the host this object onboards. The CSR approver compares it
+                    against the name a certificate request asks for, so one object can only
+                    ever produce a certificate for this host.
+                  type: string
                 insecure-skip-tls-verify:
                   default: false
                   description: InsecureSkipTLSVerify skips the validity check for the server's certificate. This will make your HTTPS connections insecure.
                   type: boolean
+                tokenExpiresAt:
+                  description: |-
+                    TokenExpiresAt is when the bootstrap token this object issues stops
+                    working. The mutating webhook overwrites whatever the request body
+                    carried, so a caller cannot choose it, and the validating webhook
+                    rejects any later change, so a token's life cannot be extended by
+                    editing the object.
+                  format: date-time
+                  type: string
               required:
                 - apiserver
                 - certificate-authority-data
+                - hostName
               type: object
             status:
               description: BootstrapKubeconfigStatus defines the observed state of BootstrapKubeconfig
@@ -1543,6 +1575,23 @@ spec:
                   description: |-
                     BootstrapKubeconfigData is an optional reference to a bootstrap kubeconfig info
                     for starting the host registration process
+
+                    Deprecated: the credential now lives in the Secret named by
+                    CredentialSecretRef. This field is no longer populated and will be
+                    removed once nothing reads it.
+                  type: string
+                credentialSecretRef:
+                  description: |-
+                    CredentialSecretRef names the Secret holding this object's credential,
+                    in this object's namespace. byohctl reads it to find the credential and
+                    the RBAC controller reads it to know which Secret its grant should name.
+                  type: string
+                tokenID:
+                  description: |-
+                    TokenID is the public half of the issued bootstrap token. A certificate
+                    request authenticates as system:bootstrap:<TokenID>, which is how the
+                    approver finds the object that issued the token it is being asked to
+                    trust.
                   type: string
               type: object
           type: object
@@ -1839,6 +1888,54 @@ webhooks:
           - CREATE
           - UPDATE
           - DELETE
+        resources:
+          - byohosts
+    sideEffects: None
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  annotations:
+    cert-manager.io/inject-ca-from: '{{ .Release.Namespace }}/byoh-serving-cert'
+  labels:
+    cluster.x-k8s.io/provider: infrastructure-byoh
+  name: byoh-mutating-webhook-configuration
+webhooks:
+  - admissionReviewVersions:
+      - v1
+    clientConfig:
+      service:
+        name: byoh-webhook-service
+        namespace: '{{ .Release.Namespace }}'
+        path: /mutate-infrastructure-cluster-x-k8s-io-v1beta1-bootstrapkubeconfig
+    failurePolicy: Fail
+    name: mbootstrapkubeconfig.kb.io
+    rules:
+      - apiGroups:
+          - infrastructure.cluster.x-k8s.io
+        apiVersions:
+          - v1beta1
+        operations:
+          - CREATE
+        resources:
+          - bootstrapkubeconfigs
+    sideEffects: None
+  - admissionReviewVersions:
+      - v1
+    clientConfig:
+      service:
+        name: byoh-webhook-service
+        namespace: '{{ .Release.Namespace }}'
+        path: /mutate-infrastructure-cluster-x-k8s-io-v1beta1-byohost
+    failurePolicy: Fail
+    name: mbyohost.kb.io
+    rules:
+      - apiGroups:
+          - infrastructure.cluster.x-k8s.io
+        apiVersions:
+          - v1beta1
+        operations:
+          - CREATE
         resources:
           - byohosts
     sideEffects: None
