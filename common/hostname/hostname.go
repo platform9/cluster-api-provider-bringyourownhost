@@ -12,17 +12,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
-// FIXME CLAUDE: Placeholder for future refactor. Maybe hostname.Name is the
-// type that everyone uses. And calls hostname.New("string") -> hostname.Name.
-// So Normalize is a side effect instead.
-type Name struct {
-	val string
-}
-
-func (n *Name) String() string {
-	return n.val
-}
-
 // Normalize turns a machine's host name into the object name used for that
 // host:
 // - lowercase
