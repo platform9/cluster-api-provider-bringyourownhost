@@ -1,4 +1,5 @@
 // Copyright 2022 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package controllers
@@ -53,7 +54,7 @@ func (r *BootstrapKubeconfigReconciler) Reconcile(ctx context.Context, req ctrl.
 
 	// There already is bootstrap-kubeconfig data associated with this object
 	// Do not create secrets again
-	if bootstrapKubeconfig.Status.BootstrapKubeconfigData != nil {
+	if bootstrapKubeconfig.Status.BootstrapKubeconfigData != nil { //nolint: staticcheck // SA1019: deprecated field, readers go away with the controller changes
 		return ctrl.Result{}, nil
 	}
 
@@ -96,7 +97,7 @@ func (r *BootstrapKubeconfigReconciler) Reconcile(ctx context.Context, req ctrl.
 	}
 
 	bootstrapKubeconfigDataStr := string(runtimeEncodedBootstrapKubeConfig)
-	bootstrapKubeconfig.Status.BootstrapKubeconfigData = &bootstrapKubeconfigDataStr
+	bootstrapKubeconfig.Status.BootstrapKubeconfigData = &bootstrapKubeconfigDataStr //nolint: staticcheck // SA1019: deprecated field, readers go away with the controller changes
 
 	return ctrl.Result{}, helper.Patch(ctx, bootstrapKubeconfig)
 }

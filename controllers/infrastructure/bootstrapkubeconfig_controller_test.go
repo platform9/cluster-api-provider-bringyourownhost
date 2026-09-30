@@ -65,7 +65,7 @@ var _ = Describe("Controllers/BoottrapKubeconfigController", func() {
 		It("should return empty result if BootstrapKubeconfigData is already present", func() {
 			helper, err := patch.NewHelper(bootstrapKubeConfig, k8sClientUncached)
 			Expect(err).NotTo(HaveOccurred())
-			bootstrapKubeConfig.Status.BootstrapKubeconfigData = &existingBootstrapKubeconfigData
+			bootstrapKubeConfig.Status.BootstrapKubeconfigData = &existingBootstrapKubeconfigData //nolint: staticcheck // SA1019: deprecated field, readers go away with the controller changes
 			Expect(helper.Patch(ctx, bootstrapKubeConfig)).NotTo(HaveOccurred())
 
 			res, err := bootstrapKubeconfigReconciler.Reconcile(ctx, reconcile.Request{
@@ -83,7 +83,7 @@ var _ = Describe("Controllers/BoottrapKubeconfigController", func() {
 			err = k8sClientUncached.Get(ctx, bootstrapKubeconfigLookupKey, createdBootstrapKubeconfig)
 			Expect(err).ToNot(HaveOccurred())
 
-			kubeconfigData := createdBootstrapKubeconfig.Status.BootstrapKubeconfigData
+			kubeconfigData := createdBootstrapKubeconfig.Status.BootstrapKubeconfigData //nolint: staticcheck // SA1019: deprecated field, readers go away with the controller changes
 			Expect(kubeconfigData).ShouldNot(BeNil())
 
 			bootstrapKubeconfigFileData, err := clientcmd.Load([]byte(*kubeconfigData))
