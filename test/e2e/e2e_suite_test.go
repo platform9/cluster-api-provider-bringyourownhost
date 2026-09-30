@@ -533,8 +533,8 @@ func generateBootstrapKubeconfig(ctx context.Context, clusterProxy framework.Clu
 		if err != nil {
 			return nil
 		}
-		return createdBootstrapKubeconfig.Status.BootstrapKubeconfigData
+		return createdBootstrapKubeconfig.Status.BootstrapKubeconfigData //nolint: staticcheck // SA1019: deprecated field, readers go away with the controller changes
 	}, e2eConfig.GetIntervals("", "wait-controllers")...).ShouldNot(BeNil())
 
-	return *createdBootstrapKubeconfig.Status.BootstrapKubeconfigData
+	return *createdBootstrapKubeconfig.Status.BootstrapKubeconfigData //nolint: staticcheck // SA1019: deprecated field, readers go away with the controller changes
 }
