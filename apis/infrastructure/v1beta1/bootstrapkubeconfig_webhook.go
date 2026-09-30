@@ -158,7 +158,7 @@ func (r *BootstrapKubeconfig) validateAPIServer() error {
 	if err != nil {
 		return field.Invalid(apiserverField, r.Spec.APIServer, "APIServer URL is not valid")
 	}
-	if !r.isURLValid(parsedURL) {
+	if parsedURL.Host == "" || parsedURL.Scheme != APIServerURLScheme || parsedURL.Port() == "" {
 		return field.Invalid(apiserverField, r.Spec.APIServer, "APIServer is not of the format https://hostname:port")
 	}
 	return nil
@@ -239,12 +239,4 @@ func validateImmutableFields(oldObj, newObj *BootstrapKubeconfig) error {
 	}
 
 	return nil
-}
-
-// FIXME CLAUDE: Remove this function if it is used only once.
-func (r *BootstrapKubeconfig) isURLValid(parsedURL *url.URL) bool {
-	if parsedURL.Host == "" || parsedURL.Scheme != APIServerURLScheme || parsedURL.Port() == "" {
-		return false
-	}
-	return true
 }
