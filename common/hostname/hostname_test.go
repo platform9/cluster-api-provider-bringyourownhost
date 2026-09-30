@@ -110,7 +110,6 @@ func TestNormalize(t *testing.T) {
 			require.Error(t, err)
 			assert.Empty(t, got)
 			assert.Contains(t, err.Error(), tc.input)
-
 		})
 	}
 }

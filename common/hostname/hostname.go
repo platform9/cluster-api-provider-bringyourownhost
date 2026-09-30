@@ -35,11 +35,8 @@ func (n *Name) String() string {
 // CAVEAT: Two separate hostname inputs may resolve to the same normalized
 // output. But ensuring unique hostnames is beyone the scope of this function.
 //
-// FIXME CLAUDE: Verify the validity of the --node-name claim.
-// The normalized name can differ from the name the machine reports for
-// itself. That is safe because kubelet is started with --node-name set to the
-// normalized name, so the node object agrees with the ByoHost object. Nothing
-// compares the machine's own hostname against either.
+// NOTE: Ensure kubeadm's nodeRegistration.name is set to the normalized name,
+// so the Node and the ByoHost agree.
 func Normalize(name string) (string, error) {
 	normalized := strings.ToLower(name)
 	normalized = strings.ReplaceAll(normalized, "_", "-")
