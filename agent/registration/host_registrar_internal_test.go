@@ -6,6 +6,7 @@ package registration
 
 import (
 	"fmt"
+	"net"
 	"os"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -13,6 +14,26 @@ import (
 
 	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 )
+
+func noDefaultRoute() (net.IP, error) {
+	return nil, fmt.Errorf("no default route")
+}
+
+func fixedDefaultRoute(ip string) func() (net.IP, error) {
+	return func() (net.IP, error) { return net.ParseIP(ip), nil }
+}
+
+func fakeInterfaces(ifaces []netInterface, err error) func() ([]netInterface, error) {
+	return func() ([]netInterface, error) { return ifaces, err }
+}
+
+func addrOf(ip string) net.Addr {
+	parsed := net.ParseIP(ip)
+	if parsed.To4() != nil {
+		return &net.IPNet{IP: parsed, Mask: net.CIDRMask(24, 32)}
+	}
+	return &net.IPNet{IP: parsed, Mask: net.CIDRMask(64, 128)}
+}
 
 func getMockFile(targetOs string) ([]byte, error) {
 	out := fmt.Sprintf(`NAME="Ubuntu"
@@ -104,6 +125,70 @@ var _ = Describe("Host Registrar Tests", func() {
 				return nil, os.ErrNotExist
 			})
 			Expect(err.Error()).To(Equal("error opening file : file does not exist"))
+		})
+	})
+
+	Context("When computing network status", func() {
+		It("Should mark the default interface via an IPv4 default route", func() {
+			hr := HostRegistrar{}
+			ifaces := []netInterface{
+				{Name: "eth0", Flags: net.FlagUp, MACAddr: "aa:bb:cc:dd:ee:ff", Addrs: []net.Addr{addrOf("192.168.1.10")}},
+			}
+			status := hr.getNetworkStatus(fixedDefaultRoute("192.168.1.10"), noDefaultRoute, fakeInterfaces(ifaces, nil))
+
+			Expect(status).To(HaveLen(1))
+			Expect(status[0].IsDefault).To(BeTrue())
+			Expect(hr.ByoHostInfo.DefaultNetworkInterfaceName).To(Equal("eth0"))
+		})
+
+		It("Should mark the default interface via an IPv6-only default route", func() {
+			hr := HostRegistrar{}
+			ifaces := []netInterface{
+				{Name: "eth0", Flags: net.FlagUp, MACAddr: "aa:bb:cc:dd:ee:ff", Addrs: []net.Addr{addrOf("2001:db8::10")}},
+			}
+			status := hr.getNetworkStatus(noDefaultRoute, fixedDefaultRoute("2001:db8::10"), fakeInterfaces(ifaces, nil))
+
+			Expect(status).To(HaveLen(1))
+			Expect(status[0].IsDefault).To(BeTrue())
+			Expect(hr.ByoHostInfo.DefaultNetworkInterfaceName).To(Equal("eth0"))
+		})
+
+		It("Should mark the default interface on a dual-stack host via either family's route", func() {
+			hr := HostRegistrar{}
+			ifaces := []netInterface{
+				{
+					Name:    "eth0",
+					Flags:   net.FlagUp,
+					MACAddr: "aa:bb:cc:dd:ee:ff",
+					Addrs:   []net.Addr{addrOf("192.168.1.10"), addrOf("2001:db8::10")},
+				},
+			}
+			status := hr.getNetworkStatus(fixedDefaultRoute("192.168.1.10"), fixedDefaultRoute("2001:db8::10"), fakeInterfaces(ifaces, nil))
+
+			Expect(status).To(HaveLen(1))
+			Expect(status[0].IsDefault).To(BeTrue())
+			Expect(status[0].IPAddrs).To(ConsistOf("192.168.1.10/24", "2001:db8::10/64"))
+			Expect(hr.ByoHostInfo.DefaultNetworkInterfaceName).To(Equal("eth0"))
+		})
+
+		It("Should still report interfaces when neither family has a default route", func() {
+			hr := HostRegistrar{}
+			ifaces := []netInterface{
+				{Name: "eth0", Flags: net.FlagUp, MACAddr: "aa:bb:cc:dd:ee:ff", Addrs: []net.Addr{addrOf("2001:db8::10")}},
+			}
+			status := hr.getNetworkStatus(noDefaultRoute, noDefaultRoute, fakeInterfaces(ifaces, nil))
+
+			Expect(status).To(HaveLen(1))
+			Expect(status[0].IsDefault).To(BeFalse())
+			Expect(status[0].IPAddrs).To(ConsistOf("2001:db8::10/64"))
+			Expect(hr.ByoHostInfo.DefaultNetworkInterfaceName).To(BeEmpty())
+		})
+
+		It("Should return an empty status when interface enumeration itself fails", func() {
+			hr := HostRegistrar{}
+			status := hr.getNetworkStatus(fixedDefaultRoute("192.168.1.10"), noDefaultRoute, fakeInterfaces(nil, fmt.Errorf("boom")))
+
+			Expect(status).To(BeEmpty())
 		})
 	})
 
