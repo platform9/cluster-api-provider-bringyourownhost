@@ -6,7 +6,6 @@ package controllers
 import (
 	"context"
 	b64 "encoding/base64"
-	"time"
 
 	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/common/bootstraptoken"
@@ -25,11 +24,6 @@ type BootstrapKubeconfigReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 }
-
-const (
-	// ttl is the time to live for the generated bootstrap token
-	ttl = time.Minute * 30
-)
 
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=bootstrapkubeconfigs,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=bootstrapkubeconfigs/status,verbs=get;update;patch
@@ -62,7 +56,7 @@ func (r *BootstrapKubeconfigReconciler) Reconcile(ctx context.Context, req ctrl.
 		return ctrl.Result{}, err
 	}
 
-	bootstrapKubeconfigSecret, err := bootstraptoken.GenerateSecretFromBootstrapToken(tokenStr, ttl)
+	bootstrapKubeconfigSecret, err := bootstraptoken.GenerateSecretFromBootstrapToken(tokenStr, infrastructurev1beta1.DefaultTokenExpiry)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
