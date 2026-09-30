@@ -1,4 +1,5 @@
 // Copyright 2022 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package v1beta1
@@ -39,14 +40,51 @@ type BootstrapKubeconfigSpec struct {
 
 	// CertificateAuthorityData contains PEM-encoded certificate authority certificates.
 	CertificateAuthorityData string `json:"certificate-authority-data"`
+
+	// HostName is the host this object onboards. The CSR approver compares it
+	// against the name a certificate request asks for, so one object can only
+	// ever produce a certificate for this host.
+	HostName string `json:"hostName"`
+
+	// TokenExpiresAt is when the bootstrap token this object issues stops
+	// working. The mutating webhook overwrites whatever the request body
+	// carried, so a caller cannot choose it, and the validating webhook
+	// rejects any later change, so a token's life cannot be extended by
+	// editing the object.
+	// +optional
+	TokenExpiresAt *metav1.Time `json:"tokenExpiresAt,omitempty"`
+
+	// CreatedBy is the authenticated identity that created this object. The
+	// mutating webhook overwrites whatever the request body carried, so a
+	// caller cannot claim to be someone else. The grant that scopes the
+	// credential Secret's read binds to it.
+	// +optional
+	CreatedBy string `json:"createdBy,omitempty"`
 }
 
 // BootstrapKubeconfigStatus defines the observed state of BootstrapKubeconfig
 type BootstrapKubeconfigStatus struct {
 	// BootstrapKubeconfigData is an optional reference to a bootstrap kubeconfig info
 	// for starting the host registration process
+	//
+	// Deprecated: the credential now lives in the Secret named by
+	// CredentialSecretRef. This field is no longer populated and will be
+	// removed once nothing reads it.
 	// +optional
 	BootstrapKubeconfigData *string `json:"bootstrapKubeconfigData,omitempty"`
+
+	// TokenID is the public half of the issued bootstrap token. A certificate
+	// request authenticates as system:bootstrap:<TokenID>, which is how the
+	// approver finds the object that issued the token it is being asked to
+	// trust.
+	// +optional
+	TokenID string `json:"tokenID,omitempty"`
+
+	// CredentialSecretRef names the Secret holding this object's credential,
+	// in this object's namespace. byohctl reads it to find the credential and
+	// the RBAC controller reads it to know which Secret its grant should name.
+	// +optional
+	CredentialSecretRef string `json:"credentialSecretRef,omitempty"`
 }
 
 //+kubebuilder:object:root=true
