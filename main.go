@@ -167,6 +167,10 @@ func setupControllers(ctx context.Context, mgr ctrl.Manager, opts controllerOpti
 		Decoder: admission.NewDecoder(mgr.GetScheme()),
 	}})
 
+	mgr.GetWebhookServer().Register("/mutate-infrastructure-cluster-x-k8s-io-v1beta1-byohost", &webhook.Admission{Handler: &infrastructurev1beta1.ByoHostIdentityStamper{
+		Decoder: admission.NewDecoder(mgr.GetScheme()),
+	}})
+
 	if err := (&byohcontrollers.BootstrapKubeconfigReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
