@@ -47,9 +47,10 @@ type BootstrapKubeconfigSpec struct {
 	HostName string `json:"hostName"`
 
 	// TokenExpiresAt is when the bootstrap token this object issues stops
-	// working. The mutating webhook sets it on create and the validating
-	// webhook rejects any later change, so a token's life cannot be extended
-	// by editing the object.
+	// working. The mutating webhook overwrites whatever the request body
+	// carried, so a caller cannot choose it, and the validating webhook
+	// rejects any later change, so a token's life cannot be extended by
+	// editing the object.
 	// +optional
 	TokenExpiresAt *metav1.Time `json:"tokenExpiresAt,omitempty"`
 
