@@ -71,6 +71,15 @@ type ByoHostSpec struct {
 	// is in progress.
 	// +optional
 	DesiredAgent *DesiredAgentSpec `json:"desiredAgent,omitempty"`
+
+	// Identity is the certificate identity currently valid for this host, in
+	// the form byoh:host:<hostName>:<suffix>. The admission webhook sets it
+	// from the authenticated requester when the host is created, never from
+	// the request body, and rejects any later change. Renewal is authorized
+	// against it, so a certificate whose identity no longer matches cannot
+	// renew even while it is still cryptographically valid.
+	// +optional
+	Identity string `json:"identity,omitempty"`
 }
 
 // DesiredAgentSpec is the agent version/package a host should converge on.
