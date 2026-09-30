@@ -43,7 +43,7 @@ var managerServiceAccounts = map[string]struct{}{
 // Precompile email-like regex for efficiency
 var emailLikeUserRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 
-// nolint: gocritic
+// nolint: gocritic // hugeParam: admission.Handler requires Request by value.
 // Handle handles all the requests for ByoHost resource
 func (v *ByoHostValidator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	var response admission.Response
@@ -171,8 +171,7 @@ type ByoHostIdentityStamper struct {
 }
 
 // Handle implements admission.Handler.
-// FIXME CLAUDE: Explain this nolint. Why do we need it?
-// nolint: gocritic // admission.Handler fixes this signature.
+// nolint: gocritic // hugeParam: admission.Handler requires Request by value.
 func (s *ByoHostIdentityStamper) Handle(_ context.Context, req admission.Request) admission.Response {
 	if req.Operation != v1.Create {
 		return admission.Allowed("")
