@@ -622,12 +622,16 @@ type BootstrapKubeconfigBuilder struct {
 	server        string
 	skipTLSVerify bool
 	caData        string
+	hostName      string
 }
 
 func BootstrapKubeconfig(namespace, name string) *BootstrapKubeconfigBuilder {
 	return &BootstrapKubeconfigBuilder{
 		namespace: namespace,
 		name:      name,
+		// NOTE: Stop gap to ensure webhook passes. Follow up will ensure we
+		// pass hostName as a test input instead.
+		hostName: "test-host",
 	}
 }
 
@@ -664,6 +668,7 @@ func (b *BootstrapKubeconfigBuilder) Build() *infrastructurev1beta1.BootstrapKub
 			APIServer:                b.server,
 			InsecureSkipTLSVerify:    b.skipTLSVerify,
 			CertificateAuthorityData: b.caData,
+			HostName:                 b.hostName,
 		},
 		Status: infrastructurev1beta1.BootstrapKubeconfigStatus{},
 	}
