@@ -76,7 +76,7 @@ func TestBootstrapKubeconfigDefaulter_TokenExpiresAt(t *testing.T) {
 		assert.WithinDuration(t, time.Now().Add(DefaultTokenExpiry), obj.Spec.TokenExpiresAt.Time, time.Minute)
 	})
 
-	t.Run("a supplied expiry is left alone, and the validator bounds it instead", func(t *testing.T) {
+	t.Run("a supplied expiry is discarded and replaced with the default window", func(t *testing.T) {
 		supplied := metav1.NewTime(time.Now().Add(10 * time.Minute))
 		obj := &BootstrapKubeconfig{
 			Spec: BootstrapKubeconfigSpec{
@@ -90,7 +90,8 @@ func TestBootstrapKubeconfigDefaulter_TokenExpiresAt(t *testing.T) {
 		require.NoError(t, err)
 
 		require.NotNil(t, obj.Spec.TokenExpiresAt)
-		assert.Equal(t, supplied.Time, obj.Spec.TokenExpiresAt.Time)
+		assert.NotEqual(t, supplied.Time, obj.Spec.TokenExpiresAt.Time)
+		assert.WithinDuration(t, time.Now().Add(DefaultTokenExpiry), obj.Spec.TokenExpiresAt.Time, time.Minute)
 	})
 
 	t.Run("a request without admission context is an error, not a silent empty creator", func(t *testing.T) {
@@ -142,51 +143,6 @@ func TestBootstrapKubeconfig_validateHostName(t *testing.T) {
 			}
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.wantErr)
-		})
-	}
-}
-
-func TestBootstrapKubeconfig_validateTokenExpiresAt(t *testing.T) {
-	now := time.Now()
-
-	testCases := []struct {
-		name      string
-		expiresAt *metav1.Time
-		wantErr   bool
-	}{
-		{
-			name:      "no expiry is accepted, the defaulter fills it in",
-			expiresAt: nil,
-		},
-		{
-			name:      "an expiry inside the window is accepted",
-			expiresAt: ptrTime(now.Add(DefaultTokenExpiry)),
-		},
-		{
-			name:      "an expiry beyond the window is rejected",
-			expiresAt: ptrTime(now.Add(MaxTokenExpiryWindow + time.Minute)),
-			wantErr:   true,
-		},
-		{
-			name:      "an expiry far in the future is rejected, so a caller cannot ask for a token that never dies",
-			expiresAt: ptrTime(now.AddDate(1, 0, 0)),
-			wantErr:   true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			obj := &BootstrapKubeconfig{
-				Spec: BootstrapKubeconfigSpec{TokenExpiresAt: tc.expiresAt},
-			}
-
-			err := obj.validateTokenExpiresAt(now)
-
-			if tc.wantErr {
-				require.Error(t, err)
-				return
-			}
-			assert.NoError(t, err)
 		})
 	}
 }
@@ -258,9 +214,4 @@ func TestValidateImmutableFields(t *testing.T) {
 			assert.Contains(t, err.Error(), tc.wantErr)
 		})
 	}
-}
-
-func ptrTime(t time.Time) *metav1.Time {
-	mt := metav1.NewTime(t)
-	return &mt
 }

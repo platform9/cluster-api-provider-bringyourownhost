@@ -29,15 +29,9 @@ var bootstrapkubeconfiglog = logf.Log.WithName("bootstrapkubeconfig-resource")
 // APIServerURLScheme is the url scheme for the APIServer
 const APIServerURLScheme = "https"
 
-const (
-	// DefaultTokenExpiry is how far ahead the defaulting webhook sets
-	// spec.tokenExpiresAt when a create leaves it empty.
-	DefaultTokenExpiry = 30 * time.Minute
-
-	// MaxTokenExpiryWindow is the upper bound of how far ahead
-	// spec.tokenExpiresAt may be set to on create.
-	MaxTokenExpiryWindow = time.Hour
-)
+// DefaultTokenExpiry is how far ahead the defaulting webhook stamps
+// spec.tokenExpiresAt on create.
+const DefaultTokenExpiry = 30 * time.Minute
 
 func (r *BootstrapKubeconfig) SetupWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr).
@@ -77,10 +71,10 @@ func (d *BootstrapKubeconfigDefaulter) Default(ctx context.Context, obj runtime.
 	// and instead it accurately captures the user from the request.
 	bootstrapKubeconfig.Spec.CreatedBy = req.UserInfo.Username
 
-	if bootstrapKubeconfig.Spec.TokenExpiresAt == nil {
-		expiresAt := metav1.NewTime(time.Now().Add(DefaultTokenExpiry))
-		bootstrapKubeconfig.Spec.TokenExpiresAt = &expiresAt
-	}
+	// Stamp rather than fill in. A body-supplied expiry would let a caller
+	// create a token that outlives its onboarding window.
+	expiresAt := metav1.NewTime(time.Now().Add(DefaultTokenExpiry))
+	bootstrapKubeconfig.Spec.TokenExpiresAt = &expiresAt
 
 	return nil
 }
@@ -101,10 +95,6 @@ func (r *BootstrapKubeconfig) ValidateCreate(_ context.Context, obj runtime.Obje
 	}
 
 	if err := bootstrapKubeconfig.validateHostName(); err != nil {
-		return nil, err
-	}
-
-	if err := bootstrapKubeconfig.validateTokenExpiresAt(time.Now()); err != nil {
 		return nil, err
 	}
 
@@ -205,37 +195,33 @@ func (r *BootstrapKubeconfig) validateHostName() error {
 	return nil
 }
 
-func (r *BootstrapKubeconfig) validateTokenExpiresAt(now time.Time) error {
-	if r.Spec.TokenExpiresAt == nil {
-		return nil
-	}
-
-	path := field.NewPath("spec").Child("tokenExpiresAt")
-	if r.Spec.TokenExpiresAt.After(now.Add(MaxTokenExpiryWindow)) {
-		detail := fmt.Sprintf("must not be more than %s in the future", MaxTokenExpiryWindow)
-		return field.Invalid(path, r.Spec.TokenExpiresAt.Format(time.RFC3339), detail)
-	}
-
-	return nil
-}
-
 // validateImmutableFields rejects a change to any field that identifies what
 // the object issues or who it was issued for. The defaulting webhook only runs
 // on create, so without this an edit could extend a live token's life or point
 // the credential's RBAC grant at a different identity.
 func validateImmutableFields(oldObj, newObj *BootstrapKubeconfig) error {
-	spec := field.NewPath("spec")
-
-	if oldObj.Spec.HostName != newObj.Spec.HostName {
-		return field.Forbidden(spec.Child("hostName"), "hostName is immutable")
+	immutableFields := []struct {
+		name    string
+		changed bool
+	}{
+		{
+			name:    "hostName",
+			changed: oldObj.Spec.HostName != newObj.Spec.HostName,
+		},
+		{
+			name:    "createdBy",
+			changed: oldObj.Spec.CreatedBy != newObj.Spec.CreatedBy,
+		},
+		{
+			name:    "tokenExpiresAt",
+			changed: !apiequality.Semantic.DeepEqual(oldObj.Spec.TokenExpiresAt, newObj.Spec.TokenExpiresAt),
+		},
 	}
 
-	if oldObj.Spec.CreatedBy != newObj.Spec.CreatedBy {
-		return field.Forbidden(spec.Child("createdBy"), "createdBy is immutable")
-	}
-
-	if !apiequality.Semantic.DeepEqual(oldObj.Spec.TokenExpiresAt, newObj.Spec.TokenExpiresAt) {
-		return field.Forbidden(spec.Child("tokenExpiresAt"), "tokenExpiresAt is immutable")
+	for _, f := range immutableFields {
+		if f.changed {
+			return field.Forbidden(field.NewPath("spec").Child(f.name), f.name+" is immutable")
+		}
 	}
 
 	return nil

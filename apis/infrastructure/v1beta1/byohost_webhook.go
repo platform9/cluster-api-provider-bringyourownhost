@@ -129,15 +129,6 @@ func (v *ByoHostValidator) handleDelete(ctx context.Context, req *admission.Requ
 // BootstrapKubeconfig that issued the certificate.
 const hostIdentityPrefix = "byoh:host:"
 
-// FIXME CLAUDE: Is this even used anywhere except tests?
-// HostIdentity builds the certificate common name for one issuance. The
-// suffix makes every issuance for a host a distinct identity, so a
-// certificate from an earlier onboarding cannot act as the host after it is
-// onboarded again.
-func HostIdentity(hostName, suffix string) string {
-	return fmt.Sprintf("%s%s:%s", hostIdentityPrefix, hostName, suffix)
-}
-
 // HostNameFromIdentity returns the host name a certificate identity names.
 // Segments are compared whole, because a substring match would let a
 // certificate for "worker-1" act on "worker-10".
