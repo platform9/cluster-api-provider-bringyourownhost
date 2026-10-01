@@ -125,23 +125,27 @@ func (v *ByoHostValidator) handleDelete(ctx context.Context, req *admission.Requ
 }
 
 // hostIdentityPrefix is what every host certificate's common name starts
-// with. The two segments after it are the host name and the suffix of the
-// BootstrapKubeconfig that issued the certificate.
+// with. The segment after it is the host name, optionally followed by a
+// suffix that makes each issued certificate a distinct identity.
 const hostIdentityPrefix = "byoh:host:"
 
 // HostNameFromIdentity returns the host name a certificate identity names.
 // Segments are compared whole, because a substring match would let a
 // certificate for "worker-1" act on "worker-10".
 //
-// For example, "byoh:host:coke-worker-1:x7k2p" returns "coke-worker-1".
+// For example, "byoh:host:coke-worker-1:x7k2p" and "byoh:host:coke-worker-1"
+// both return "coke-worker-1".
+//
+// NOTE: the agent's CSR does not add a suffix yet, so the three-segment form
+// is accepted until it does.
 func HostNameFromIdentity(identity string) (string, error) {
 	if !strings.HasPrefix(identity, hostIdentityPrefix) {
 		return "", fmt.Errorf("identity %q does not start with %q", identity, hostIdentityPrefix)
 	}
 
 	segments := strings.Split(identity, ":")
-	if len(segments) != 4 { //nolint: mnd
-		return "", fmt.Errorf("identity %q is not of the form %s<hostName>:<suffix>", identity, hostIdentityPrefix)
+	if len(segments) != 3 && len(segments) != 4 { //nolint: mnd
+		return "", fmt.Errorf("identity %q is not of the form %s<hostName> or %s<hostName>:<suffix>", identity, hostIdentityPrefix, hostIdentityPrefix)
 	}
 
 	hostName := segments[2]
@@ -149,7 +153,7 @@ func HostNameFromIdentity(identity string) (string, error) {
 		return "", fmt.Errorf("identity %q carries an empty host name", identity)
 	}
 
-	if segments[3] == "" {
+	if len(segments) == 4 && segments[3] == "" { //nolint: mnd
 		return "", fmt.Errorf("identity %q carries an empty suffix", identity)
 	}
 

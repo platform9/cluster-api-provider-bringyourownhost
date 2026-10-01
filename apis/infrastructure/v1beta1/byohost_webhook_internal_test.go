@@ -349,9 +349,9 @@ func TestHostNameFromIdentity(t *testing.T) {
 			wantErr:  "does not start with",
 		},
 		{
-			name:     "identity without suffix is rejected",
+			name:     "identity without suffix is allowed",
 			identity: "byoh:host:coke-worker-1",
-			wantErr:  "is not of the form",
+			want:     "coke-worker-1",
 		},
 		{
 			name:     "identity with extra segments is rejected",
@@ -362,6 +362,21 @@ func TestHostNameFromIdentity(t *testing.T) {
 			name:     "empty host name is rejected",
 			identity: "byoh:host::x7k2p",
 			wantErr:  "empty host name",
+		},
+		{
+			name:     "empty host name without suffix is rejected",
+			identity: "byoh:host:",
+			wantErr:  "empty host name",
+		},
+		{
+			name:     "identity with only two segments is rejected",
+			identity: "byoh:host",
+			wantErr:  "does not start with",
+		},
+		{
+			name:     "identity with six segments is rejected",
+			identity: "byoh:host:coke-worker-1:x7k2p:extra:more",
+			wantErr:  "is not of the form",
 		},
 		{
 			name:     "empty suffix is rejected",
