@@ -123,13 +123,20 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	GOOS=linux go vet ./...
 
-GOLANGCI_LINT = $(shell pwd)/bin/golangci-lint
+GOLANGCI_LINT_VERSION := v2.12.2
+# The binary name carries the linter version and Go version, so a change to either installs a fresh binary.
+GOLANGCI_LINT = $(PROJECT_DIR)/bin/golangci-lint-$(GOLANGCI_LINT_VERSION)-go$(GO_VERSION)
 # Scope the cache to this checkout — golangci-lint's default cache is shared machine-wide, which cross-contaminates concurrent runs across worktrees.
 GOLANGCI_LINT_CACHE = $(shell pwd)/bin/golangci-lint-cache
 lint: golangci-lint
 	GOLANGCI_LINT_CACHE=$(GOLANGCI_LINT_CACHE) ${GOLANGCI_LINT} run
 golangci-lint:
-	$(call go-get-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2)
+	@[ -f $(GOLANGCI_LINT) ] || { \
+	set -e ;\
+	echo "Downloading golangci-lint $(GOLANGCI_LINT_VERSION)" ;\
+	GOBIN=$(PROJECT_DIR)/bin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) ;\
+	mv $(PROJECT_DIR)/bin/golangci-lint $(GOLANGCI_LINT) ;\
+	}
 
 ##@ Build
 
@@ -523,12 +530,8 @@ PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
 define go-get-tool
 @[ -f $(1) ] || { \
 set -e ;\
-TMP_DIR=$$(mktemp -d) ;\
-cd $$TMP_DIR ;\
-go mod init tmp ;\
 echo "Downloading $(2)" ;\
 GOBIN=$(PROJECT_DIR)/bin go install $(2) ;\
-rm -rf $$TMP_DIR ;\
 }
 endef
 
