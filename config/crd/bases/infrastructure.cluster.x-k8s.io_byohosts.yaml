@@ -141,6 +141,15 @@ spec:
                   required:
                     - version
                   type: object
+                identity:
+                  description: |-
+                    Identity is the certificate identity currently valid for this host, in
+                    the form byoh:host:<hostName>:<suffix>. The admission webhook sets it
+                    from the authenticated requester when the host is created, never from
+                    the request body, and rejects any later change. Renewal is authorized
+                    against it, so a certificate whose identity no longer matches cannot
+                    renew even while it is still cryptographically valid.
+                  type: string
                 installationSecret:
                   description: |-
                     InstallationSecret is an optional reference to InstallationSecret
