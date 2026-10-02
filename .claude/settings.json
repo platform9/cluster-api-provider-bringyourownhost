@@ -20,11 +20,36 @@
       "Bash(make build-host-agent-deb-linux-vm *)",
       "Bash(make clean *)",
       "Bash(make help *)",
+      "Bash(make patch-coverage *)",
       "Bash(gh run *)",
       "Bash(gh pr view *)"
     ]
   },
   "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/scripts/dev/patch-coverage-hook.sh",
+            "timeout": 300,
+            "statusMessage": "Checking patch coverage"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/scripts/dev/patch-coverage-hook.sh",
+            "timeout": 300,
+            "statusMessage": "Checking patch coverage"
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash(make test-e2e*)",
