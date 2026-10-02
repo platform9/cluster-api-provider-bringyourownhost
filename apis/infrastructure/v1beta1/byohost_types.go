@@ -48,6 +48,7 @@ const (
 )
 
 // ByoHostSpec defines the desired state of ByoHost
+// +kubebuilder:validation:XValidation:rule="has(self.identity) == has(oldSelf.identity) && (!has(self.identity) || self.identity == oldSelf.identity)",message="identity is immutable"
 type ByoHostSpec struct {
 	// BootstrapSecret is an optional reference to a Cluster API Secret
 	// for bootstrap purpose

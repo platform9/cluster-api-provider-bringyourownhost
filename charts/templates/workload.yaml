@@ -256,6 +256,9 @@ spec:
                   type: object
                   x-kubernetes-map-type: atomic
               type: object
+              x-kubernetes-validations:
+                - message: identity is immutable
+                  rule: has(self.identity) == has(oldSelf.identity) && (!has(self.identity) || self.identity == oldSelf.identity)
             status:
               description: ByoHostStatus defines the observed state of ByoHost
               properties:
