@@ -123,6 +123,10 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	GOOS=linux go vet ./...
 
+.PHONY: golangci-lint-version
+golangci-lint-version: ## Print the pinned golangci-lint version
+	@echo $(GOLANGCI_LINT_VERSION)
+
 GOLANGCI_LINT_VERSION := v2.12.2
 # The binary name carries the linter version and Go version, so a change to either installs a fresh binary.
 GOLANGCI_LINT = $(PROJECT_DIR)/bin/golangci-lint-$(GOLANGCI_LINT_VERSION)-go$(GO_VERSION)
