@@ -258,6 +258,12 @@ controller-test: $(GINKGO) ## Run controller tests
 webhook-test: $(GINKGO) ## Run webhook tests
 	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; $(GINKGO) --coverprofile cover.out apis/infrastructure/v1beta1
 
+PATCH_COVERAGE_BASE ?= origin/main
+PATCH_COVERAGE_PROFILE ?= cover.out
+
+patch-coverage: ## Report changed Go lines missing coverage in PATCH_COVERAGE_PROFILE (run a make *-test target first)
+	@scripts/dev/patch-coverage.sh $(PATCH_COVERAGE_BASE) $(PATCH_COVERAGE_PROFILE)
+
 # CI will download the agent bundle from the saved artifacts if SKIP_BUILD is set.
 ifdef SKIP_BUILD
 BUILD_HOST_AGENT_DEB_PREREQ :=
