@@ -135,9 +135,9 @@ Markers in type files (e.g. `// +kubebuilder:object:root=true`) drive controller
 
 ## Linting
 
-Config is in `.golangci.yml` (v2 schema, timeout 10 min). Key enabled linters include `gosec`, `staticcheck`, `errcheck`, `gocyclo`, and `depguard`. Run `make lint` before submitting; CI enforces this via `golangci-lint-action@v9` pinned to v2.12.2 (`.github/workflows/lint.yml`).
+Config is in `.golangci.yml` (v2 schema, timeout 10 min). Key enabled linters include `gosec`, `staticcheck`, `errcheck`, `gocyclo`, and `depguard`. Run `make lint` before submitting; CI enforces this via `golangci-lint-action@v9`, which reads its version from the Makefile's `GOLANGCI_LINT_VERSION` through `make golangci-lint-version`.
 
-Gotcha: the `golangci-lint` target in the Makefile only installs the binary if `bin/golangci-lint` doesn't already exist, and pins an older v1.64.8 install script — if you have a stale v1 binary in `bin/`, `make lint` will run against the v2-schema config and fail or disagree with CI. Delete `bin/golangci-lint` and re-run `make lint` if results look wrong.
+Gotcha: `make lint` installs `bin/golangci-lint-<version>-go<GO_VERSION>` if that file is missing, so bumping the pinned linter version or the Go version in `.tool-versions` triggers a fresh install on its own. Old `bin/golangci-lint-*` binaries are left behind and can be deleted.
 
 ## Licensing
 

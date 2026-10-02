@@ -32,10 +32,14 @@ jobs:
       with:
         go-version-file: go.mod
 
+    - name: Read pinned golangci-lint version
+      id: lint-version
+      run: echo "version=$(make -s --no-print-directory golangci-lint-version)" >> "$GITHUB_OUTPUT"
+
     - name: golangci-lint
       uses: golangci/golangci-lint-action@v9
       with:
-        version: v2.12.2
+        version: ${{ steps.lint-version.outputs.version }}
 
   check-go-version-consistency:
     name: Go version consistency
