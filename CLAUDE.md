@@ -117,9 +117,16 @@ Pluggable installer interface. Kubernetes components are distributed as OCI bund
 
 ## Testing Patterns
 
-Tests use **Ginkgo v2** + **Gomega** and **Counterfeiter** for mocks (generated fakes live in `**/fakes/` directories). Controller tests use `envtest` (real API server + etcd) rather than mocking the client. E2E tests live in `test/e2e/` and require a real cluster.
+Existing tests use **Ginkgo v2** + **Gomega** and **Counterfeiter** for mocks (generated fakes live in `**/fakes/` directories). Controller tests use `envtest` (real API server + etcd) rather than mocking the client. E2E tests live in `test/e2e/` and require a real cluster.
 
 When adding a new controller or type, run `make generate && make manifests` before writing tests.
+
+### New unit tests
+
+- Unit tests go in a regular `<file>_test.go` named after the file they test (e.g. tests for `state.go` go in `state_test.go`).
+- Do not create new `_internal_test.go` files. That naming is an anti-pattern here.
+- New unit tests are vanilla Go `testing` + testify, not Ginkgo.
+- Existing Ginkgo tests will either be removed, or their files renamed to `<file>_external_test.go` so that `<file>_test.go` holds the vanilla unit tests.
 
 A throwaway local registry is available if future e2e work needs to serve a real built artifact without touching quay.io: `test/e2e/e2e_agent_bundle_registry.go`'s `ensureLocalAgentBundleRegistry` builds and serves an agent `.deb` bundle this way for the `byohctl` e2e spec (`test/e2e/e2e_byohctl_test.go`), since quay.io's published bundle is only tagged for commits already on `main`/`ci-*`. Be aware it only kicks in if `build/pf9-byohost/debsrc/` already exists (from `make build-host-agent-deb`, run separately in `.github/workflows/e2e.yml` — not part of `make test-e2e`'s own dependency chain, since it needs `fpm`/ruby installed); without that prerequisite, the spec skips locally but **fails** (not skips) when `CI` is set, so a broken prerequisite can't silently drop coverage.
 
