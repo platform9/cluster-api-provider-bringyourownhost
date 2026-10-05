@@ -1,25 +1,12 @@
 name: e2e-suite
 
+# push/pull_request triggers disabled while the PICT-driven e2e-matrix.yml
+# (workflow_dispatch-gated) is being evaluated as this suite's replacement,
+# to stop paying for both on every PR. Still runnable manually via
+# workflow_dispatch. Re-add the triggers below if e2e-matrix.yml doesn't
+# pan out, or remove this workflow once it's promoted (see the PICT e2e
+# refactor plan's PR 9).
 on:
-  push:
-    branches: [ main ]
-    tags: [ 'ci-*' ]
-    paths-ignore:
-      - '*.md'
-      - 'docs/**'
-      - 'LICENSE'
-      - 'NOTICE'
-      - 'PROJECT'
-      - 'SECURITY_CONTACTS'
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths-ignore:
-      - '*.md'
-      - 'docs/**'
-      - 'LICENSE'
-      - 'NOTICE'
-      - 'PROJECT'
-      - 'SECURITY_CONTACTS'
   workflow_dispatch: {}
 
 permissions:

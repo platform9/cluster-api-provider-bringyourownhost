@@ -1,0 +1,11 @@
+Scenario	K8sVersion
+Reuse	v1.33.2
+PackagingDeb	NA
+ByoHCtl	NA
+Installer	v1.31.0
+UpgradeCluster	v1.31.0
+MDScale	v1.35.6
+Join	v1.32.3
+PackagingRpm	NA
+UpgradeClusterClass	v1.31.0
+ClusterClass	v1.34.9
