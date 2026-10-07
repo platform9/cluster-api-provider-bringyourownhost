@@ -8,6 +8,7 @@ metadata:
   labels:
     cluster.x-k8s.io/provider: infrastructure-byoh
     cluster.x-k8s.io/v1beta1: v1beta1
+    cluster.x-k8s.io/v1beta2: v1beta1
   name: byohosts.infrastructure.cluster.x-k8s.io
 spec:
   conversion:
@@ -435,6 +436,7 @@ metadata:
   labels:
     cluster.x-k8s.io/provider: infrastructure-byoh
     cluster.x-k8s.io/v1beta1: v1beta1
+    cluster.x-k8s.io/v1beta2: v1beta1
   name: byomachines.infrastructure.cluster.x-k8s.io
 spec:
   group: infrastructure.cluster.x-k8s.io
@@ -740,6 +742,7 @@ metadata:
   labels:
     cluster.x-k8s.io/provider: infrastructure-byoh
     cluster.x-k8s.io/v1beta1: v1beta1
+    cluster.x-k8s.io/v1beta2: v1beta1
   name: byoclusters.infrastructure.cluster.x-k8s.io
 spec:
   conversion:
@@ -1005,6 +1008,7 @@ metadata:
   labels:
     cluster.x-k8s.io/provider: infrastructure-byoh
     cluster.x-k8s.io/v1beta1: v1beta1
+    cluster.x-k8s.io/v1beta2: v1beta1
   name: byohostagentupgrades.infrastructure.cluster.x-k8s.io
 spec:
   group: infrastructure.cluster.x-k8s.io
@@ -1248,6 +1252,7 @@ metadata:
   labels:
     cluster.x-k8s.io/provider: infrastructure-byoh
     cluster.x-k8s.io/v1beta1: v1beta1
+    cluster.x-k8s.io/v1beta2: v1beta1
   name: byomachinetemplates.infrastructure.cluster.x-k8s.io
 spec:
   group: infrastructure.cluster.x-k8s.io
@@ -1404,6 +1409,7 @@ metadata:
   labels:
     cluster.x-k8s.io/provider: infrastructure-byoh
     cluster.x-k8s.io/v1beta1: v1beta1
+    cluster.x-k8s.io/v1beta2: v1beta1
   name: k8sinstallerconfigs.infrastructure.cluster.x-k8s.io
 spec:
   group: infrastructure.cluster.x-k8s.io
@@ -1557,6 +1563,7 @@ metadata:
   labels:
     cluster.x-k8s.io/provider: infrastructure-byoh
     cluster.x-k8s.io/v1beta1: v1beta1
+    cluster.x-k8s.io/v1beta2: v1beta1
   name: byoclustertemplates.infrastructure.cluster.x-k8s.io
 spec:
   conversion:
@@ -1680,6 +1687,7 @@ metadata:
   labels:
     cluster.x-k8s.io/provider: infrastructure-byoh
     cluster.x-k8s.io/v1beta1: v1beta1
+    cluster.x-k8s.io/v1beta2: v1beta1
   name: bootstrapkubeconfigs.infrastructure.cluster.x-k8s.io
 spec:
   group: infrastructure.cluster.x-k8s.io
@@ -1752,6 +1760,7 @@ metadata:
   labels:
     cluster.x-k8s.io/provider: infrastructure-byoh
     cluster.x-k8s.io/v1beta1: v1beta1
+    cluster.x-k8s.io/v1beta2: v1beta1
   name: k8sinstallerconfigtemplates.infrastructure.cluster.x-k8s.io
 spec:
   group: infrastructure.cluster.x-k8s.io
