@@ -18,10 +18,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/ptr"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/annotations"
-	"sigs.k8s.io/cluster-api/util/conditions"
+	conditions "sigs.k8s.io/cluster-api/util/conditions/deprecated/v1beta1"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -154,7 +154,7 @@ var _ = Describe("Controllers/K8sInstallerConfigController", func() {
 			NamespacedName: types.NamespacedName{
 				Name:      k8sinstallerconfigWithNonExistingCluster.Name,
 				Namespace: k8sinstallerconfigWithNonExistingCluster.Namespace}})
-		Expect(err).To(MatchError("failed to get Cluster/non-existent-cluster: Cluster.cluster.x-k8s.io \"non-existent-cluster\" not found"))
+		Expect(err).To(MatchError("failed to get Cluster default/non-existent-cluster: Cluster.cluster.x-k8s.io \"non-existent-cluster\" not found"))
 	})
 
 	It("should ignore when k8sinstallerconfig is paused", func() {

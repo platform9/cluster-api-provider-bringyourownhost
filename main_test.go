@@ -31,7 +31,7 @@ import (
 
 // wantControllers is the number of runnables setupControllers adds to the
 // manager when CSR auto-approval is on: one per controller
-// (ClusterCacheReconciler, ByoMachine, ByoHost, ByoHostAgentUpgrade,
+// (ClusterCache, ByoMachine, ByoHost, ByoHostAgentUpgrade,
 // ByoMachineTemplate, ByoCluster, ByoAdmission, K8sInstallerConfig,
 // BootstrapKubeconfig). Webhooks register handler paths on the webhook server
 // instead, so they do not show up here.
@@ -87,8 +87,8 @@ func TestMain(m *testing.M) {
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
 			filepath.Join("config", "crd", "bases"),
-			filepath.Join(build.Default.GOPATH, "pkg", "mod", "sigs.k8s.io", "cluster-api@v1.10.10", "config", "crd", "bases"),
-			filepath.Join(build.Default.GOPATH, "pkg", "mod", "sigs.k8s.io", "cluster-api@v1.10.10", "bootstrap", "kubeadm", "config", "crd", "bases"),
+			filepath.Join(build.Default.GOPATH, "pkg", "mod", "sigs.k8s.io", "cluster-api@v1.12.11", "config", "crd", "bases"),
+			filepath.Join(build.Default.GOPATH, "pkg", "mod", "sigs.k8s.io", "cluster-api@v1.12.11", "bootstrap", "kubeadm", "config", "crd", "bases"),
 		},
 		ErrorIfCRDPathMissing: true,
 		// Generates the serving certificate the manager's webhook server
@@ -190,7 +190,7 @@ func TestSetupControllersReturnsRegistrationError(t *testing.T) {
 	err := setupControllers(t.Context(), mgr, testOptions())
 	require.Error(t, err)
 	assert.ErrorIs(t, err, errAddRunnable)
-	assert.Contains(t, err.Error(), "ClusterCacheReconciler")
+	assert.Contains(t, err.Error(), "create cluster cache")
 }
 
 // The context main() builds from the signal handler is the only stop signal

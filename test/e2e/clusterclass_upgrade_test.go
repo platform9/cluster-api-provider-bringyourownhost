@@ -61,17 +61,18 @@ var _ = Describe("Clusterclass upgrade test [K8s-Upgrade-ClusterClass]", func() 
 
 		By("Upgrading the control plane")
 		framework.UpgradeClusterTopologyAndWaitForUpgrade(ctx, framework.UpgradeClusterTopologyAndWaitForUpgradeInput{
-			ClusterProxy:                bootstrapClusterProxy,
-			Cluster:                     clusterResources.Cluster,
-			ControlPlane:                clusterResources.ControlPlane,
-			EtcdImageTag:                etcdUpgradeVersion,
-			DNSImageTag:                 coreDNSUpgradeVersion,
-			MachineDeployments:          clusterResources.MachineDeployments,
-			KubernetesUpgradeVersion:    kubernetesVersionUpgradeTo,
-			WaitForMachinesToBeUpgraded: e2eConfig.GetIntervals(specName, "wait-machine-upgrade"),
-			WaitForKubeProxyUpgrade:     e2eConfig.GetIntervals(specName, "wait-machine-upgrade"),
-			WaitForDNSUpgrade:           e2eConfig.GetIntervals(specName, "wait-machine-upgrade"),
-			WaitForEtcdUpgrade:          e2eConfig.GetIntervals(specName, "wait-machine-upgrade"),
+			ClusterProxy:                         bootstrapClusterProxy,
+			Cluster:                              clusterResources.Cluster,
+			ControlPlane:                         clusterResources.ControlPlane,
+			EtcdImageTag:                         etcdUpgradeVersion,
+			DNSImageTag:                          coreDNSUpgradeVersion,
+			MachineDeployments:                   clusterResources.MachineDeployments,
+			KubernetesUpgradeVersion:             kubernetesVersionUpgradeTo,
+			WaitForControlPlaneToBeUpgraded:      e2eConfig.GetIntervals(specName, "wait-machine-upgrade"),
+			WaitForMachineDeploymentToBeUpgraded: e2eConfig.GetIntervals(specName, "wait-machine-upgrade"),
+			WaitForKubeProxyUpgrade:              e2eConfig.GetIntervals(specName, "wait-machine-upgrade"),
+			WaitForDNSUpgrade:                    e2eConfig.GetIntervals(specName, "wait-machine-upgrade"),
+			WaitForEtcdUpgrade:                   e2eConfig.GetIntervals(specName, "wait-machine-upgrade"),
 		})
 
 		By("Waiting until nodes are ready")

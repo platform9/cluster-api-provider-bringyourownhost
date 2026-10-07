@@ -20,8 +20,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	"sigs.k8s.io/cluster-api/util/conditions"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	conditions "sigs.k8s.io/cluster-api/util/conditions/deprecated/v1beta1"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/cluster-api/util/predicates"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -112,7 +112,7 @@ func (r *HostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctr
 	// Only apply the default heartbeat-driven requeue cadence if reconcileNormal
 	// didn't already ask for something more specific (e.g. an immediate
 	// requeue to continue a multi-step reconcile without waiting on it).
-	if err == nil && result.RequeueAfter == 0 && !result.Requeue {
+	if err == nil && result.RequeueAfter == 0 && !result.Requeue { //nolint:staticcheck // reconcileNormal still returns Requeue: true; moving it to RequeueAfter changes requeue timing
 		result.RequeueAfter = r.HeartbeatInterval
 	}
 	return result, err

@@ -19,7 +19,7 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
 	"sigs.k8s.io/cluster-api/util"
-	"sigs.k8s.io/cluster-api/util/conditions"
+	conditions "sigs.k8s.io/cluster-api/util/conditions/deprecated/v1beta1"
 )
 
 // agentUpgradeUnavailabilityPollInterval/Duration bound how long the "budget stays exhausted"

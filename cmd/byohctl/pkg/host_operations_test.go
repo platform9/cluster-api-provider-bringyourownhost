@@ -1,3 +1,6 @@
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 package pkg
 
 import (
@@ -10,7 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
-	capiv1beta1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	capiv1beta1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/client"
 	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"

@@ -1,4 +1,5 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package controllers
@@ -20,10 +21,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/cluster-api/controllers/clustercache"
 	"sigs.k8s.io/cluster-api/controllers/external"
-	"sigs.k8s.io/cluster-api/controllers/remote"
 	"sigs.k8s.io/cluster-api/util"
-	"sigs.k8s.io/cluster-api/util/conditions"
+	conditions "sigs.k8s.io/cluster-api/util/conditions/deprecated/v1beta1"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/cluster-api/util/predicates"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -39,7 +40,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	"k8s.io/utils/ptr"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/util/annotations"
 )
 
@@ -57,12 +59,9 @@ const (
 // ByoMachineReconciler reconciles a ByoMachine object
 type ByoMachineReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
-	// Tracker uses the deprecated remote.ClusterCacheTracker (still supported at CAPI
-	// v1.10.10); migrating to controllers/clustercache changes the workload-cluster
-	// connection/cache lifecycle and is deferred as a separate, dedicated change.
-	Tracker  *remote.ClusterCacheTracker //nolint: staticcheck
-	Recorder record.EventRecorder
+	Scheme       *runtime.Scheme
+	ClusterCache clustercache.ClusterCache
+	Recorder     record.EventRecorder
 }
 
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=byomachines,verbs=get;list;watch;create;update;patch;delete
@@ -256,7 +255,7 @@ func (r *ByoMachineReconciler) reconcileNormal(ctx context.Context, machineScope
 		}
 	}
 
-	if !machineScope.Cluster.Status.InfrastructureReady {
+	if !ptr.Deref(machineScope.Cluster.Status.Initialization.InfrastructureProvisioned, false) {
 		logger.Info("Cluster infrastructure is not ready yet")
 		conditions.MarkFalse(machineScope.ByoMachine, infrav1.BYOHostReady, infrav1.WaitingForClusterInfrastructureReason, clusterv1.ConditionSeverityInfo, "")
 		return reconcile.Result{}, nil
@@ -356,12 +355,11 @@ func (r *ByoMachineReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Ma
 		Watches(
 			&clusterv1.Cluster{},
 			handler.EnqueueRequestsFromMapFunc(ClusterToByoMachines),
-			// ClusterUnpausedAndInfrastructureReady is deprecated in favor of
-			// ClusterPausedTransitionsOrInfrastructureReady, but the two differ on Create events
-			// (this one requires infra to already be ready at creation; the replacement doesn't
-			// document the same guarantee) -- swapping needs its own behavioral verification, so
-			// it's deferred rather than done as a side effect of this dependency bump.
-			builder.WithPredicates(predicates.ClusterUnpausedAndInfrastructureReady(mgr.GetScheme(), ctrl.LoggerFrom(ctx))), //nolint: staticcheck
+			// ClusterUnpausedAndInfrastructureProvisioned is deprecated in favor of
+			// ClusterPausedTransitionsOrInfrastructureProvisioned, but the two differ on Create events
+			// (this one requires infra to already be provisioned at creation) -- swapping needs its
+			// own behavioral verification, so it's deferred rather than done in a dependency bump.
+			builder.WithPredicates(predicates.ClusterUnpausedAndInfrastructureProvisioned(mgr.GetScheme(), ctrl.LoggerFrom(ctx))), //nolint:staticcheck
 		).
 		Complete(r)
 }
@@ -439,7 +437,7 @@ func (r *ByoMachineReconciler) getRemoteClient(ctx context.Context, byoMachine *
 	if err != nil {
 		return nil, err
 	}
-	remoteClient, err := r.Tracker.GetClient(ctx, util.ObjectKey(cluster))
+	remoteClient, err := r.ClusterCache.GetClient(ctx, util.ObjectKey(cluster))
 	if err != nil {
 		return nil, err
 	}
@@ -606,7 +604,7 @@ func (r *ByoMachineReconciler) attachByoHost(ctx context.Context, machineScope *
 		host.Annotations = make(map[string]string)
 	}
 	host.Annotations[infrav1.EndPointIPAnnotation] = machineScope.Cluster.Spec.ControlPlaneEndpoint.Host
-	host.Annotations[infrav1.K8sVersionAnnotation] = strings.Split(*machineScope.Machine.Spec.Version, "+")[0]
+	host.Annotations[infrav1.K8sVersionAnnotation] = strings.Split(machineScope.Machine.Spec.Version, "+")[0]
 	host.Annotations[infrav1.BundleLookupBaseRegistryAnnotation] = machineScope.ByoCluster.Spec.BundleLookupBaseRegistry
 
 	err = byohostHelper.Patch(ctx, &host)
@@ -709,7 +707,7 @@ func (r *ByoMachineReconciler) createInstallerConfig(ctx context.Context, machin
 			return err
 		}
 		installerAnnotations := map[string]string{
-			infrav1.K8sVersionAnnotation: strings.Split(*machineScope.Machine.Spec.Version, "+")[0],
+			infrav1.K8sVersionAnnotation: strings.Split(machineScope.Machine.Spec.Version, "+")[0],
 		}
 		installerConfig, err = external.GenerateTemplate(&external.GenerateTemplateInput{
 			Template:    template,

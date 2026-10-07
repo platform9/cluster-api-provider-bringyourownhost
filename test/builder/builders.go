@@ -1,4 +1,5 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package builder
@@ -14,8 +15,11 @@ import (
 	certv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	"k8s.io/utils/ptr"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 )
+
+const byoMachineKind = "ByoMachine"
 
 // ByoMachineBuilder holds the variables and objects required to build an infrastructurev1beta1.ByoMachine
 type ByoMachineBuilder struct {
@@ -56,7 +60,7 @@ func (b *ByoMachineBuilder) WithLabelSelector(selector map[string]string) *ByoMa
 func (b *ByoMachineBuilder) Build() *infrastructurev1beta1.ByoMachine {
 	byoMachine := &infrastructurev1beta1.ByoMachine{
 		TypeMeta: metav1.TypeMeta{
-			Kind:       "ByoMachine",
+			Kind:       byoMachineKind,
 			APIVersion: infrastructurev1beta1.GroupVersion.String(),
 		},
 		ObjectMeta: metav1.ObjectMeta{
@@ -243,14 +247,29 @@ func (m *MachineBuilder) Build() *clusterv1.Machine {
 		},
 		Spec: clusterv1.MachineSpec{
 			ClusterName: m.cluster,
+			// Required by the CAPI v1beta2 Machine CRD.
+			InfrastructureRef: clusterv1.ContractVersionedObjectReference{
+				APIGroup: infrastructurev1beta1.GroupVersion.Group,
+				Kind:     byoMachineKind,
+				Name:     m.name,
+			},
 		},
 	}
 	if m.version != "" {
-		machine.Spec.Version = &m.version
+		machine.Spec.Version = m.version
 	}
 	if m.bootstrapDataSecret != "" {
 		machine.Spec.Bootstrap = clusterv1.Bootstrap{
 			DataSecretName: &m.bootstrapDataSecret,
+		}
+	} else {
+		// The CAPI v1beta2 Machine CRD requires either a configRef or a dataSecretName.
+		machine.Spec.Bootstrap = clusterv1.Bootstrap{
+			ConfigRef: clusterv1.ContractVersionedObjectReference{
+				APIGroup: "bootstrap.cluster.x-k8s.io",
+				Kind:     "KubeadmConfig",
+				Name:     m.name,
+			},
 		}
 	}
 
@@ -298,16 +317,14 @@ func (c *ClusterBuilder) Build() *clusterv1.Cluster {
 		},
 		Spec: clusterv1.ClusterSpec{},
 	}
-	if c.paused {
-		cluster.Spec.Paused = c.paused
-	}
+	// Always set: the CAPI v1beta2 Cluster CRD rejects an empty spec.
+	cluster.Spec.Paused = ptr.To(c.paused)
 
 	if c.byoCluster != nil {
-		cluster.Spec.InfrastructureRef = &corev1.ObjectReference{
-			Kind:      "ByoCluster",
-			Namespace: c.byoCluster.Namespace,
-			Name:      c.byoCluster.Name,
-			UID:       c.byoCluster.UID,
+		cluster.Spec.InfrastructureRef = clusterv1.ContractVersionedObjectReference{
+			APIGroup: infrastructurev1beta1.GroupVersion.Group,
+			Kind:     "ByoCluster",
+			Name:     c.byoCluster.Name,
 		}
 	}
 
@@ -544,7 +561,7 @@ func (b *K8sInstallerConfigBuilder) Build() *infrastructurev1beta1.K8sInstallerC
 	if b.byomachine != nil {
 		k8sinstallerconfig.OwnerReferences = []metav1.OwnerReference{
 			{
-				Kind:       "ByoMachine",
+				Kind:       byoMachineKind,
 				Name:       b.byomachine.Name,
 				APIVersion: infrastructurev1beta1.GroupVersion.String(),
 				UID:        b.byomachine.UID,

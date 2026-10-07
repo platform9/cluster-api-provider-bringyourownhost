@@ -33,7 +33,8 @@ import (
 	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 
 	//+kubebuilder:scaffold:imports
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	"sigs.k8s.io/cluster-api/controllers/clustercache"
 	"sigs.k8s.io/cluster-api/controllers/remote"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 )
@@ -92,25 +93,21 @@ func setFlags() {
 // their watches and map functions, so one with a different lifetime leaves
 // those watches running past the manager, or dead before it.
 func setupControllers(ctx context.Context, mgr ctrl.Manager, opts controllerOptions) error {
-	remoteLogger := ctrl.Log.WithName("remote").WithName("ClusterCacheTracker")
-	options := remote.ClusterCacheTrackerOptions{Log: &remoteLogger} //nolint: staticcheck
-	tracker, err := remote.NewClusterCacheTracker(mgr, options)      //nolint: staticcheck
+	clusterCache, err := clustercache.SetupWithManager(ctx, mgr, clustercache.Options{
+		SecretClient: mgr.GetAPIReader(),
+		Client: clustercache.ClientOptions{
+			UserAgent: remote.DefaultClusterAPIUserAgent("byoh-controller-manager"),
+		},
+	}, concurrency(0))
 	if err != nil {
-		return fmt.Errorf("create cluster cache tracker: %w", err)
-	}
-
-	if err := (&remote.ClusterCacheReconciler{ //nolint: staticcheck
-		Client:  mgr.GetClient(),
-		Tracker: tracker,
-	}).SetupWithManager(ctx, mgr, concurrency(0)); err != nil {
-		return fmt.Errorf("create ClusterCacheReconciler controller: %w", err)
+		return fmt.Errorf("create cluster cache: %w", err)
 	}
 
 	if err := (&byohcontrollers.ByoMachineReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Tracker:  tracker,
-		Recorder: mgr.GetEventRecorderFor("byomachine-controller"),
+		Client:       mgr.GetClient(),
+		Scheme:       mgr.GetScheme(),
+		ClusterCache: clusterCache,
+		Recorder:     mgr.GetEventRecorderFor("byomachine-controller"),
 	}).SetupWithManager(ctx, mgr); err != nil {
 		return fmt.Errorf("create ByoMachine controller: %w", err)
 	}
