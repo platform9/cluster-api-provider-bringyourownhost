@@ -1,10 +1,12 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package v1beta1
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -41,7 +43,7 @@ var managerServiceAccounts = map[string]struct{}{
 // Precompile email-like regex for efficiency
 var emailLikeUserRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 
-// nolint: gocritic
+// nolint: gocritic // hugeParam: admission.Handler requires Request by value.
 // Handle handles all the requests for ByoHost resource
 func (v *ByoHostValidator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	var response admission.Response
@@ -74,24 +76,22 @@ func (v *ByoHostValidator) handleCreateUpdate(req *admission.Request) admission.
 		return admission.Allowed("")
 	}
 
-	substrs := strings.Split(userName, ":")
-
-	if len(substrs) < 2 { //nolint: mnd
-		return admission.Denied(fmt.Sprintf("%s is not a valid agent username", userName))
+	// The host name comes from the authenticated identity, not from the
+	// object that issued the certificate, which may be gone by now.
+	hostName, err := HostNameFromIdentity(userName)
+	if err != nil {
+		return admission.Denied(fmt.Sprintf("%s is not a valid agent username: %s", userName, err.Error()))
 	}
 
-	// An agent's username encodes the host it owns as the third colon-separated segment
-	// (format: byoh:host:<hostname>). Reject requests where the encoded host does not
-	// match the target ByoHost — an agent must not create or update another agent's host.
+	if hostName != byoHost.Name {
+		return admission.Denied(fmt.Sprintf("%s cannot create/update resource %s", userName, byoHost.Name))
+	}
 
-	// FIXME: We only support token based kubeconfig for now. cert based flow needs a redesign. Disable it for now to allow host onboarding for the time being.
-	// Restoring the check must restore these two expectations: a create and an update from
-	// "byoh:host:host2" targeting a ByoHost named "host1" are both denied, with the message
-	// "byoh:host:host2 cannot create/update resource host1".
-	//
-	// if len(substrs) >= 3 && !strings.Contains(byoHost.Name, substrs[2]) {
-	// 	return admission.Denied(fmt.Sprintf("%s cannot create/update resource %s", userName, byoHost.Name))
-	// }
+	// On create the object must already carry the requester's identity, which
+	// the stamping webhook wrote. A mismatch means the stamp was bypassed.
+	if req.Operation == v1.Create && byoHost.Spec.Identity != userName {
+		return admission.Denied(fmt.Sprintf("%s cannot create resource %s with identity %q", userName, byoHost.Name, byoHost.Spec.Identity))
+	}
 
 	return admission.Allowed("")
 }
@@ -122,4 +122,83 @@ func (v *ByoHostValidator) handleDelete(ctx context.Context, req *admission.Requ
 		return admission.Denied("cannot delete ByoHost when MachineRef is assigned")
 	}
 	return admission.Allowed("")
+}
+
+// hostIdentityPrefix is what every host certificate's common name starts
+// with. The segment after it is the host name, optionally followed by a
+// suffix that makes each issued certificate a distinct identity.
+const hostIdentityPrefix = "byoh:host:"
+
+// HostNameFromIdentity returns the host name a certificate identity names.
+// Segments are compared whole, because a substring match would let a
+// certificate for "worker-1" act on "worker-10".
+//
+// For example, "byoh:host:example-worker-1:x7k2p" and "byoh:host:example-worker-1"
+// both return "example-worker-1".
+//
+// NOTE: the agent's CSR does not add a suffix yet, so the three-segment form
+// is accepted until it does.
+func HostNameFromIdentity(identity string) (string, error) {
+	if !strings.HasPrefix(identity, hostIdentityPrefix) {
+		return "", fmt.Errorf("identity %q does not start with %q", identity, hostIdentityPrefix)
+	}
+
+	segments := strings.Split(identity, ":")
+	if len(segments) != 3 && len(segments) != 4 { //nolint: mnd
+		return "", fmt.Errorf("identity %q is not of the form %s<hostName> or %s<hostName>:<suffix>", identity, hostIdentityPrefix, hostIdentityPrefix)
+	}
+
+	hostName := segments[2]
+	if hostName == "" {
+		return "", fmt.Errorf("identity %q carries an empty host name", identity)
+	}
+
+	if len(segments) == 4 && segments[3] == "" { //nolint: mnd
+		return "", fmt.Errorf("identity %q carries an empty suffix", identity)
+	}
+
+	return hostName, nil
+}
+
+//+kubebuilder:webhook:path=/mutate-infrastructure-cluster-x-k8s-io-v1beta1-byohost,mutating=true,failurePolicy=fail,sideEffects=None,groups=infrastructure.cluster.x-k8s.io,resources=byohosts,verbs=create,versions=v1beta1,name=mbyohost.kb.io,admissionReviewVersions=v1
+
+// +k8s:deepcopy-gen=false
+// ByoHostIdentityStamper records which certificate identity may act as a host,
+// taken from whoever authenticated the creating request. Renewal is authorized
+// against that record, so it must come from the request and never from the
+// object body.
+//
+// It is a spec field rather than a status one because the API server drops the
+// status stanza on create, so a webhook cannot stamp status at creation time.
+type ByoHostIdentityStamper struct {
+	Decoder admission.Decoder
+}
+
+// Handle implements admission.Handler.
+// nolint: gocritic // hugeParam: admission.Handler requires Request by value.
+func (s *ByoHostIdentityStamper) Handle(_ context.Context, req admission.Request) admission.Response {
+	if req.Operation != v1.Create {
+		return admission.Allowed("")
+	}
+
+	byoHost := &ByoHost{}
+	if err := s.Decoder.Decode(req, byoHost); err != nil {
+		return admission.Errored(http.StatusBadRequest, err)
+	}
+
+	// Only a host certificate gets stamped. An operator or the manager creates
+	// hosts under its own identity, which names no host and would make the
+	// record meaningless.
+	if _, err := HostNameFromIdentity(req.UserInfo.Username); err != nil {
+		return admission.Allowed("")
+	}
+
+	byoHost.Spec.Identity = req.UserInfo.Username
+
+	marshaled, err := json.Marshal(byoHost)
+	if err != nil {
+		return admission.Errored(http.StatusInternalServerError, err)
+	}
+
+	return admission.PatchResponseFromRaw(req.Object.Raw, marshaled)
 }
