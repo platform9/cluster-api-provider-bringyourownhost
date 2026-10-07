@@ -25,10 +25,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	"k8s.io/utils/ptr"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/annotations"
-	"sigs.k8s.io/cluster-api/util/conditions"
+	conditions "sigs.k8s.io/cluster-api/util/conditions/deprecated/v1beta1"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -117,18 +118,18 @@ var _ = Describe("Controllers/ByomachineController", func() {
 			NamespacedName: types.NamespacedName{
 				Name:      byoMachineWithNonExistingCluster.Name,
 				Namespace: byoMachineWithNonExistingCluster.Namespace}})
-		Expect(err).To(MatchError("failed to get Cluster/non-existent-cluster: Cluster.cluster.x-k8s.io \"non-existent-cluster\" not found"))
+		Expect(err).To(MatchError("failed to get Cluster default/non-existent-cluster: Cluster.cluster.x-k8s.io \"non-existent-cluster\" not found"))
 	})
 
 	Context("When cluster infrastructure is ready", func() {
 		BeforeEach(func() {
 			ph, err := patch.NewHelper(capiCluster, k8sClientUncached)
 			Expect(err).ShouldNot(HaveOccurred())
-			capiCluster.Status.InfrastructureReady = true
+			capiCluster.Status.Initialization.InfrastructureProvisioned = ptr.To(true)
 			Expect(ph.Patch(ctx, capiCluster, patch.WithStatusObservedGeneration{})).Should(Succeed())
 
 			WaitForObjectToBeUpdatedInCache(ctx, capiCluster, func(object client.Object) bool {
-				return object.(*clusterv1.Cluster).Status.InfrastructureReady == true
+				return ptr.Deref(object.(*clusterv1.Cluster).Status.Initialization.InfrastructureProvisioned, false) == true
 			})
 		})
 
@@ -585,7 +586,15 @@ var _ = Describe("Controllers/ByomachineController", func() {
 				ph, err := patch.NewHelper(machine, k8sClientUncached)
 				Expect(err).ShouldNot(HaveOccurred())
 
-				machine.Spec.Bootstrap = clusterv1.Bootstrap{DataSecretName: nil}
+				// v1beta2 requires a configRef when dataSecretName is unset: the bootstrap
+				// provider hasn't produced the data secret yet.
+				machine.Spec.Bootstrap = clusterv1.Bootstrap{
+					ConfigRef: clusterv1.ContractVersionedObjectReference{
+						APIGroup: "bootstrap.cluster.x-k8s.io",
+						Kind:     "KubeadmConfig",
+						Name:     machine.Name,
+					},
+				}
 				Expect(ph.Patch(ctx, machine, patch.WithStatusObservedGeneration{})).Should(Succeed())
 
 				WaitForObjectToBeUpdatedInCache(ctx, machine, func(object client.Object) bool {
@@ -838,7 +847,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 				Expect(err).ShouldNot(HaveOccurred())
 
 				Expect(k8sInstallerConfigTemplate.Spec.Template.Spec).To(Equal(createdK8sInstallerConfig.Spec))
-				Expect(createdK8sInstallerConfig.GetAnnotations()[infrastructurev1beta1.K8sVersionAnnotation]).To(Equal(*machine.Spec.Version))
+				Expect(createdK8sInstallerConfig.GetAnnotations()[infrastructurev1beta1.K8sVersionAnnotation]).To(Equal(machine.Spec.Version))
 			})
 		})
 
@@ -876,12 +885,12 @@ var _ = Describe("Controllers/ByomachineController", func() {
 		BeforeEach(func() {
 			ph, err := patch.NewHelper(capiCluster, k8sClientUncached)
 			Expect(err).ShouldNot(HaveOccurred())
-			capiCluster.Status.InfrastructureReady = false
+			capiCluster.Status.Initialization.InfrastructureProvisioned = ptr.To(false)
 			err = ph.Patch(ctx, capiCluster, patch.WithStatusObservedGeneration{})
 			Expect(err).ShouldNot(HaveOccurred())
 
 			WaitForObjectToBeUpdatedInCache(ctx, capiCluster, func(object client.Object) bool {
-				return object.(*clusterv1.Cluster).Status.InfrastructureReady == false
+				return ptr.Deref(object.(*clusterv1.Cluster).Status.Initialization.InfrastructureProvisioned, false) == false
 			})
 		})
 

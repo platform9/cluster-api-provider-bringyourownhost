@@ -1,4 +1,5 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package v1beta1
@@ -6,7 +7,7 @@ package v1beta1
 import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 )
 
 const (
@@ -95,11 +96,11 @@ func init() {
 }
 
 // GetConditions returns the conditions of ByoMachine status
-func (byoMachine *ByoMachine) GetConditions() clusterv1.Conditions {
+func (byoMachine *ByoMachine) GetV1Beta1Conditions() clusterv1.Conditions {
 	return byoMachine.Status.Conditions
 }
 
 // SetConditions sets the conditions of ByoMachine status
-func (byoMachine *ByoMachine) SetConditions(conditions clusterv1.Conditions) {
+func (byoMachine *ByoMachine) SetV1Beta1Conditions(conditions clusterv1.Conditions) {
 	byoMachine.Status.Conditions = conditions
 }

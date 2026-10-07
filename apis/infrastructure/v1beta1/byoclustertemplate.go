@@ -1,11 +1,12 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package v1beta1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1beta1 "sigs.k8s.io/cluster-api/api/core/v1beta1" //nolint:staticcheck // stays on the v1beta1 schema until the v1beta2 contract is adopted (KAAP-2449)
 )
 
 // ByoClusterTemplateSpec defines the desired state of ByoClusterTemplate.
@@ -45,6 +46,6 @@ type ByoClusterTemplateResource struct {
 	// Standard object's metadata.
 	// More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata
 	// +optional
-	ObjectMeta clusterv1.ObjectMeta `json:"metadata,omitempty"`
-	Spec       ByoClusterSpec       `json:"spec"`
+	ObjectMeta clusterv1beta1.ObjectMeta `json:"metadata,omitempty"`
+	Spec       ByoClusterSpec            `json:"spec"`
 }
