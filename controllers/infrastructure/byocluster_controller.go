@@ -176,7 +176,7 @@ func (r ByoClusterReconciler) reconcileNormal(ctx context.Context, byoCluster *i
 		byoCluster.Spec.ControlPlaneEndpoint.Port = DefaultAPIEndpointPort
 	}
 
-	byoCluster.Status.Ready = true
+	byoCluster.Status.Ready = true //nolint:staticcheck // still written for v1beta1-contract consumers until it is removed
 
 	return reconcile.Result{}, nil
 }

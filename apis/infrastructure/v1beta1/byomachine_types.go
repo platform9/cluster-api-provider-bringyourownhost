@@ -61,10 +61,54 @@ type ByoMachineStatus struct {
 	// +optional
 	HostInfo HostInfo `json:"hostinfo,omitempty"`
 
+	// Initialization provides observations of the ByoMachine initialization process.
+	// Cluster API reads initialization.provisioned under the v1beta2 provider contract.
+	// +optional
+	Initialization *ByoMachineInitializationStatus `json:"initialization,omitempty"`
+
+	// Conditions represents the observations of the ByoMachine's current state.
+	// +optional
+	// +listType=map
+	// +listMapKey=type
+	// +kubebuilder:validation:MaxItems=32
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// Ready is true when the ByoMachine is attached to a host and the node's providerID is set.
+	//
+	// Deprecated: Use initialization.provisioned instead. Kept for one release
+	// series so pre-v1beta2-contract consumers keep working.
 	// +optional
 	Ready bool `json:"ready"`
 
-	// Conditions defines current service state of the BYOMachine.
+	// Deprecated groups all the status fields that are deprecated and will be removed
+	// when support for the v1beta1 provider contract is dropped.
+	// +optional
+	Deprecated *ByoMachineDeprecatedStatus `json:"deprecated,omitempty"`
+}
+
+// ByoMachineInitializationStatus provides observations of the ByoMachine initialization process.
+// +kubebuilder:validation:MinProperties=1
+type ByoMachineInitializationStatus struct {
+	// Provisioned is true when the infrastructure provider reports that the machine's
+	// infrastructure is fully provisioned.
+	// +optional
+	Provisioned *bool `json:"provisioned,omitempty"`
+}
+
+// ByoMachineDeprecatedStatus groups all the status fields that are deprecated and will be
+// removed in a future version.
+type ByoMachineDeprecatedStatus struct {
+	// V1Beta1 groups all the status fields that are deprecated and will be removed when
+	// support for the v1beta1 provider contract is dropped.
+	// +optional
+	V1Beta1 *ByoMachineV1Beta1DeprecatedStatus `json:"v1beta1,omitempty"`
+}
+
+// ByoMachineV1Beta1DeprecatedStatus groups all the status fields that are deprecated and
+// will be removed when support for the v1beta1 provider contract is dropped.
+type ByoMachineV1Beta1DeprecatedStatus struct {
+	// Conditions defines current service state of the ByoMachine, in the legacy
+	// Cluster API v1beta1 condition format.
 	// +optional
 	Conditions clusterv1.Conditions `json:"conditions,omitempty"`
 }
@@ -95,12 +139,31 @@ func init() {
 	SchemeBuilder.Register(&ByoMachine{}, &ByoMachineList{})
 }
 
-// GetConditions returns the conditions of ByoMachine status
-func (byoMachine *ByoMachine) GetV1Beta1Conditions() clusterv1.Conditions {
+// GetConditions returns the conditions of the ByoMachine.
+func (byoMachine *ByoMachine) GetConditions() []metav1.Condition {
 	return byoMachine.Status.Conditions
 }
 
-// SetConditions sets the conditions of ByoMachine status
-func (byoMachine *ByoMachine) SetV1Beta1Conditions(conditions clusterv1.Conditions) {
+// SetConditions sets the conditions of the ByoMachine.
+func (byoMachine *ByoMachine) SetConditions(conditions []metav1.Condition) {
 	byoMachine.Status.Conditions = conditions
+}
+
+// GetV1Beta1Conditions returns the legacy v1beta1 conditions of the ByoMachine.
+func (byoMachine *ByoMachine) GetV1Beta1Conditions() clusterv1.Conditions {
+	if byoMachine.Status.Deprecated == nil || byoMachine.Status.Deprecated.V1Beta1 == nil {
+		return nil
+	}
+	return byoMachine.Status.Deprecated.V1Beta1.Conditions
+}
+
+// SetV1Beta1Conditions sets the legacy v1beta1 conditions of the ByoMachine.
+func (byoMachine *ByoMachine) SetV1Beta1Conditions(conditions clusterv1.Conditions) {
+	if byoMachine.Status.Deprecated == nil {
+		byoMachine.Status.Deprecated = &ByoMachineDeprecatedStatus{}
+	}
+	if byoMachine.Status.Deprecated.V1Beta1 == nil {
+		byoMachine.Status.Deprecated.V1Beta1 = &ByoMachineV1Beta1DeprecatedStatus{}
+	}
+	byoMachine.Status.Deprecated.V1Beta1.Conditions = conditions
 }

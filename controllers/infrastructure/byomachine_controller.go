@@ -325,7 +325,7 @@ func (r *ByoMachineReconciler) updateNodeProviderID(ctx context.Context, machine
 	}
 
 	machineScope.ByoMachine.Spec.ProviderID = providerID
-	machineScope.ByoMachine.Status.Ready = true
+	machineScope.ByoMachine.Status.Ready = true //nolint:staticcheck // still written for v1beta1-contract consumers until it is removed
 	conditions.MarkTrue(machineScope.ByoMachine, infrav1.BYOHostReady)
 	r.Recorder.Eventf(machineScope.ByoMachine, corev1.EventTypeNormal, "NodeProvisionedSucceeded", "Provisioned Node %s", machineScope.ByoHost.Name)
 	return ctrl.Result{}, nil

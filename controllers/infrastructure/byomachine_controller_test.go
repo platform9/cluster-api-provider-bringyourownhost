@@ -271,7 +271,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 				err = k8sClientUncached.Get(ctx, byoMachineLookupKey, createdByoMachine)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(createdByoMachine.Spec.ProviderID).To(ContainSubstring(controllers.ProviderIDPrefix))
-				Expect(createdByoMachine.Status.Ready).To(BeTrue())
+				Expect(createdByoMachine.Status.Ready).To(BeTrue()) //nolint:staticcheck // deprecated field is still written
 
 				actualCondition := conditions.Get(createdByoMachine, infrastructurev1beta1.BYOHostReady)
 				Expect(*actualCondition).To(conditions.MatchCondition(clusterv1.Condition{
@@ -748,7 +748,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 				err = k8sClientUncached.Get(ctx, byoMachineLookupKey, createdByoMachine)
 				Expect(err).ToNot(HaveOccurred())
 
-				Expect(createdByoMachine.Status.Ready).To(BeTrue())
+				Expect(createdByoMachine.Status.Ready).To(BeTrue()) //nolint:staticcheck // deprecated field is still written
 
 				readyCondition := conditions.Get(createdByoMachine, infrastructurev1beta1.BYOHostReady)
 				Expect(*readyCondition).To(conditions.MatchCondition(clusterv1.Condition{
@@ -797,7 +797,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 				createdByoMachine := &infrastructurev1beta1.ByoMachine{}
 				err = k8sClientUncached.Get(ctx, byoMachineLookupKey, createdByoMachine)
 				Expect(err).ToNot(HaveOccurred())
-				Expect(createdByoMachine.Status.Ready).To(BeTrue())
+				Expect(createdByoMachine.Status.Ready).To(BeTrue()) //nolint:staticcheck // deprecated field is still written
 
 				readyCondition := conditions.Get(createdByoMachine, infrastructurev1beta1.BYOHostReady)
 				Expect(*readyCondition).To(conditions.MatchCondition(clusterv1.Condition{
