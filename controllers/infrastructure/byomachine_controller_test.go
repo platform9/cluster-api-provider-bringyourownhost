@@ -29,6 +29,7 @@ import (
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/annotations"
+	v1beta2conditions "sigs.k8s.io/cluster-api/util/conditions"
 	conditions "sigs.k8s.io/cluster-api/util/conditions/deprecated/v1beta1"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -190,6 +191,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 					Reason:   infrastructurev1beta1.BYOHostsUnavailableReason,
 					Severity: clusterv1.ConditionSeverityInfo,
 				}))
+				expectV1Beta2BYOHostReady(createdByoMachine, metav1.ConditionFalse, infrastructurev1beta1.BYOHostsUnavailableReason)
 
 				// assert events
 				events := eventutils.CollectEvents(recorder.Events)
@@ -278,6 +280,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 					Type:   infrastructurev1beta1.BYOHostReady,
 					Status: corev1.ConditionTrue,
 				}))
+				expectV1Beta2BYOHostReady(createdByoMachine, metav1.ConditionTrue, clusterv1.ReadyReason)
 
 				// assert events
 				events := eventutils.CollectEvents(recorder.Events)
@@ -538,6 +541,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 					Reason:   infrastructurev1beta1.ClusterOrResourcePausedReason,
 					Severity: clusterv1.ConditionSeverityInfo,
 				}))
+				expectV1Beta2BYOHostReady(createdByoMachine, metav1.ConditionFalse, infrastructurev1beta1.ClusterOrResourcePausedReason)
 			})
 
 			It("should mark BYOHostReady as False when cluster is paused", func() {
@@ -576,6 +580,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 					Reason:   infrastructurev1beta1.ClusterOrResourcePausedReason,
 					Severity: clusterv1.ConditionSeverityInfo,
 				}))
+				expectV1Beta2BYOHostReady(createdByoMachine, metav1.ConditionFalse, infrastructurev1beta1.ClusterOrResourcePausedReason)
 
 				Expect(k8sClientUncached.Delete(ctx, pausedCluster)).Should(Succeed())
 				Expect(k8sClientUncached.Delete(ctx, pausedMachine)).Should(Succeed())
@@ -615,6 +620,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 					Reason:   infrastructurev1beta1.WaitingForBootstrapDataSecretReason,
 					Severity: clusterv1.ConditionSeverityInfo,
 				}))
+				expectV1Beta2BYOHostReady(createdByoMachine, metav1.ConditionFalse, infrastructurev1beta1.WaitingForBootstrapDataSecretReason)
 			})
 
 			It("should mark BYOHostReady condition as False when the InstallationSecret is not available", func() {
@@ -635,6 +641,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 					Reason:   infrastructurev1beta1.InstallationSecretNotAvailableReason,
 					Severity: clusterv1.ConditionSeverityInfo,
 				}))
+				expectV1Beta2BYOHostReady(createdByoMachine, metav1.ConditionFalse, infrastructurev1beta1.InstallationSecretNotAvailableReason)
 			})
 		})
 
@@ -675,6 +682,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 					Reason:   infrastructurev1beta1.BYOHostsUnavailableReason,
 					Severity: clusterv1.ConditionSeverityInfo,
 				}))
+				expectV1Beta2BYOHostReady(createdByoMachine, metav1.ConditionFalse, infrastructurev1beta1.BYOHostsUnavailableReason)
 
 				// assert events
 				events := eventutils.CollectEvents(recorder.Events)
@@ -713,6 +721,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 					Reason:   infrastructurev1beta1.BYOHostsUnavailableReason,
 					Severity: clusterv1.ConditionSeverityInfo,
 				}))
+				expectV1Beta2BYOHostReady(createdByoMachine, metav1.ConditionFalse, infrastructurev1beta1.BYOHostsUnavailableReason)
 
 				// assert events
 				events := eventutils.CollectEvents(recorder.Events)
@@ -755,6 +764,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 					Type:   infrastructurev1beta1.BYOHostReady,
 					Status: corev1.ConditionTrue,
 				}))
+				expectV1Beta2BYOHostReady(createdByoMachine, metav1.ConditionTrue, clusterv1.ReadyReason)
 
 				// assert events
 				events := eventutils.CollectEvents(recorder.Events)
@@ -804,6 +814,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 					Type:   infrastructurev1beta1.BYOHostReady,
 					Status: corev1.ConditionTrue,
 				}))
+				expectV1Beta2BYOHostReady(createdByoMachine, metav1.ConditionTrue, clusterv1.ReadyReason)
 
 				// assert events
 				events := eventutils.CollectEvents(recorder.Events)
@@ -909,6 +920,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 				Reason:   infrastructurev1beta1.WaitingForClusterInfrastructureReason,
 				Severity: clusterv1.ConditionSeverityInfo,
 			}))
+			expectV1Beta2BYOHostReady(createdByoMachine, metav1.ConditionFalse, infrastructurev1beta1.WaitingForClusterInfrastructureReason)
 
 			// assert events
 			events := eventutils.CollectEvents(recorder.Events)
@@ -1037,4 +1049,21 @@ func TestByoHostToByoMachineMapFunc(t *testing.T) {
 	t.Run("returns nil for a non-ByoHost object", func(t *testing.T) {
 		assert.Nil(t, mapFunc(t.Context(), &corev1.Pod{}))
 	})
+}
+
+// expectV1Beta2BYOHostReady asserts the v1beta2 BYOHostReady condition, plus the Ready
+// summary and initialization.provisioned that the v1beta2 provider contract derives from it.
+func expectV1Beta2BYOHostReady(byoMachine *infrastructurev1beta1.ByoMachine, status metav1.ConditionStatus, reason string) {
+	GinkgoHelper()
+	hostReady := v1beta2conditions.Get(byoMachine, string(infrastructurev1beta1.BYOHostReady))
+	Expect(hostReady).NotTo(BeNil())
+	Expect(hostReady.Status).To(Equal(status))
+	Expect(hostReady.Reason).To(Equal(reason))
+
+	ready := v1beta2conditions.Get(byoMachine, clusterv1.ReadyCondition)
+	Expect(ready).NotTo(BeNil())
+	Expect(ready.Status).To(Equal(status))
+
+	provisioned := byoMachine.Status.Initialization != nil && ptr.Deref(byoMachine.Status.Initialization.Provisioned, false)
+	Expect(provisioned).To(Equal(status == metav1.ConditionTrue))
 }
