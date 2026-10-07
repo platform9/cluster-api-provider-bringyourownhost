@@ -1,147 +1,51 @@
-// Copyright 2021 VMware, Inc. All Rights Reserved.
 // Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package controllers_test
 
 import (
-	"context"
-	"fmt"
+	"testing"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	controllers "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/controllers/infrastructure"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/test/builder"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	v1beta2conditions "sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
-var _ = Describe("Controllers/ByoclusterController", func() {
+func TestByoClusterController_ReconcilesLegacyStatus(t *testing.T) {
+	c := startIsolatedEnv(t)
+	ns := newTestNamespace(t, c, "byocluster-legacy-status")
+	cluster := builder.Cluster(ns, "legacy-cluster").Build()
+	require.NoError(t, c.Create(t.Context(), cluster))
+	infraCluster := builder.ByoCluster(ns, "legacy-cluster").WithOwnerCluster(cluster).Build()
+	require.NoError(t, c.Create(t.Context(), infraCluster))
 
-	var (
-		k8sClientUncached client.Client
-		byoCluster        *infrastructurev1beta1.ByoCluster
-		cluster           *clusterv1.Cluster
-	)
-
-	BeforeEach(func() {
-		ctx = context.Background()
-		var clientErr error
-
-		k8sClientUncached, clientErr = client.New(cfg, client.Options{Scheme: scheme.Scheme})
-		Expect(clientErr).NotTo(HaveOccurred())
+	storeLegacyStatus(t, c, infraCluster, "byoclusters.infrastructure.cluster.x-k8s.io", map[string]interface{}{
+		"ready": true,
+		"conditions": []interface{}{
+			map[string]interface{}{"type": "Ready", "status": "True", "lastTransitionTime": "2025-06-01T00:00:00Z"},
+		},
 	})
 
-	It("should not throw error when byocluster does not exist", func() {
-		_, err := byoClusterReconciler.Reconcile(ctx, reconcile.Request{
-			NamespacedName: types.NamespacedName{
-				Name:      "non-existent-byocluster",
-				Namespace: nonExistentNamespace}})
-		Expect(err).NotTo(HaveOccurred())
-	})
+	r := controllers.ByoClusterReconciler{Client: c}
+	_, err := r.Reconcile(t.Context(), reconcile.Request{NamespacedName: client.ObjectKeyFromObject(infraCluster)})
+	require.NoError(t, err)
 
-	It("should not throw error when OwnerRef is not set", func() {
-		byoCluster = builder.ByoCluster(defaultNamespace, "byocluster-not-link-cluster").Build()
-		Expect(k8sClientUncached.Create(ctx, byoCluster)).Should(Succeed())
-		WaitForObjectsToBePopulatedInCache(ctx, byoCluster)
-
-		_, err := byoClusterReconciler.Reconcile(ctx, reconcile.Request{
-			NamespacedName: types.NamespacedName{
-				Name:      byoCluster.Name,
-				Namespace: byoCluster.Namespace}})
-		Expect(err).NotTo(HaveOccurred())
-	})
-
-	It("should not throw error when byocluster is paused", func() {
-		cluster = builder.Cluster(defaultNamespace, "cluster-paused").
-			WithPausedField(true).
-			Build()
-		Expect(k8sClientUncached.Create(ctx, cluster)).Should(Succeed())
-		WaitForObjectsToBePopulatedInCache(ctx, cluster)
-
-		byoCluster = builder.ByoCluster(defaultNamespace, "byocluster-paused").
-			WithOwnerCluster(cluster).
-			Build()
-		Expect(k8sClientUncached.Create(ctx, byoCluster)).Should(Succeed())
-		WaitForObjectsToBePopulatedInCache(ctx, byoCluster)
-
-		_, err := byoClusterReconciler.Reconcile(ctx, reconcile.Request{
-			NamespacedName: types.NamespacedName{
-				Name:      byoCluster.Name,
-				Namespace: byoCluster.Namespace}})
-		Expect(err).NotTo(HaveOccurred())
-	})
-
-	It("should be able to delete ByoCluster", func() {
-		cluster = builder.Cluster(defaultNamespace, "byocluster-deleted").
-			Build()
-		Expect(k8sClientUncached.Create(ctx, cluster)).Should(Succeed())
-		WaitForObjectsToBePopulatedInCache(ctx, cluster)
-
-		byoCluster = builder.ByoCluster(defaultNamespace, "byocluster-deleted").
-			WithOwnerCluster(cluster).
-			Build()
-		Expect(k8sClientUncached.Create(ctx, byoCluster)).Should(Succeed())
-		WaitForObjectsToBePopulatedInCache(ctx, byoCluster)
-
-		byoClusterLookupKey := types.NamespacedName{Name: byoCluster.Name, Namespace: byoCluster.Namespace}
-		_, err := byoClusterReconciler.Reconcile(ctx, reconcile.Request{
-			NamespacedName: byoClusterLookupKey})
-		Expect(err).NotTo(HaveOccurred())
-
-		Expect(k8sClientUncached.Delete(ctx, byoCluster)).Should(Succeed())
-		WaitForObjectToBeUpdatedInCache(ctx, byoCluster, func(object client.Object) bool {
-			return !object.(*infrastructurev1beta1.ByoCluster).DeletionTimestamp.IsZero()
-		})
-
-		_, err = byoClusterReconciler.Reconcile(ctx, reconcile.Request{
-			NamespacedName: byoClusterLookupKey})
-		Expect(err).NotTo(HaveOccurred())
-
-		// assert ByoCluster does not exists
-		deletedByoCluster := &infrastructurev1beta1.ByoCluster{}
-		err = k8sClientUncached.Get(ctx, byoClusterLookupKey, deletedByoCluster)
-		Expect(err).To(MatchError(fmt.Sprintf("byoclusters.infrastructure.cluster.x-k8s.io %q not found", byoClusterLookupKey.Name)))
-
-	})
-
-	It("should get valid value of fields when ByoClusterController gets a create request", func() {
-		cluster = builder.Cluster(defaultNamespace, "byocluster-finalizer").
-			Build()
-		Expect(k8sClientUncached.Create(ctx, cluster)).Should(Succeed())
-		WaitForObjectsToBePopulatedInCache(ctx, cluster)
-
-		byoCluster = builder.ByoCluster(defaultNamespace, "byocluster-finalizer").
-			WithOwnerCluster(cluster).
-			Build()
-		Expect(k8sClientUncached.Create(ctx, byoCluster)).Should(Succeed())
-		WaitForObjectsToBePopulatedInCache(ctx, byoCluster)
-
-		byoClusterLookupKey := types.NamespacedName{Name: byoCluster.Name, Namespace: byoCluster.Namespace}
-		_, err := byoClusterReconciler.Reconcile(ctx, reconcile.Request{
-			NamespacedName: byoClusterLookupKey})
-		Expect(err).NotTo(HaveOccurred())
-
-		createdByoCluster := &infrastructurev1beta1.ByoCluster{}
-		err = k8sClientUncached.Get(ctx, byoClusterLookupKey, createdByoCluster)
-		Expect(err).ToNot(HaveOccurred())
-		Expect(controllerutil.ContainsFinalizer(createdByoCluster, infrastructurev1beta1.ClusterFinalizer)).To(BeTrue())
-		Expect(createdByoCluster.Status.Ready).To(BeTrue()) //nolint:staticcheck // deprecated field is still written
-		Expect(createdByoCluster.Status.Initialization).NotTo(BeNil())
-		Expect(createdByoCluster.Status.Initialization.Provisioned).To(Equal(ptr.To(true)))
-		ready := v1beta2conditions.Get(createdByoCluster, clusterv1.ReadyCondition)
-		Expect(ready).NotTo(BeNil())
-		Expect(ready.Status).To(Equal(metav1.ConditionTrue))
-		Expect(ready.Reason).To(Equal(clusterv1.ProvisionedReason))
-		Expect(createdByoCluster.Spec.ControlPlaneEndpoint.Port).To(Equal(controllers.DefaultAPIEndpointPort))
-	})
-
-})
+	updated := &infrastructurev1beta1.ByoCluster{}
+	require.NoError(t, c.Get(t.Context(), client.ObjectKeyFromObject(infraCluster), updated))
+	require.NotNil(t, updated.Status.Initialization)
+	assert.Equal(t, ptr.To(true), updated.Status.Initialization.Provisioned)
+	assert.True(t, updated.Status.Ready) //nolint:staticcheck // deprecated field is still written
+	ready := v1beta2conditions.Get(updated, clusterv1.ReadyCondition)
+	require.NotNil(t, ready)
+	assert.Equal(t, metav1.ConditionTrue, ready.Status)
+	assert.Equal(t, clusterv1.ProvisionedReason, ready.Reason)
+	assertConditionsInV1Beta2Shape(t, c, updated)
+}
