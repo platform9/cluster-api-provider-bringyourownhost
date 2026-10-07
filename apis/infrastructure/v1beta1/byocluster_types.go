@@ -1,11 +1,13 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package v1beta1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1beta1 "sigs.k8s.io/cluster-api/api/core/v1beta1" //nolint:staticcheck // stays on the v1beta1 schema until the v1beta2 contract is adopted (KAAP-2449)
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 )
 
 const (
@@ -37,7 +39,7 @@ type ByoClusterStatus struct {
 	Conditions clusterv1.Conditions `json:"conditions,omitempty"`
 
 	// FailureDomains is a list of failure domain objects synced from the infrastructure provider.
-	FailureDomains clusterv1.FailureDomains `json:"failureDomains,omitempty"`
+	FailureDomains clusterv1beta1.FailureDomains `json:"failureDomains,omitempty"`
 }
 
 // APIEndpoint represents a reachable Kubernetes API endpoint.
@@ -65,12 +67,12 @@ type ByoCluster struct {
 }
 
 // GetConditions gets the condition for the ByoCluster status
-func (byoCluster *ByoCluster) GetConditions() clusterv1.Conditions {
+func (byoCluster *ByoCluster) GetV1Beta1Conditions() clusterv1.Conditions {
 	return byoCluster.Status.Conditions
 }
 
 // SetConditions sets the conditions for the ByoCluster status
-func (byoCluster *ByoCluster) SetConditions(conditions clusterv1.Conditions) {
+func (byoCluster *ByoCluster) SetV1Beta1Conditions(conditions clusterv1.Conditions) {
 	byoCluster.Status.Conditions = conditions
 }
 

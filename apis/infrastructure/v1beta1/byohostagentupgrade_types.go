@@ -6,7 +6,7 @@ package v1beta1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 )
 
 // ByoHostAgentUpgradePhase is the coarse-grained state of a
@@ -150,11 +150,11 @@ func init() {
 }
 
 // GetConditions gets the ByoHostAgentUpgrade status conditions
-func (b *ByoHostAgentUpgrade) GetConditions() clusterv1.Conditions {
+func (b *ByoHostAgentUpgrade) GetV1Beta1Conditions() clusterv1.Conditions {
 	return b.Status.Conditions
 }
 
 // SetConditions sets the ByoHostAgentUpgrade status conditions
-func (b *ByoHostAgentUpgrade) SetConditions(conditions clusterv1.Conditions) {
+func (b *ByoHostAgentUpgrade) SetV1Beta1Conditions(conditions clusterv1.Conditions) {
 	b.Status.Conditions = conditions
 }
