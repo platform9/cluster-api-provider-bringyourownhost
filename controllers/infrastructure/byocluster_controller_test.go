@@ -13,9 +13,12 @@ import (
 	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	controllers "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/controllers/infrastructure"
 	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/test/builder"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	v1beta2conditions "sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -132,6 +135,12 @@ var _ = Describe("Controllers/ByoclusterController", func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(controllerutil.ContainsFinalizer(createdByoCluster, infrastructurev1beta1.ClusterFinalizer)).To(BeTrue())
 		Expect(createdByoCluster.Status.Ready).To(BeTrue()) //nolint:staticcheck // deprecated field is still written
+		Expect(createdByoCluster.Status.Initialization).NotTo(BeNil())
+		Expect(createdByoCluster.Status.Initialization.Provisioned).To(Equal(ptr.To(true)))
+		ready := v1beta2conditions.Get(createdByoCluster, clusterv1.ReadyCondition)
+		Expect(ready).NotTo(BeNil())
+		Expect(ready.Status).To(Equal(metav1.ConditionTrue))
+		Expect(ready.Reason).To(Equal(clusterv1.ProvisionedReason))
 		Expect(createdByoCluster.Spec.ControlPlaneEndpoint.Port).To(Equal(controllers.DefaultAPIEndpointPort))
 	})
 
