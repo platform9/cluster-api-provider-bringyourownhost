@@ -10,7 +10,9 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -24,6 +26,7 @@ import (
 
 	clusterutilv1 "sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/annotations"
+	v1beta2conditions "sigs.k8s.io/cluster-api/util/conditions"
 	conditions "sigs.k8s.io/cluster-api/util/conditions/deprecated/v1beta1"
 	"sigs.k8s.io/cluster-api/util/patch"
 )
@@ -114,15 +117,35 @@ func patchByoCluster(ctx context.Context, patchHelper *patch.Helper, byoCluster 
 	conditions.SetSummary(byoCluster,
 		conditions.WithStepCounterIf(byoCluster.DeletionTimestamp.IsZero()),
 	)
+	setByoClusterReadyCondition(byoCluster)
 
 	// Patch the object, ignoring conflicts on the conditions owned by this controller.
 	return patchHelper.Patch(
 		ctx,
 		byoCluster,
+		patch.WithOwnedConditions{Conditions: []string{clusterv1.ReadyCondition}},
 		patch.WithOwnedV1Beta1Conditions{Conditions: []clusterv1.ConditionType{
 			clusterv1.ReadyV1Beta1Condition,
 		}},
 	)
+}
+
+// setByoClusterReadyCondition sets the v1beta2 Ready condition, which Cluster API mirrors
+// onto the Cluster, from the ByoCluster's provisioning and deletion state.
+func setByoClusterReadyCondition(byoCluster *infrav1.ByoCluster) {
+	ready := metav1.Condition{
+		Type:   clusterv1.ReadyCondition,
+		Status: metav1.ConditionFalse,
+		Reason: clusterv1.NotProvisionedReason,
+	}
+	switch {
+	case !byoCluster.DeletionTimestamp.IsZero():
+		ready.Reason = clusterv1.DeletingReason
+	case byoCluster.Status.Initialization != nil && ptr.Deref(byoCluster.Status.Initialization.Provisioned, false):
+		ready.Status = metav1.ConditionTrue
+		ready.Reason = clusterv1.ProvisionedReason
+	}
+	v1beta2conditions.Set(byoCluster, ready)
 }
 
 // GetByoMachinesInCluster gets a cluster's ByoMachine resources.
@@ -176,7 +199,8 @@ func (r ByoClusterReconciler) reconcileNormal(ctx context.Context, byoCluster *i
 		byoCluster.Spec.ControlPlaneEndpoint.Port = DefaultAPIEndpointPort
 	}
 
-	byoCluster.Status.Ready = true
+	byoCluster.Status.Ready = true //nolint:staticcheck // still written for v1beta1-contract consumers until it is removed
+	byoCluster.Status.Initialization = &infrav1.ByoClusterInitializationStatus{Provisioned: ptr.To(true)}
 
 	return reconcile.Result{}, nil
 }

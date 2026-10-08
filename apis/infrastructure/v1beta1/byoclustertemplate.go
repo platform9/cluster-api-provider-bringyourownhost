@@ -6,7 +6,7 @@ package v1beta1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1beta1 "sigs.k8s.io/cluster-api/api/core/v1beta1" //nolint:staticcheck // stays on the v1beta1 schema until the v1beta2 contract is adopted (KAAP-2449)
+	clusterv1beta1 "sigs.k8s.io/cluster-api/api/core/v1beta1" //nolint:staticcheck // v1beta2 ObjectMeta adds minProperties=1, which would reject existing templates with an empty metadata
 )
 
 // ByoClusterTemplateSpec defines the desired state of ByoClusterTemplate.

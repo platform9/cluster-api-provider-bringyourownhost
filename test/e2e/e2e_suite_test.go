@@ -461,6 +461,7 @@ func applyClusterAndWait(ctx context.Context, namespace, clusterName, specName, 
 		WaitForControlPlaneIntervals: e2eConfig.GetIntervals(specName, "wait-control-plane"),
 		WaitForMachineDeployments:    e2eConfig.GetIntervals(specName, "wait-worker-nodes"),
 	}, clusterResources)
+	AssertInfrastructureProvisioned(ctx, bootstrapClusterProxy, clusterResources.Cluster)
 }
 
 func dumpSpecResourcesAndCleanup(ctx context.Context, specName string, clusterProxy framework.ClusterProxy, artifactFolder string, namespace *corev1.Namespace, cancelWatches context.CancelFunc, cluster *clusterv1.Cluster, intervalsGetter func(spec, key string) []interface{}, skipCleanup bool) {

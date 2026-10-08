@@ -24,6 +24,7 @@ import (
 	"sigs.k8s.io/cluster-api/controllers/clustercache"
 	"sigs.k8s.io/cluster-api/controllers/external"
 	"sigs.k8s.io/cluster-api/util"
+	v1beta2conditions "sigs.k8s.io/cluster-api/util/conditions"
 	conditions "sigs.k8s.io/cluster-api/util/conditions/deprecated/v1beta1"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/cluster-api/util/predicates"
@@ -139,7 +140,7 @@ func (r *ByoMachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	helper, _ := patch.NewHelper(byoMachine, r.Client)
 	defer func() {
-		if err = helper.Patch(ctx, byoMachine); err != nil && reterr == nil {
+		if err = patchByoMachine(ctx, helper, byoMachine); err != nil && reterr == nil {
 			logger.Error(err, "failed to patch byomachine")
 			reterr = err
 		}
@@ -175,7 +176,7 @@ func (r *ByoMachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				logger.Error(err, "cannot set paused annotation for byohost")
 			}
 		}
-		conditions.MarkFalse(byoMachine, infrav1.BYOHostReady, infrav1.ClusterOrResourcePausedReason, clusterv1.ConditionSeverityInfo, "")
+		markBYOHostNotReady(byoMachine, infrav1.ClusterOrResourcePausedReason)
 		return ctrl.Result{}, nil
 	}
 
@@ -220,6 +221,9 @@ func (r *ByoMachineReconciler) FetchAttachedByoHost(ctx context.Context, byomach
 func (r *ByoMachineReconciler) reconcileDelete(ctx context.Context, machineScope *byoMachineScope) (reconcile.Result, error) {
 	logger := log.FromContext(ctx).WithValues("cluster", machineScope.Cluster.Name)
 	logger.Info("Deleting ByoMachine")
+	// Also replaces a BYOHostReady stored before the v1beta2 contract, whose empty reason
+	// the current schema rejects, so the deferred status patch succeeds.
+	markBYOHostNotReady(machineScope.ByoMachine, clusterv1.DeletingReason)
 	if machineScope.ByoHost != nil {
 		// Add annotation to trigger host cleanup
 		logger.Info("Releasing ByoHost", "byohost", machineScope.ByoHost.Name)
@@ -257,13 +261,13 @@ func (r *ByoMachineReconciler) reconcileNormal(ctx context.Context, machineScope
 
 	if !ptr.Deref(machineScope.Cluster.Status.Initialization.InfrastructureProvisioned, false) {
 		logger.Info("Cluster infrastructure is not ready yet")
-		conditions.MarkFalse(machineScope.ByoMachine, infrav1.BYOHostReady, infrav1.WaitingForClusterInfrastructureReason, clusterv1.ConditionSeverityInfo, "")
+		markBYOHostNotReady(machineScope.ByoMachine, infrav1.WaitingForClusterInfrastructureReason)
 		return reconcile.Result{}, nil
 	}
 
 	if machineScope.Machine.Spec.Bootstrap.DataSecretName == nil {
 		logger.Info("Bootstrap Data Secret not available yet")
-		conditions.MarkFalse(machineScope.ByoMachine, infrav1.BYOHostReady, infrav1.WaitingForBootstrapDataSecretReason, clusterv1.ConditionSeverityInfo, "")
+		markBYOHostNotReady(machineScope.ByoMachine, infrav1.WaitingForBootstrapDataSecretReason)
 		return reconcile.Result{}, nil
 	}
 
@@ -274,7 +278,7 @@ func (r *ByoMachineReconciler) reconcileNormal(ctx context.Context, machineScope
 		if res, err := r.attachByoHost(ctx, machineScope); err != nil {
 			return res, err
 		}
-		conditions.MarkFalse(machineScope.ByoMachine, infrav1.BYOHostReady, infrav1.InstallationSecretNotAvailableReason, clusterv1.ConditionSeverityInfo, "")
+		markBYOHostNotReady(machineScope.ByoMachine, infrav1.InstallationSecretNotAvailableReason)
 		r.Recorder.Eventf(machineScope.ByoHost, corev1.EventTypeNormal, "ByoHostAttachSucceeded", "Attached to ByoMachine %s", machineScope.ByoMachine.Name)
 		r.Recorder.Eventf(machineScope.ByoMachine, corev1.EventTypeNormal, "ByoHostAttachSucceeded", "Attached ByoHost %s", machineScope.ByoHost.Name)
 	}
@@ -325,10 +329,48 @@ func (r *ByoMachineReconciler) updateNodeProviderID(ctx context.Context, machine
 	}
 
 	machineScope.ByoMachine.Spec.ProviderID = providerID
-	machineScope.ByoMachine.Status.Ready = true
-	conditions.MarkTrue(machineScope.ByoMachine, infrav1.BYOHostReady)
+	machineScope.ByoMachine.Status.Ready = true //nolint:staticcheck // still written for v1beta1-contract consumers until it is removed
+	machineScope.ByoMachine.Status.Initialization = &infrav1.ByoMachineInitializationStatus{Provisioned: ptr.To(true)}
+	markBYOHostReady(machineScope.ByoMachine)
 	r.Recorder.Eventf(machineScope.ByoMachine, corev1.EventTypeNormal, "NodeProvisionedSucceeded", "Provisioned Node %s", machineScope.ByoHost.Name)
 	return ctrl.Result{}, nil
+}
+
+// markBYOHostReady sets BYOHostReady to true in both the v1beta2 conditions and the
+// deprecated v1beta1 conditions.
+func markBYOHostReady(byoMachine *infrav1.ByoMachine) {
+	conditions.MarkTrue(byoMachine, infrav1.BYOHostReady)
+	v1beta2conditions.Set(byoMachine, metav1.Condition{
+		Type:   string(infrav1.BYOHostReady),
+		Status: metav1.ConditionTrue,
+		Reason: clusterv1.ReadyReason,
+	})
+}
+
+// markBYOHostNotReady sets BYOHostReady to false with the given reason in both the
+// v1beta2 conditions and the deprecated v1beta1 conditions.
+func markBYOHostNotReady(byoMachine *infrav1.ByoMachine, reason string) {
+	conditions.MarkFalse(byoMachine, infrav1.BYOHostReady, reason, clusterv1.ConditionSeverityInfo, "")
+	v1beta2conditions.Set(byoMachine, metav1.Condition{
+		Type:   string(infrav1.BYOHostReady),
+		Status: metav1.ConditionFalse,
+		Reason: reason,
+	})
+}
+
+// patchByoMachine summarizes the v1beta2 Ready condition, which Cluster API mirrors onto
+// the Machine, and patches the ByoMachine.
+func patchByoMachine(ctx context.Context, patchHelper *patch.Helper, byoMachine *infrav1.ByoMachine) error {
+	if err := v1beta2conditions.SetSummaryCondition(byoMachine, byoMachine, clusterv1.ReadyCondition,
+		v1beta2conditions.ForConditionTypes{string(infrav1.BYOHostReady)},
+	); err != nil {
+		return fmt.Errorf("failed to set Ready condition: %w", err)
+	}
+
+	return patchHelper.Patch(ctx, byoMachine,
+		patch.WithOwnedConditions{Conditions: []string{clusterv1.ReadyCondition, string(infrav1.BYOHostReady)}},
+		patch.WithOwnedV1Beta1Conditions{Conditions: []clusterv1.ConditionType{infrav1.BYOHostReady}},
+	)
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -567,7 +609,7 @@ func (r *ByoMachineReconciler) attachByoHost(ctx context.Context, machineScope *
 	if len(hostsList.Items) == 0 {
 		logger.Info("No hosts found, waiting..")
 		r.Recorder.Eventf(machineScope.ByoMachine, corev1.EventTypeWarning, "ByoHostSelectionFailed", "No available ByoHost")
-		conditions.MarkFalse(machineScope.ByoMachine, infrav1.BYOHostReady, infrav1.BYOHostsUnavailableReason, clusterv1.ConditionSeverityInfo, "")
+		markBYOHostNotReady(machineScope.ByoMachine, infrav1.BYOHostsUnavailableReason)
 		return ctrl.Result{RequeueAfter: RequeueForbyohost}, errors.New("no hosts found")
 	}
 	// TODO- Needs smarter logic
