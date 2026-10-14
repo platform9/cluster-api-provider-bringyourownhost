@@ -52,6 +52,14 @@ type NetworkStatus struct {
 	IsDefault bool `json:"isDefault,omitempty"`
 }
 
+// ByoMachineInitialization represents the initialization status of the machine.
+type ByoMachineInitialization struct {
+	// Provisioned is set to true when the initial provisioning of the machine infrastructure is completed.
+	// The value of this field is never updated after provisioning is completed.
+	// +optional
+	Provisioned bool `json:"provisioned,omitempty"`
+}
+
 // ByoMachineStatus defines the observed state of ByoMachine
 type ByoMachineStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
@@ -61,8 +69,16 @@ type ByoMachineStatus struct {
 	// +optional
 	HostInfo HostInfo `json:"hostinfo,omitempty"`
 
+	// Ready is true when the machine infrastructure is ready.
+	//
+	// Deprecated: This field is deprecated and will be removed in a future API version.
+	// Use status.initialization.provisioned instead.
 	// +optional
 	Ready bool `json:"ready"`
+
+	// Initialization contains information about the initialization status of the machine.
+	// +optional
+	Initialization *ByoMachineInitialization `json:"initialization,omitempty"`
 
 	// Conditions defines current service state of the BYOMachine.
 	// +optional
