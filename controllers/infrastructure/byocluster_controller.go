@@ -176,7 +176,8 @@ func (r ByoClusterReconciler) reconcileNormal(ctx context.Context, byoCluster *i
 		byoCluster.Spec.ControlPlaneEndpoint.Port = DefaultAPIEndpointPort
 	}
 
-	byoCluster.Status.Ready = true
+	byoCluster.Status.Ready = true //nolint: staticcheck // SA1019: deprecated field, still read by Cluster API under the v1beta1 contract
+	byoCluster.Status.Initialization = &infrav1.ByoClusterInitialization{Provisioned: true}
 
 	return reconcile.Result{}, nil
 }
