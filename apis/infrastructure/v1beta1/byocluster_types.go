@@ -29,10 +29,26 @@ type ByoClusterSpec struct {
 	BundleLookupBaseRegistry string `json:"bundleLookupBaseRegistry,omitempty"`
 }
 
+// ByoClusterInitialization represents the initialization status of the cluster.
+type ByoClusterInitialization struct {
+	// Provisioned is set to true when the initial provisioning of the cluster infrastructure is completed.
+	// The value of this field is never updated after provisioning is completed.
+	// +optional
+	Provisioned bool `json:"provisioned,omitempty"`
+}
+
 // ByoClusterStatus defines the observed state of ByoCluster
 type ByoClusterStatus struct {
+	// Ready is true when the cluster infrastructure is ready.
+	//
+	// Deprecated: This field is deprecated and will be removed in a future API version.
+	// Use status.initialization.provisioned instead.
 	// +optional
 	Ready bool `json:"ready,omitempty"`
+
+	// Initialization contains information about the initialization status of the cluster.
+	// +optional
+	Initialization *ByoClusterInitialization `json:"initialization,omitempty"`
 
 	// Conditions defines current service state of the ByoCluster.
 	// +optional
