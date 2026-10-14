@@ -1,0 +1,46 @@
+# Copyright 2026 Platform9, Inc. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# PICT (https://github.com/microsoft/pict) model. Regenerate
+# generated-matrix.tsv with `make generate-pict` -- never hand-edit it,
+# generated-drift.yml enforces that in CI.
+#
+# One unified model instead of one per scenario: install-method and
+# template-flavor differences already collapse into which Scenario value a
+# row picks, not a separately-crossed variable.
+#
+# Deliberately narrow: only parameters that actually vary independently of
+# Scenario today are modeled --
+#   - OS: every scenario runs a single, fixed image today (Ubuntu 22.04 for
+#     everything via spinUpByoHosts/ByoHostRunner/kindImage and byohctl,
+#     Rocky 9 only for PackagingRpm's separate provisioning path). 100%
+#     determined by Scenario, not a free-crossing dimension -- modeling it
+#     would just mirror the Scenario column back at itself. Reintroduce
+#     once a second real image exists for the spinUpByoHosts path.
+#   - IPFamily: only IPv4 is supported end-to-end today; IPv6/Dual are a
+#     future PR's networking work, not just this matrix's.
+#   - Upgrade target version: for UpgradeCluster/UpgradeClusterClass,
+#     K8sVersion is fixed to the one real starting version below, so the
+#     target has no independent freedom (always the same value) and isn't
+#     a second column.
+
+Scenario:   Join, Installer, ByoHCtl, Reuse, ClusterClass, UpgradeCluster, UpgradeClusterClass, MDScale, PackagingDeb, PackagingRpm
+# The non-NA values are one real, confirmed-pullable tag per minor line
+# this repo's default bundle registry
+# (quay.io/platform9/byoh-bundle-ubuntu_22.04_x86-64_k8s) publishes today
+# -- latest patch for each minor, except v1.31.0 (this repo's own literal
+# default, also the fixed upgrade-from version below, kept instead of the
+# newer v1.31.2 patch so 1.31 isn't represented twice). A tag existing
+# doesn't guarantee this repo's pinned CAPI/kubeadm providers can
+# bootstrap that version yet; that's for whoever runs this matrix to find
+# out, same as any other combo here.
+K8sVersion: v1.31.0, v1.32.3, v1.33.2, v1.34.9, v1.35.6, NA
+
+IF [Scenario] IN {"ByoHCtl", "PackagingDeb", "PackagingRpm"}
+  THEN [K8sVersion] = "NA";
+
+IF [Scenario] IN {"UpgradeCluster", "UpgradeClusterClass"}
+  THEN [K8sVersion] = "v1.31.0";
+
+IF [Scenario] IN {"Join", "Installer", "Reuse", "ClusterClass", "MDScale"}
+  THEN [K8sVersion] <> "NA";
