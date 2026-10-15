@@ -7,6 +7,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -42,7 +43,14 @@ func copyFileToContainer(ctx context.Context, containerID, localPath, containerP
 	return dockerClient.CopyToContainer(ctx, containerID, "/", &buf, container.CopyToContainerOptions{})
 }
 
+// execTimeout bounds a single command run in the container, so a hung command fails
+// its spec naming the command instead of using up the whole suite's -timeout.
+const execTimeout = 2 * time.Minute
+
 func execInContainer(ctx context.Context, containerID string, cmd, env []string) (output string, exitCode int, err error) {
+	ctx, cancel := context.WithTimeout(ctx, execTimeout)
+	defer cancel()
+
 	created, err := dockerClient.ContainerExecCreate(ctx, containerID, container.ExecOptions{
 		Cmd:          cmd,
 		Env:          env,
@@ -62,8 +70,15 @@ func execInContainer(ctx context.Context, containerID string, cmd, env []string)
 		return "", 0, err
 	}
 	defer attached.Close()
+	// The attached stream is a hijacked connection that ignores ctx, so close it
+	// when ctx expires to unblock the read below.
+	stop := context.AfterFunc(ctx, attached.Close)
+	defer stop()
 
 	outputBytes, err := io.ReadAll(attached.Reader)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return string(outputBytes), 0, fmt.Errorf("%v: %w", cmd, ctxErr)
+	}
 	if err != nil {
 		return "", 0, err
 	}
