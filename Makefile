@@ -276,8 +276,6 @@ else
 BUILD_HOST_AGENT_DEB_PREREQ := build-host-agent-deb
 endif
 
-# The Cluster API e2e framework shells out to `kustomize` for provider manifests, so put
-# the pinned bin/kustomize first on PATH rather than relying on one installed on the host.
 test-e2e: take-user-input docker-build prepare-byoh-docker-host-image $(GINKGO) kustomize cluster-templates-e2e $(BUILD_HOST_AGENT_DEB_PREREQ) ## Run the end-to-end tests
 	PATH="$(shell pwd)/bin:$$PATH" $(GINKGO) -vv -trace -tags=e2e -focus="$(GINKGO_FOCUS)" $(_SKIP_ARGS) -nodes=$(GINKGO_NODES) --noColor=$(GINKGO_NOCOLOR) $(GINKGO_ARGS) test/e2e -- \
 	    -e2e.artifacts-folder="$(ARTIFACTS)" \
