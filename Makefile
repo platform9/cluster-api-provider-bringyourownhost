@@ -276,8 +276,8 @@ else
 BUILD_HOST_AGENT_DEB_PREREQ := build-host-agent-deb
 endif
 
-test-e2e: take-user-input docker-build prepare-byoh-docker-host-image $(GINKGO) cluster-templates-e2e $(BUILD_HOST_AGENT_DEB_PREREQ) ## Run the end-to-end tests
-	$(GINKGO) -vv -trace -tags=e2e -focus="$(GINKGO_FOCUS)" $(_SKIP_ARGS) -nodes=$(GINKGO_NODES) --noColor=$(GINKGO_NOCOLOR) $(GINKGO_ARGS) test/e2e -- \
+test-e2e: take-user-input docker-build prepare-byoh-docker-host-image $(GINKGO) kustomize cluster-templates-e2e $(BUILD_HOST_AGENT_DEB_PREREQ) ## Run the end-to-end tests
+	PATH="$(shell pwd)/bin:$$PATH" $(GINKGO) -vv -trace -tags=e2e -focus="$(GINKGO_FOCUS)" $(_SKIP_ARGS) -nodes=$(GINKGO_NODES) --noColor=$(GINKGO_NOCOLOR) $(GINKGO_ARGS) test/e2e -- \
 	    -e2e.artifacts-folder="$(ARTIFACTS)" \
 	    -e2e.config="$(E2E_CONF_FILE)" \
 	    -e2e.skip-resource-cleanup=$(SKIP_RESOURCE_CLEANUP) -e2e.use-existing-cluster=$(USE_EXISTING_CLUSTER) \
