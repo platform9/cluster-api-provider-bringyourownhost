@@ -1,6 +1,6 @@
 module github.com/platform9/cluster-api-provider-bringyourownhost/cmd
 
-go 1.26.4
+go 1.26.10
 
 require (
 	github.com/spf13/cobra v1.10.2

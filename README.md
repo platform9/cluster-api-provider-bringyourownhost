@@ -84,7 +84,7 @@ To verify, for example:
 
 ```bash
 $ go version
-go version go1.26.4 darwin/arm64
+go version go1.26.10 darwin/arm64
 ```
 ### Launching a Kubernetes cluster using BYOH source code
 
