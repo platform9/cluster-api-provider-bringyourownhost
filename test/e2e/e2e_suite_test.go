@@ -311,7 +311,7 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	bundleRepoInsecureForContainers = shared.bundleRepoInsecureForContainers
 
 	e2eConfig = loadE2EConfig(suiteCtx, configPath)
-	bootstrapClusterProxy = framework.NewClusterProxy("bootstrap", shared.kubeconfigPath, initScheme(), framework.WithMachineLogCollector(framework.DockerLogCollector{}))
+	bootstrapClusterProxy = framework.NewClusterProxy("bootstrap", shared.kubeconfigPath, initScheme(), framework.WithMachineLogCollector(byoHostLogCollector{}))
 })
 
 // Using a SynchronizedAfterSuite for controlling how to delete resources shared across ParallelNodes (~ginkgo threads).
