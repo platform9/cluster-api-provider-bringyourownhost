@@ -200,7 +200,21 @@ spec:
                       description: The Operating System reported by the host.
                       type: string
                   type: object
+                initialization:
+                  description: Initialization contains information about the initialization status of the machine.
+                  properties:
+                    provisioned:
+                      description: |-
+                        Provisioned is set to true when the initial provisioning of the machine infrastructure is completed.
+                        The value of this field is never updated after provisioning is completed.
+                      type: boolean
+                  type: object
                 ready:
+                  description: |-
+                    Ready is true when the machine infrastructure is ready.
+
+                    Deprecated: This field is deprecated and will be removed in a future API version.
+                    Use status.initialization.provisioned instead.
                   type: boolean
               type: object
           type: object

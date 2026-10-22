@@ -131,7 +131,9 @@ var _ = Describe("Controllers/ByoclusterController", func() {
 		err = k8sClientUncached.Get(ctx, byoClusterLookupKey, createdByoCluster)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(controllerutil.ContainsFinalizer(createdByoCluster, infrastructurev1beta1.ClusterFinalizer)).To(BeTrue())
-		Expect(createdByoCluster.Status.Ready).To(BeTrue())
+		Expect(createdByoCluster.Status.Ready).To(BeTrue()) //nolint: staticcheck // SA1019: deprecated field is still written
+		Expect(createdByoCluster.Status.Initialization).NotTo(BeNil())
+		Expect(createdByoCluster.Status.Initialization.Provisioned).To(BeTrue())
 		Expect(createdByoCluster.Spec.ControlPlaneEndpoint.Port).To(Equal(controllers.DefaultAPIEndpointPort))
 	})
 

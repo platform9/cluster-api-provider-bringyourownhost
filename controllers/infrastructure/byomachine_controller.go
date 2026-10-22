@@ -325,7 +325,8 @@ func (r *ByoMachineReconciler) updateNodeProviderID(ctx context.Context, machine
 	}
 
 	machineScope.ByoMachine.Spec.ProviderID = providerID
-	machineScope.ByoMachine.Status.Ready = true
+	machineScope.ByoMachine.Status.Ready = true //nolint: staticcheck // SA1019: deprecated field, still read by Cluster API under the v1beta1 contract
+	machineScope.ByoMachine.Status.Initialization = &infrav1.ByoMachineInitialization{Provisioned: true}
 	conditions.MarkTrue(machineScope.ByoMachine, infrav1.BYOHostReady)
 	r.Recorder.Eventf(machineScope.ByoMachine, corev1.EventTypeNormal, "NodeProvisionedSucceeded", "Provisioned Node %s", machineScope.ByoHost.Name)
 	return ctrl.Result{}, nil
