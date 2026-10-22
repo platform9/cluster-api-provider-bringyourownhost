@@ -40,8 +40,9 @@ var managerServiceAccounts = map[string]struct{}{
 	byohSystemManagerServiceAccount: struct{}{},
 }
 
-// Precompile email-like regex for efficiency
-var emailLikeUserRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+// Precompile email-like regex for efficiency. It matches "user@example.com" and
+// the "<du>:user@example.com" format given to PCD-K users by oidc-proxy
+var emailLikeUserRegex = regexp.MustCompile(`^([a-zA-Z0-9.-]+:)?[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 
 // nolint: gocritic // hugeParam: admission.Handler requires Request by value.
 // Handle handles all the requests for ByoHost resource
