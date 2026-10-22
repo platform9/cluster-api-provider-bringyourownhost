@@ -516,7 +516,7 @@ var _ = Describe("Agent", func() {
 		})
 
 		JustAfterEach(func() {
-			if CurrentGinkgoTestDescription().Failed {
+			if CurrentSpecReport().Failed() {
 				e2e.ShowFileContent(agentLogFile)
 			}
 		})

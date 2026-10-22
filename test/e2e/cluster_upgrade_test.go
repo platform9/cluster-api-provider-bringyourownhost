@@ -93,7 +93,7 @@ var _ = Describe("Cluster upgrade test [K8s-Upgrade-Cluster]", func() {
 		})
 	})
 	JustAfterEach(func() {
-		if CurrentGinkgoTestDescription().Failed {
+		if CurrentSpecReport().Failed() {
 			ShowInfo(allAgentLogFiles)
 		}
 	})

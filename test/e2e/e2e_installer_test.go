@@ -70,7 +70,7 @@ var _ = Describe("When BYOH joins existing cluster [Installer]", func() {
 	})
 
 	JustAfterEach(func() {
-		if CurrentGinkgoTestDescription().Failed {
+		if CurrentSpecReport().Failed() {
 			ShowInfo([]string{agentLogFile1, agentLogFile2})
 		}
 	})

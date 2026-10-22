@@ -118,7 +118,7 @@ var _ = Describe("When BYO Host rejoins the capacity pool [Reuse]", func() {
 	})
 
 	JustAfterEach(func() {
-		if CurrentGinkgoTestDescription().Failed {
+		if CurrentSpecReport().Failed() {
 			ShowInfo([]string{agentLogFile1, agentLogFile2})
 		}
 	})
