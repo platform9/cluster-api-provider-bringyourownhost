@@ -55,9 +55,7 @@ func TestAPIs(t *testing.T) {
 	suiteCtx = t.Context()
 	RegisterFailHandler(Fail)
 
-	RunSpecsWithDefaultAndCustomReporters(t,
-		"Webhook Suite",
-		[]Reporter{})
+	RunSpecs(t, "Webhook Suite")
 }
 
 var _ = BeforeSuite(func() {

@@ -85,7 +85,7 @@ var _ = Describe("When testing MachineDeployment scale out/in [MD-Scale]", func(
 	})
 
 	JustAfterEach(func() {
-		if CurrentGinkgoTestDescription().Failed {
+		if CurrentSpecReport().Failed() {
 			ShowInfo(allAgentLogFiles)
 		}
 	})

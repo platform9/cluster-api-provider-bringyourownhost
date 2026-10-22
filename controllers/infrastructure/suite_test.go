@@ -237,9 +237,7 @@ func TestMain(m *testing.M) {
 func TestAPIs(t *testing.T) {
 	RegisterFailHandler(Fail)
 
-	RunSpecsWithDefaultAndCustomReporters(t,
-		"Controller Suite",
-		[]Reporter{})
+	RunSpecs(t, "Controller Suite")
 }
 
 func WaitForObjectsToBePopulatedInCache(ctx context.Context, objects ...client.Object) {

@@ -118,7 +118,7 @@ var _ = Describe("When a host onboards via byohctl using a bootstrap kubeconfig,
 	})
 
 	JustAfterEach(func() {
-		if CurrentGinkgoTestDescription().Failed {
+		if CurrentSpecReport().Failed() {
 			ShowInfo([]string{agentLogFile})
 		}
 	})
