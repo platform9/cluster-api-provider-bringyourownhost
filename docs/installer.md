@@ -1,11 +1,11 @@
 # Installer Implementation
 An installer controller is responsible to provide the installation and uninstallation scripts for k8s dependencies, prerequisites and components on each `BYOHost`.
-We provide a default installer ([K8sInstallerConfig](https://github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/blob/main/controllers/infrastructure/k8sinstallerconfig_controller.go#L58)) to install the supported upstream k8s.
+We provide a default installer ([K8sInstallerConfig](https://github.com/platform9/cluster-api-provider-bringyourownhost/blob/main/controllers/infrastructure/k8sinstallerconfig_controller.go#L58)) to install the supported upstream k8s.
 If someone wants to implement their own installer controller then they need to follow the following contract:
 
 ## Data Types
-1. Must create a CustomResourceDefinition `InstallerConfigTemplate` for your `installerConfig` (eg. [K8sInstallerConfigTemplate](https://github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/blob/main/apis/infrastructure/v1beta1/k8sinstallerconfigtemplate_types.go))
-1. Must create a CustomResourceDefinition `InstallerConfig` (eg. [K8sInstallerConfig](https://github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/blob/main/apis/infrastructure/v1beta1/k8sinstallerconfig_types.go))
+1. Must create a CustomResourceDefinition `InstallerConfigTemplate` for your `installerConfig` (eg. [K8sInstallerConfigTemplate](https://github.com/platform9/cluster-api-provider-bringyourownhost/blob/main/apis/infrastructure/v1beta1/k8sinstallerconfigtemplate_types.go))
+1. Must create a CustomResourceDefinition `InstallerConfig` (eg. [K8sInstallerConfig](https://github.com/platform9/cluster-api-provider-bringyourownhost/blob/main/apis/infrastructure/v1beta1/k8sinstallerconfig_types.go))
 1. Must be namespace-scoped
 1. Must have the standard Kubernetes `type metadata` and `object metadata`
 1. Must have a `status` field with the following:

@@ -153,7 +153,7 @@ formatters:
       simplify: true
     goimports:
       local-prefixes:
-        - github.com/vmware-tanzu
+        - github.com/platform9/cluster-api-provider-bringyourownhost
   exclusions:
     generated: lax
     paths:

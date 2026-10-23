@@ -23,8 +23,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gexec"
-	infraproviderv1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
-	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/test/builder"
+	infraproviderv1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/test/builder"
 	certv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -262,7 +262,7 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	// GOOS is forced to linux because the binary runs inside Linux BYOH host
 	// containers regardless of the OS the test suite itself runs on (e.g. macOS).
 	pathToHostAgentBinary, err = gexec.BuildWithEnvironment(
-		"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent",
+		"github.com/platform9/cluster-api-provider-bringyourownhost/agent",
 		[]string{"CGO_ENABLED=0", "GOOS=linux", "GOARCH=" + goruntime.GOARCH},
 	)
 	Expect(err).NotTo(HaveOccurred())

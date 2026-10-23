@@ -1,4 +1,4 @@
-module github.com/vmware-tanzu/cluster-api-provider-bringyourownhost
+module github.com/platform9/cluster-api-provider-bringyourownhost
 
 go 1.26.10
 

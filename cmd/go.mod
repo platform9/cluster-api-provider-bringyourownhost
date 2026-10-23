@@ -5,7 +5,7 @@ go 1.26.10
 require (
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
-	github.com/vmware-tanzu/cluster-api-provider-bringyourownhost v0.5.0
+	github.com/platform9/cluster-api-provider-bringyourownhost v0.5.0
 	golang.org/x/term v0.46.0
 	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/api v0.34.3
@@ -81,4 +81,4 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
-replace github.com/vmware-tanzu/cluster-api-provider-bringyourownhost => ../
+replace github.com/platform9/cluster-api-provider-bringyourownhost => ../

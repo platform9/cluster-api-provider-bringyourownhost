@@ -20,7 +20,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gexec"
-	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/test/e2e"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/test/e2e"
 	corev1 "k8s.io/api/core/v1"
 	clientset "k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -111,13 +111,13 @@ var _ = BeforeSuite(func() {
 	// The production build always uses CGO_ENABLED=0 because the agent must run
 	// on arbitrary Linux hosts without dynamic library dependencies. Match that here.
 	pathToHostAgentBinary, err = gexec.BuildWithEnvironment(
-		"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent",
+		"github.com/platform9/cluster-api-provider-bringyourownhost/agent",
 		[]string{"CGO_ENABLED=0"},
 	)
 	Expect(err).NotTo(HaveOccurred())
 
 	pathToLinuxHostAgentBinary, err = gexec.BuildWithEnvironment(
-		"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent",
+		"github.com/platform9/cluster-api-provider-bringyourownhost/agent",
 		[]string{"CGO_ENABLED=0", "GOOS=linux", "GOARCH=" + goruntime.GOARCH},
 	)
 	Expect(err).NotTo(HaveOccurred())

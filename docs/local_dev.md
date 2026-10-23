@@ -4,7 +4,7 @@ This doc provides instructions about how to test Bring Your Own Host Provider on
 
 - [Kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation) for provisioning a management cluster
 - [Docker](https://docs.docker.com/engine/install/) run for creating hosts to be used as a capacity for BYO Host machines
-- [BYOH](https://github.com/vmware-tanzu/cluster-api-provider-bringyourownhost) provider to add the above hosts to the aforemention workload cluster
+- [BYOH](https://github.com/platform9/cluster-api-provider-bringyourownhost) provider to add the above hosts to the aforemention workload cluster
 - [Tilt](https://docs.tilt.dev/install.html) for faster iterative development
 
 ## Running `agent-test` / `test-e2e` on macOS
@@ -111,7 +111,7 @@ Installing cluster API into the Kubernetes cluster will turn it into a Cluster A
 We are going using [tilt](https://tilt.dev/) in order to do so, so you can have your local environment set up for rapid iterations, as described in
 [Developing Cluster API with Tilt](https://cluster-api.sigs.k8s.io/developer/core/tilt.html).
 
-In order to do so you need to clone both https://github.com/kubernetes-sigs/cluster-api/ and https://github.com/vmware-tanzu/cluster-api-provider-bringyourownhost locally;
+In order to do so you need to clone both https://github.com/kubernetes-sigs/cluster-api/ and https://github.com/platform9/cluster-api-provider-bringyourownhost locally;
 
 __Clone CAPI Repo__
 
