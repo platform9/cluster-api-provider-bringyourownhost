@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Cluster API Provider BYOH (BringYourOwnHost) is a Kubernetes infrastructure provider that lets operators declare, provision, and manage Kubernetes clusters on already-provisioned Linux hosts. It decouples node provisioning from host provisioning by running an agent daemon on each BYO host that registers with a management cluster.
 
-This repo (`platform9/cluster-api-provider-bringyourownhost`) is Platform9's fork of the upstream `vmware-tanzu/cluster-api-provider-bringyourownhost`. This is a hard fork: we do not track upstream. The root Go module path is `github.com/platform9/cluster-api-provider-bringyourownhost`. `cmd/byohctl` is still its own Go module (`cmd/go.mod`) and imports the root module through a `replace` directive.
+This repo (`platform9/cluster-api-provider-bringyourownhost`) is Platform9's fork of the upstream `vmware-tanzu/cluster-api-provider-bringyourownhost`. This is a hard fork: we do not track upstream. The root Go module path is `github.com/platform9/cluster-api-provider-bringyourownhost`. There is one Go module for the whole repo, including `cmd/byohctl`.
 
 ## Build & Development Commands
 
@@ -14,14 +14,14 @@ This repo (`platform9/cluster-api-provider-bringyourownhost`) is Platform9's for
 # Build
 make build                    # Build manager binary to bin/manager
 make host-agent-binaries      # Build host agent binaries
-cd cmd/byohctl && make build  # Build byohctl CLI (separate Go module, see Architecture)
+cd cmd/byohctl && make build  # Build byohctl CLI (built from the root Go module)
 
 # Run tests
 make test                     # All unit tests with coverage (includes cmd-test)
 make controller-test          # Controller tests only
 make agent-test               # Agent tests only
 make webhook-test             # Webhook tests only
-make cmd-test                 # byohctl tests (cd cmd && go test ./...)
+make cmd-test                 # byohctl tests (go test ./cmd/...)
 make test-e2e                 # End-to-end tests (requires a cluster)
 make test-e2e-linux-vm        # E2E tests in Linux VM (use on macOS to avoid false negatives)
 
@@ -75,10 +75,10 @@ macOS sandbox (no real dockerd, no `/etc/os-release`), not real regressions.
 
 ### Three-Binary Design
 
-The project produces three binaries, two of which share the root Go module:
+The project produces three binaries from one Go module:
 - **Manager** (`main.go`) — runs in the management cluster; reconciles `ByoCluster`, `ByoMachine`, `ByoHost`, and related CRs.
 - **Host Agent** (`agent/main.go`) — runs as a daemon on each BYO host; registers the host with the management cluster and drives Kubernetes installation.
-- **byohctl** (`cmd/byohctl/`) — operator-facing CLI for onboarding, deauthorizing, and decommissioning a host (`cmd/byohctl/cmd/{onboard,deauthorise,decommission}.go`). Lives in its own Go module (`cmd/go.mod`) with its own `cmd/byohctl/Makefile`; built and tested independently of the root module — see `make cmd-test`.
+- **byohctl** (`cmd/byohctl/`) — operator-facing CLI for onboarding, deauthorizing, and decommissioning a host (`cmd/byohctl/cmd/{onboard,deauthorise,decommission}.go`). Has its own `cmd/byohctl/Makefile`; tests run via `make cmd-test`.
 
 ### Custom Resources (`apis/infrastructure/v1beta1/`)
 
