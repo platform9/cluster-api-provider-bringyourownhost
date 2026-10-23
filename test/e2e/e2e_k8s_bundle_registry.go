@@ -15,7 +15,7 @@ import (
 
 	"github.com/docker/docker/client"
 
-	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/installer"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/installer"
 )
 
 const (

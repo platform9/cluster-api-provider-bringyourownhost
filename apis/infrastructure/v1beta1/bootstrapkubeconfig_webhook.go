@@ -18,7 +18,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/common/hostname"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/hostname"
 )
 
 // log is for logging in this package.

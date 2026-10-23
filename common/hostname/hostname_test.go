@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/common/hostname"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/hostname"
 )
 
 func TestNormalize(t *testing.T) {

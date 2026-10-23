@@ -21,11 +21,11 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gexec"
-	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/registration"
-	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/version"
-	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
-	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/test/builder"
-	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/test/e2e"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/agent/registration"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/agent/version"
+	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/test/builder"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/test/e2e"
 	certv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -342,15 +342,15 @@ var _ = Describe("Agent", func() {
 			version.GitTreeState = "clean"
 			version.BuildDate = string(date)
 
-			ldflags := fmt.Sprintf("-X 'github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/version.GitMajor=%s'"+
-				"-X 'github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/version.GitMinor=%s'"+
-				"-X 'github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/version.GitVersion=%s'"+
-				"-X 'github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/version.GitCommit=%s'"+
-				"-X 'github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/version.GitTreeState=%s'"+
-				"-X 'github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/version.BuildDate=%s'",
+			ldflags := fmt.Sprintf("-X 'github.com/platform9/cluster-api-provider-bringyourownhost/agent/version.GitMajor=%s'"+
+				"-X 'github.com/platform9/cluster-api-provider-bringyourownhost/agent/version.GitMinor=%s'"+
+				"-X 'github.com/platform9/cluster-api-provider-bringyourownhost/agent/version.GitVersion=%s'"+
+				"-X 'github.com/platform9/cluster-api-provider-bringyourownhost/agent/version.GitCommit=%s'"+
+				"-X 'github.com/platform9/cluster-api-provider-bringyourownhost/agent/version.GitTreeState=%s'"+
+				"-X 'github.com/platform9/cluster-api-provider-bringyourownhost/agent/version.BuildDate=%s'",
 				version.GitMajor, version.GitMinor, version.GitVersion, version.GitCommit, version.GitTreeState, version.BuildDate)
 
-			tmpHostAgentBinary, err = gexec.Build("github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent", "-ldflags", ldflags)
+			tmpHostAgentBinary, err = gexec.Build("github.com/platform9/cluster-api-provider-bringyourownhost/agent", "-ldflags", ldflags)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -408,7 +408,7 @@ var _ = Describe("Agent", func() {
 			root, _ := exec.Command("/bin/sh", "-c", "git rev-parse --show-toplevel").Output()
 			cmd := exec.Command("/bin/sh", "-c", strings.TrimSuffix(string(root), "\n")+"/hack/version.sh")
 			ldflags, _ := cmd.Output()
-			tmpHostAgentBinary, err = gexec.Build("github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent", "-ldflags", string(ldflags))
+			tmpHostAgentBinary, err = gexec.Build("github.com/platform9/cluster-api-provider-bringyourownhost/agent", "-ldflags", string(ldflags))
 			Expect(err).NotTo(HaveOccurred())
 		})
 

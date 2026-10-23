@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Cluster API Provider BYOH (BringYourOwnHost) is a Kubernetes infrastructure provider that lets operators declare, provision, and manage Kubernetes clusters on already-provisioned Linux hosts. It decouples node provisioning from host provisioning by running an agent daemon on each BYO host that registers with a management cluster.
 
-This repo (`platform9/cluster-api-provider-bringyourownhost`) is Platform9's fork of the upstream `vmware-tanzu/cluster-api-provider-bringyourownhost`. The root Go module keeps the upstream import path (`github.com/vmware-tanzu/cluster-api-provider-bringyourownhost`) for compatibility with existing imports; new Platform9-authored code (`cmd/byohctl`) uses its own module under the `github.com/platform9/...` path instead. Keep this distinction in mind when adding imports — don't assume the whole tree shares one module or one import prefix.
+This repo (`platform9/cluster-api-provider-bringyourownhost`) is Platform9's fork of the upstream `vmware-tanzu/cluster-api-provider-bringyourownhost`. This is a hard fork: we do not track upstream. The root Go module path is `github.com/platform9/cluster-api-provider-bringyourownhost`. `cmd/byohctl` is still its own Go module (`cmd/go.mod`) and imports the root module through a `replace` directive.
 
 ## Build & Development Commands
 
@@ -155,6 +155,7 @@ Most existing files carry a VMware copyright header, e.g.:
 ```
 
 - Never remove or replace an existing copyright header, including VMware's.
+- Never edit `LICENSE` or `NOTICE`. Bulk rewrites, such as a module path rename, must match the full string being replaced and must not touch copyright text. A blanket replace of `vmware-tanzu` or `VMware` is not allowed.
 - When editing a file going forward, add a Platform9 copyright line above the `SPDX-License-Identifier` line (don't replace the existing one) using the current year:
 ```go
 // Copyright 2021 VMware, Inc. All Rights Reserved.
