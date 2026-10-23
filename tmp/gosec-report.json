@@ -1,0 +1,432 @@
+{
+	"Golang errors": {},
+	"Issues": [
+		{
+			"severity": "HIGH",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G703",
+			"details": "Path traversal via taint analysis: os.WriteFile",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/cmd/onboard.go",
+			"code": "272: \tdestPath := filepath.Join(bootstrapAgentConfDir, \"bootstrap-kubeconfig.yaml\")\n273: \tif err := os.WriteFile(destPath, data, 0o600); err != nil {\n274: \t\treturn fmt.Errorf(\"failed to write %s: %w\", destPath, err)\n",
+			"line": "273",
+			"column": "24",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/utils/logger.go",
+			"code": "224: \t// Use the standard ps command to check if process exists\n225: \tcmd := exec.Command(\"ps\", \"-p\", pid)\n226: \terr := cmd.Run()\n",
+			"line": "225",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/service/agent.go",
+			"code": "245: \t// Purge the package\n246: \tcmd := exec.Command(dpkgPath, \"--purge\", ByohAgentServiceName)\n247: \toutput, err := cmd.CombinedOutput()\n",
+			"line": "246",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/service/agent.go",
+			"code": "229: \t// First, try a clean installation\n230: \tcmd := exec.Command(dpkgPath, \"-i\", debFilePath)\n231: \toutput, err := cmd.CombinedOutput()\n",
+			"line": "230",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/service/agent.go",
+			"code": "203: \tvar outputBuffer bytes.Buffer\n204: \tpullCmd := exec.Command(imgpkgPath, pullArgs...)\n205: \tpullCmd.Stdout = \u0026outputBuffer\n",
+			"line": "204",
+			"column": "13",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/service/agent.go",
+			"code": "29: func isPackageInstalled(packageName string) bool {\n30: \tcmd := exec.Command(\"dpkg\", \"-l\", packageName)\n31: \toutput, err := cmd.CombinedOutput()\n",
+			"line": "30",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/test/e2e/e2e_k8s_bundle_registry.go",
+			"code": "169: \n170: \trunCmd := exec.CommandContext(ctx, \"docker\", \"run\", //nolint:gosec // fixed args, no user input\n171: \t\t\"--name\", k8sBundleBuilderContainer,\n172: \t\t\"-e\", \"BUILD_ONLY=1\",\n173: \t\t\"-e\", \"CONTAINERD_VERSION=\"+k8sBundleContainerdVersion,\n174: \t\t\"-e\", \"KUBERNETES_VERSION=\"+kubernetesVersion,\n175: \t\t\"-e\", \"KUBERNETES_MAJOR_VERSION=\"+majorMinor,\n176: \t\t\"-e\", \"CRITOOL_VERSION=\"+critoolVersion,\n177: \t\t\"-e\", \"ARCH=\"+debianArch,\n178: \t\t\"-e\", \"UBUNTU_VERSION=\"+k8sBundleUbuntuVersion,\n179: \t\tk8sBundleBuilderImageTag,\n180: \t)\n181: \tif output, runErr := runCmd.CombinedOutput(); runErr != nil {\n",
+			"line": "170-180",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/service/agent.go",
+			"code": "180: \t\tutils.LogInfo(\"Installing %s...\", pkg.Name)\n181: \t\toutput, err := exec.Command(pkg.InstallCommand, pkg.InstallArgs...).CombinedOutput()\n182: \t\tif err != nil {\n",
+			"line": "181",
+			"column": "18",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/utils/logger.go",
+			"code": "54: \tvar err error\n55: \tdebugLogFile, err = os.OpenFile(debugLogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)\n56: \tif err != nil {\n",
+			"line": "55",
+			"column": "22",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/cmd/onboard.go",
+			"code": "255: func writeBootstrapCredential(byohDir, bootstrapKubeconfigPath, namespace string) error {\n256: \tdata, err := os.ReadFile(bootstrapKubeconfigPath)\n257: \tif err != nil {\n",
+			"line": "256",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/cmd/onboard.go",
+			"code": "241: func LoadOnboardConfig(path string) (*OnboardConfig, error) {\n242: \tdata, err := os.ReadFile(path)\n243: \tif err != nil {\n",
+			"line": "242",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/client/k8s.go",
+			"code": "82: \t// Read the kubeconfig file and get the namespace\n83: \tdata, err := os.ReadFile(kubeconfigPath)\n84: \tif err != nil {\n",
+			"line": "83",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "377",
+				"url": "https://cwe.mitre.org/data/definitions/377.html"
+			},
+			"rule_id": "G303",
+			"details": "File creation in shared tmp directory without using ioutil.Tempfile",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/test/e2e/docker_helper.go",
+			"code": "267: \t\tkubeconfig = re.ReplaceAll(kubeconfig, []byte(\"server: https://127.0.0.1:\"+r.Port))\n268: \t\tExpect(os.WriteFile(TempKubeconfigPath, kubeconfig, kubeconfigFileMode)).NotTo(HaveOccurred()) // #nosec G703 -- TempKubeconfigPath is a fixed local const, not user input\n269: \n",
+			"line": "268",
+			"column": "10",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G302",
+			"details": "Expect file permissions to be 0600 or less",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/test/e2e/e2e_debug_helper.go",
+			"code": "116: func WriteShellScript(shellFileName string, shellFileContent []string) {\n117: \tf, err := os.OpenFile(shellFileName, os.O_APPEND|os.O_WRONLY|os.O_CREATE, DefaultFileMode) // #nosec G304 -- e2e debug helper; callers always pass a fixed /tmp path owned by the test suite\n118: \tif err != nil {\n",
+			"line": "117",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G302",
+			"details": "Expect file permissions to be 0600 or less",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/test/e2e/e2e_debug_helper.go",
+			"code": "41: func StreamDockerLog(stream types.HijackedResponse, outputFile string) (stop func()) {\n42: \tf, err := os.OpenFile(outputFile, os.O_CREATE|os.O_WRONLY, DefaultFileMode) // #nosec G304 -- e2e debug helper; callers always pass a fixed /tmp path owned by the test suite\n43: \tif err != nil {\n",
+			"line": "42",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G302",
+			"details": "Expect file permissions to be 0600 or less",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/utils/logger.go",
+			"code": "54: \tvar err error\n55: \tdebugLogFile, err = os.OpenFile(debugLogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)\n56: \tif err != nil {\n",
+			"line": "55",
+			"column": "22",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G302",
+			"details": "Expect file permissions to be 0600 or less",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/service/agent.go",
+			"code": "59: \n60: \t\t\tif err := os.Chmod(ImgPkgPath, 0755); err != nil {\n61: \t\t\t\treturn fmt.Errorf(\"failed to make file executable: %v\", err)\n",
+			"line": "60",
+			"column": "14",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/utils/logger.go",
+			"code": "44: \t// Create log directory if it doesn't exist\n45: \tif err := os.MkdirAll(logDir, 0755); err != nil {\n46: \t\treturn fmt.Errorf(\"failed to create log directory: %v\", err)\n",
+			"line": "45",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/service/agent.go",
+			"code": "135: \t// Create byohDir if it doesn't exist\n136: \tif err := os.MkdirAll(byohDir, DefaultDirPerms); err != nil {\n137: \t\treturn fmt.Errorf(\"failed to create BYOH directory %s: %v\", byohDir, err)\n",
+			"line": "136",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/cmd/onboard.go",
+			"code": "490: \tpkgDir := filepath.Join(byohDir, \"packages\")\n491: \tif err := os.MkdirAll(pkgDir, service.DefaultDirPerms); err != nil {\n492: \t\tutils.LogError(\"Failed to create packages directory: %v\", err)\n",
+			"line": "491",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/cmd/onboard.go",
+			"code": "268: \t}\n269: \tif err := os.MkdirAll(bootstrapAgentConfDir, service.DefaultDirPerms); err != nil {\n270: \t\treturn fmt.Errorf(\"failed to create %s: %w\", bootstrapAgentConfDir, err)\n",
+			"line": "269",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/client/k8s.go",
+			"code": "178: \t// Step 4: Create byohDir if it doesn't exist\n179: \tif err = os.MkdirAll(byohDir, DefaultDirPerms); err != nil {\n180: \t\treturn fmt.Errorf(\"failed to create byoh directory: %v\", err)\n",
+			"line": "179",
+			"column": "11",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/agent/cloudinit/file_writer.go",
+			"code": "39: \tif os.IsNotExist(err) {\n40: \t\treturn os.MkdirAll(dirName, dirPermission)\n41: \t}\n",
+			"line": "40",
+			"column": "10",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/cmd/onboard.go",
+			"code": "483: \tregionLabel := service.PcdKaapiRegionKey + \"=\" + regionName\n484: \tif err := os.WriteFile(regionFile, []byte(regionLabel), service.DefaultFilePerms); err != nil {\n485: \t\tutils.LogError(\"Failed to save region name: %v\", err)\n",
+			"line": "484",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/cmd/onboard.go",
+			"code": "276: \tnamespaceFile := filepath.Join(byohDir, \"namespace\")\n277: \tif err := os.WriteFile(namespaceFile, []byte(namespace), service.DefaultFilePerms); err != nil {\n278: \t\treturn fmt.Errorf(\"failed to save namespace: %w\", err)\n",
+			"line": "277",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/home/runner/work/cluster-api-provider-bringyourownhost/cluster-api-provider-bringyourownhost/cmd/byohctl/client/k8s.go",
+			"code": "195: \n196: \tif err = os.WriteFile(kubeconfigPath, kubeconfig, service.DefaultFilePerms); err != nil {\n197: \t\treturn fmt.Errorf(\"failed to write kubeconfig: %v\", err)\n",
+			"line": "196",
+			"column": "11",
+			"nosec": false,
+			"suppressions": null
+		}
+	],
+	"Stats": {
+		"files": 81,
+		"lines": 12383,
+		"nosec": 18,
+		"found": 26
+	},
+	"GosecVersion": "dev"
+}
