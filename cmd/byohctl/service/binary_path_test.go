@@ -1,3 +1,6 @@
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 package service
 
 import (
@@ -14,6 +17,7 @@ import (
 func statMissing(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
 func statPresent(string) (os.FileInfo, error) { return nil, nil }
 
+//nolint:gocyclo // one subtest per canonical-path case
 func TestCheckCanonicalPath(t *testing.T) {
 	origExecutable := osExecutable
 	origStatPath := statPath

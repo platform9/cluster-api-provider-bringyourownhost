@@ -1,3 +1,6 @@
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 package utils
 
 import (
@@ -11,14 +14,14 @@ import (
 func AskBool(msg string, args ...interface{}) (bool, error) {
 	_, err := fmt.Fprintf(os.Stdout, fmt.Sprintf("%s: ", msg), args...)
 	if err != nil {
-		return false, fmt.Errorf("Unable to show options to user: %s", err.Error())
+		return false, fmt.Errorf("Unable to show options to user: %s", err.Error()) //nolint:staticcheck // user-facing message kept unchanged
 	}
 
 	r := bufio.NewReader(os.Stdin)
 	byt, isPrefix, err := r.ReadLine()
 
 	if isPrefix || err != nil {
-		return false, fmt.Errorf("Unable to read i/p: %s", err.Error())
+		return false, fmt.Errorf("Unable to read i/p: %s", err.Error()) //nolint:staticcheck // user-facing message kept unchanged
 	}
 
 	resp := string(byt)
@@ -30,5 +33,5 @@ func AskBool(msg string, args ...interface{}) (bool, error) {
 		return false, nil
 	}
 
-	return false, fmt.Errorf("Please provide input as y or n, provided: %s", resp)
+	return false, fmt.Errorf("Please provide input as y or n, provided: %s", resp) //nolint:staticcheck // user-facing message kept unchanged
 }

@@ -1,3 +1,6 @@
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 package client
 
 import (
@@ -78,11 +81,14 @@ func TestGetSecret(t *testing.T) {
 
 		// Send test response
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(types.Secret{
+		err := json.NewEncoder(w).Encode(types.Secret{
 			Data: map[string]string{
 				"config": base64.StdEncoding.EncodeToString([]byte("test-kubeconfig")),
 			},
 		})
+		if err != nil {
+			t.Errorf("Failed to encode response: %v", err)
+		}
 	}))
 	defer ts.Close()
 
@@ -163,12 +169,15 @@ func TestSaveKubeConfig(t *testing.T) {
 			ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				// Send test response with a valid kubeconfig structure
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(types.Secret{
+				encErr := json.NewEncoder(w).Encode(types.Secret{
 					Data: map[string]string{
 						"value":  base64.StdEncoding.EncodeToString([]byte("apiVersion: v1\nkind: Config\n")),
 						"config": base64.StdEncoding.EncodeToString([]byte("apiVersion: v1\nkind: Config\n")),
 					},
 				})
+				if encErr != nil {
+					t.Errorf("Failed to encode response: %v", encErr)
+				}
 			}))
 			defer ts.Close()
 

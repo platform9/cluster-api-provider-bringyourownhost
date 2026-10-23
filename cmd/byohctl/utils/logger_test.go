@@ -1,4 +1,6 @@
-// utils/logger_test.go
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 package utils
 
 import (
@@ -26,10 +28,10 @@ func TestLogFiles(t *testing.T) {
 	// Test various log levels
 	infoTestMessage := "Test info log message"
 	LogInfo("%s", infoTestMessage)
-	
+
 	debugTestMessage := "Test debug log message"
 	LogDebug("%s", debugTestMessage)
-	
+
 	errorTestMessage := "Test error log message"
 	LogError("%s", errorTestMessage)
 
@@ -94,19 +96,19 @@ func TestConsoleOutputLevels(t *testing.T) {
 
 	for _, test := range tests {
 		SetConsoleOutputLevel(test.level)
-		
+
 		if shouldShowOnConsole(LevelDebug) != test.debugShouldLog {
 			t.Errorf("For level %s, debug should show on console: %v", test.level, test.debugShouldLog)
 		}
-		
+
 		if shouldShowOnConsole(LevelInfo) != test.infoShouldLog {
 			t.Errorf("For level %s, info should show on console: %v", test.level, test.infoShouldLog)
 		}
-		
+
 		if shouldShowOnConsole(LevelWarning) != test.warnShouldLog {
 			t.Errorf("For level %s, warning should show on console: %v", test.level, test.warnShouldLog)
 		}
-		
+
 		if shouldShowOnConsole(LevelError) != test.errorShouldLog {
 			t.Errorf("For level %s, error should show on console: %v", test.level, test.errorShouldLog)
 		}

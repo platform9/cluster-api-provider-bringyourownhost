@@ -24,11 +24,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
-	capiv1beta1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+	capiv1beta1 "sigs.k8s.io/cluster-api/api/core/v1beta1" //nolint:staticcheck // v1beta1 is the API version the cluster serves
 )
 
 const (
@@ -115,7 +114,7 @@ func (c *K8sClient) GetSecret(secretName string) (*types.Secret, error) {
 	secretEndpoint := fmt.Sprintf("https://%s/oidc-proxy/%s/%s/api/v1/namespaces/%s/secrets/%s",
 		c.fqdn, namespace, c.regionName, namespace, secretName)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", secretEndpoint, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", secretEndpoint, http.NoBody)
 	if err != nil {
 		return nil, utils.LogErrorf("error creating request: %v", err)
 	}
@@ -162,7 +161,7 @@ func (c *K8sClient) SaveKubeConfig(secretName string) error {
 	}
 
 	// Step 3: Decode kubeconfig
-	kubeconfig, err := base64.StdEncoding.DecodeString(string(kubeconfigString))
+	kubeconfig, err := base64.StdEncoding.DecodeString(kubeconfigString)
 	if err != nil {
 		return fmt.Errorf("failed to decode kubeconfig: %v", err)
 	}
@@ -204,7 +203,6 @@ func (c *K8sClient) SaveKubeConfig(secretName string) error {
 
 // DeleteSavedKubeconfig deletes the kubeconfig from the user's BYOH directory
 func (c *K8sClient) DeleteSavedKubeconfig() error {
-
 	if err := os.RemoveAll(service.ByohDir); err != nil {
 		return fmt.Errorf("failed to delete kubeconfig: %v", err)
 	}
@@ -216,7 +214,7 @@ func (c *K8sClient) DeleteSavedKubeconfig() error {
 // CheckDNSResolution verifies that DNS resolution works for the FQDN
 func (c *K8sClient) CheckDNSResolution() ([]string, error) {
 	utils.LogInfo("Verifying DNS resolution for %s", c.fqdn)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second) //nolint:mnd // DNS lookup timeout, used once
 	defer cancel()
 
 	var r net.Resolver
@@ -235,7 +233,6 @@ func (c *K8sClient) CheckDNSResolution() ([]string, error) {
 
 // GetK8sClient returns a new Kubernetes client from given kubeconfig
 func GetK8sClient(kubeconfigPath string) (*Client, error) {
-
 	// Build the config from the kubeconfig file.
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
@@ -262,11 +259,7 @@ func GetK8sClient(kubeconfigPath string) (*Client, error) {
 
 // GetByoHosts gets ByoHost object in the given namespace.
 func (client *Client) GetByoHostObject(namespace string) (*infrastructurev1beta1.ByoHost, error) {
-	byohostGVR := schema.GroupVersionResource{
-		Group:    "infrastructure.cluster.x-k8s.io",
-		Version:  "v1beta1",
-		Resource: "byohosts",
-	}
+	byohostGVR := infrastructurev1beta1.GroupVersion.WithResource("byohosts")
 
 	hostName, err := os.Hostname()
 	if err != nil {
@@ -291,11 +284,7 @@ func (client *Client) GetByoHostObject(namespace string) (*infrastructurev1beta1
 
 // DeleteByoHostObject deletes the ByoHost object in the given namespace.
 func (client *Client) DeleteByoHostObject(namespace string) error {
-	byohostGVR := schema.GroupVersionResource{
-		Group:    "infrastructure.cluster.x-k8s.io",
-		Version:  "v1beta1",
-		Resource: "byohosts",
-	}
+	byohostGVR := infrastructurev1beta1.GroupVersion.WithResource("byohosts")
 
 	hostName, err := os.Hostname()
 	if err != nil {
@@ -313,11 +302,7 @@ func (client *Client) DeleteByoHostObject(namespace string) error {
 
 // AnnotateMachineObject annotates the machine object with the given annotation
 func (client *Client) AnnotateMachineObject(ctx context.Context, machineObj *unstructured.Unstructured, namespace, annotationKey, annotationValue string) error {
-	machineGVR := schema.GroupVersionResource{
-		Group:    "cluster.x-k8s.io",
-		Version:  "v1beta1",
-		Resource: "machines",
-	}
+	machineGVR := capiv1beta1.GroupVersion.WithResource("machines")
 
 	annotations := machineObj.GetAnnotations()
 	if annotations == nil {
@@ -342,13 +327,9 @@ func (client *Client) ScaleDownMachineDeployment(ctx context.Context, machineObj
 	machineDeploymentName := machineObj.GetLabels()["cluster.x-k8s.io/deployment-name"]
 
 	if machineDeploymentName == "" {
-		return fmt.Errorf("machine object does not have a machine deployment name as a label.")
+		return fmt.Errorf("machine object does not have a machine deployment name as a label.") //nolint:staticcheck // user-facing message kept unchanged
 	}
-	deploymentGVR := schema.GroupVersionResource{
-		Group:    "cluster.x-k8s.io",
-		Version:  "v1beta1",
-		Resource: "machinedeployments",
-	}
+	deploymentGVR := capiv1beta1.GroupVersion.WithResource("machinedeployments")
 
 	// Get the machine deployment object
 	unstructuredDeploymentObj, err := client.DynamicClient.Resource(deploymentGVR).Namespace(namespace).Get(ctx, machineDeploymentName, metav1.GetOptions{})
@@ -361,7 +342,7 @@ func (client *Client) ScaleDownMachineDeployment(ctx context.Context, machineObj
 		return fmt.Errorf("error converting machine deployment object: %v", err)
 	}
 
-	*machineDeploymentObj.Spec.Replicas = *machineDeploymentObj.Spec.Replicas - 1
+	*machineDeploymentObj.Spec.Replicas--
 
 	updatedUnstructuredDeploymentObj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(machineDeploymentObj)
 	if err != nil {
@@ -383,11 +364,7 @@ func (client *Client) ScaleDownMachineDeployment(ctx context.Context, machineObj
 
 // GetMachineObject returns the machine object
 func (client *Client) GetUnstructuredMachineObject(ctx context.Context, namespace, machineName string) (*unstructured.Unstructured, error) {
-	machineGVR := schema.GroupVersionResource{
-		Group:    "cluster.x-k8s.io",
-		Version:  "v1beta1",
-		Resource: "machines",
-	}
+	machineGVR := capiv1beta1.GroupVersion.WithResource("machines")
 
 	// Get the machine object
 	unstructuredMachineObj, err := client.DynamicClient.Resource(machineGVR).Namespace(namespace).Get(ctx, machineName, metav1.GetOptions{})
@@ -404,13 +381,9 @@ func (client *Client) GetMachineDeploymentReplicaCount(ctx context.Context, mach
 	machineDeploymentName := machineObj.GetLabels()["cluster.x-k8s.io/deployment-name"]
 
 	if machineDeploymentName == "" {
-		return 0, fmt.Errorf("machine object does not have a machine deployment name as a label.")
+		return 0, fmt.Errorf("machine object does not have a machine deployment name as a label.") //nolint:staticcheck // user-facing message kept unchanged
 	}
-	deploymentGVR := schema.GroupVersionResource{
-		Group:    "cluster.x-k8s.io",
-		Version:  "v1beta1",
-		Resource: "machinedeployments",
-	}
+	deploymentGVR := capiv1beta1.GroupVersion.WithResource("machinedeployments")
 
 	// Get the machine deployment object
 	unstructuredDeploymentObj, err := client.DynamicClient.Resource(deploymentGVR).Namespace(namespace).Get(ctx, machineDeploymentName, metav1.GetOptions{})
@@ -464,7 +437,7 @@ func (client *Client) WaitForMachineRefToBeUnset(ctx context.Context, byoHost *i
 }
 
 // CheckRegionAvailability checks if the region is available for the tenant
-func (c *K8sClient) CheckRegionAvailability(ctx context.Context, regionName string) (bool, []string, error) {
+func (c *K8sClient) CheckRegionAvailability(ctx context.Context, regionName string) (found bool, knownRegions []string, err error) {
 	// Create a client from the kubeconfig
 	client, err := GetK8sClient(service.KubeconfigFilePath)
 	if err != nil {

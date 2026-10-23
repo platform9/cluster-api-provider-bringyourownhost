@@ -37,7 +37,7 @@ This tool helps onboard hosts to your Platform9 deployment.`,
 		// onboard's own package install is about to make this warning's advice moot
 		// (it installs the canonical copy itself), so skip it there - it would otherwise
 		// fire on every single onboarding, the one invocation where it's guaranteed noise.
-		if cmd.Name() != "onboard" {
+		if cmd.Name() != onboardCommandName {
 			if ok, msg := service.CheckCanonicalPath(); !ok {
 				utils.LogWarn("%s", msg)
 			}
