@@ -29,21 +29,6 @@ At the minimum,
 * all code changes should be accompanied with corresponding unit / integration tests (if for some reason, the code is not unit / integration testable, add enough justification in the PR. Although, this almost should never be the case.)
 * all the commits made in the PR should be squashed into one single commit before the final merge by the PR author themselves such that it would be easier to track the commits in Git history.
 
-### Contributor License Agreement
-All contributors to this project must have a signed Contributor License
-Agreement (**"CLA"**) on file with us. The CLA grants us the permissions we
-need to use and redistribute your contributions as part of the project; you or
-your employer retain the copyright to your contribution. Before a PR can pass
-all required checks, our CLA action will prompt you to accept the agreement.
-Head over to [https://cla.vmware.com/](https://cla.vmware.com/) to see your
-current agreement(s) on file or to sign a new one.
-
-We generally only need you (or your employer) to sign our CLA once and once
-signed, you should be able to submit contributions to any VMware project.
-
-Note: if you would like to submit an "_obvious fix_" for something like a typo,
-formatting issue or spelling mistake, you may not need to sign the CLA.
-
 ---
 
 ## As a Code Reviewer
