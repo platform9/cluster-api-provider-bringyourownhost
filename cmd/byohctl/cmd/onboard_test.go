@@ -418,17 +418,15 @@ func createTestCommand() *cobra.Command {
 
 func TestWriteBootstrapCredential(t *testing.T) {
 	byohDir := t.TempDir()
-	origConfDir := bootstrapAgentConfDir
-	bootstrapAgentConfDir = t.TempDir()
-	t.Cleanup(func() { bootstrapAgentConfDir = origConfDir })
+	confDir := t.TempDir()
 
 	srcPath := filepath.Join(t.TempDir(), "bootstrap-kubeconfig.yaml")
 	const kubeconfigContent = "apiVersion: v1\nkind: Config\n"
 	require.NoError(t, os.WriteFile(srcPath, []byte(kubeconfigContent), 0o600))
 
-	require.NoError(t, writeBootstrapCredential(byohDir, srcPath, "test-tenant-ns"))
+	require.NoError(t, writeBootstrapCredential(byohDir, confDir, srcPath, "test-tenant-ns"))
 
-	written, err := os.ReadFile(filepath.Join(bootstrapAgentConfDir, "bootstrap-kubeconfig.yaml"))
+	written, err := os.ReadFile(filepath.Join(confDir, "bootstrap-kubeconfig.yaml"))
 	require.NoError(t, err)
 	require.Equal(t, kubeconfigContent, string(written))
 
@@ -442,12 +440,10 @@ func TestWriteBootstrapCredential(t *testing.T) {
 // of its own, so the setting has to be recorded rather than merely applied in-process.
 func TestWriteBootstrapCredentialInsecure(t *testing.T) {
 	byohDir := t.TempDir()
-	origConfDir := bootstrapAgentConfDir
-	bootstrapAgentConfDir = t.TempDir()
+	confDir := t.TempDir()
 	origInsecure := insecure
 	insecure = true
 	t.Cleanup(func() {
-		bootstrapAgentConfDir = origConfDir
 		insecure = origInsecure
 	})
 
@@ -463,9 +459,9 @@ current-context: ""
 `
 	require.NoError(t, os.WriteFile(srcPath, []byte(kubeconfigContent), 0o600))
 
-	require.NoError(t, writeBootstrapCredential(byohDir, srcPath, "test-tenant-ns"))
+	require.NoError(t, writeBootstrapCredential(byohDir, confDir, srcPath, "test-tenant-ns"))
 
-	written, err := os.ReadFile(filepath.Join(bootstrapAgentConfDir, "bootstrap-kubeconfig.yaml"))
+	written, err := os.ReadFile(filepath.Join(confDir, "bootstrap-kubeconfig.yaml"))
 	require.NoError(t, err)
 	require.Contains(t, string(written), "insecure-skip-tls-verify: true")
 	require.NotContains(t, string(written), "certificate-authority-data")
@@ -473,11 +469,9 @@ current-context: ""
 
 func TestWriteBootstrapCredentialMissingSource(t *testing.T) {
 	byohDir := t.TempDir()
-	origConfDir := bootstrapAgentConfDir
-	bootstrapAgentConfDir = t.TempDir()
-	t.Cleanup(func() { bootstrapAgentConfDir = origConfDir })
+	confDir := t.TempDir()
 
-	err := writeBootstrapCredential(byohDir, filepath.Join(t.TempDir(), "does-not-exist.yaml"), "test-tenant-ns")
+	err := writeBootstrapCredential(byohDir, confDir, filepath.Join(t.TempDir(), "does-not-exist.yaml"), "test-tenant-ns")
 	require.Error(t, err)
 }
 

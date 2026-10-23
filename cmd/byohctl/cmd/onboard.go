@@ -42,7 +42,7 @@ const (
 	defaultTenant      = "service"
 )
 
-var bootstrapAgentConfDir = "/etc/pf9-byohost-agent.service.d"
+const bootstrapAgentConfDir = "/etc/pf9-byohost-agent.service.d"
 
 var onboardCmd = &cobra.Command{
 	Use:   onboardCommandName,
@@ -260,7 +260,7 @@ func LoadOnboardConfig(path string) (*OnboardConfig, error) {
 
 // Never writes ~/.byoh/config thus agent's own bootstrap-token-to-certificate exchange
 // runs on first start
-func writeBootstrapCredential(byohDir, bootstrapKubeconfigPath, namespace string) error {
+func writeBootstrapCredential(byohDir, confDir, bootstrapKubeconfigPath, namespace string) error {
 	data, err := os.ReadFile(bootstrapKubeconfigPath)
 	if err != nil {
 		return fmt.Errorf("failed to read bootstrap kubeconfig %s: %w", bootstrapKubeconfigPath, err)
@@ -274,11 +274,11 @@ func writeBootstrapCredential(byohDir, bootstrapKubeconfigPath, namespace string
 			return fmt.Errorf("failed to apply --insecure to bootstrap kubeconfig: %w", err)
 		}
 	}
-	if err := os.MkdirAll(bootstrapAgentConfDir, service.DefaultDirPerms); err != nil {
-		return fmt.Errorf("failed to create %s: %w", bootstrapAgentConfDir, err)
+	if err := os.MkdirAll(confDir, service.DefaultDirPerms); err != nil {
+		return fmt.Errorf("failed to create %s: %w", confDir, err)
 	}
-	destPath := filepath.Join(bootstrapAgentConfDir, "bootstrap-kubeconfig.yaml")
-	// #nosec G703 -- path is the fixed bootstrap directory plus a constant filename
+	destPath := filepath.Join(confDir, "bootstrap-kubeconfig.yaml")
+	// #nosec G703 -- confDir is a package constant in production
 	if err := os.WriteFile(destPath, data, 0o600); err != nil { //nolint:mnd // 0o600 is the standard mode for a secret file
 		return fmt.Errorf("failed to write %s: %w", destPath, err)
 	}
@@ -438,7 +438,7 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	if usingBootstrapKubeconfig {
 		utils.LogDebug("Using bootstrap kubeconfig %s, namespace %s", bootstrapKubeconfigPath, hostNamespace)
 		utils.LogInfo("Handing bootstrap credential to the agent")
-		if err = writeBootstrapCredential(byohDir, bootstrapKubeconfigPath, hostNamespace); err != nil {
+		if err = writeBootstrapCredential(byohDir, bootstrapAgentConfDir, bootstrapKubeconfigPath, hostNamespace); err != nil {
 			utils.LogError("Failed to write bootstrap credential: %v", err)
 			os.Exit(1)
 		}
