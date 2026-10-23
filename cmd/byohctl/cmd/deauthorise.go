@@ -35,7 +35,12 @@ func init() {
 }
 
 func runDeauthorise(cmd *cobra.Command, args []string) {
+	runHostOperation(cmd, pkg.OperationDeauthorise, deauthoriseForce, "Failed to deauthorise host. ", "Successfully deauthorised host from the byo cluster")
+}
 
+// runHostOperation runs a deauthorise or decommission against the management cluster that the
+// host's kubeconfig points to. It exits the process with status 1 on any failure.
+func runHostOperation(cmd *cobra.Command, operation pkg.HostOperationType, force bool, failureMsg, successMsg string) {
 	utils.SetConsoleOutputLevel(verbosity)
 
 	if _, err := os.Stat(service.KubeconfigFilePath); os.IsNotExist(err) {
@@ -55,12 +60,11 @@ func runDeauthorise(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	err = pkg.PerformHostOperation(cmd.Context(), k8sClient, pkg.DefaultHostIO{}, pkg.OperationDeauthorise, namespace, deauthoriseForce)
+	err = pkg.PerformHostOperation(cmd.Context(), k8sClient, pkg.DefaultHostIO{}, operation, namespace, force)
 	if err != nil {
-		fmt.Println("Failed to deauthorise host. " + err.Error())
+		fmt.Println(failureMsg + err.Error())
 		os.Exit(1)
 	}
 
-	utils.LogSuccess("Successfully deauthorised host from the byo cluster")
-
+	utils.LogSuccess("%s", successMsg)
 }

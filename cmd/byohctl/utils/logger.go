@@ -1,12 +1,15 @@
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 package utils
 
 import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
-	"os/exec"
 )
 
 // Log level constants
@@ -20,16 +23,16 @@ const (
 
 // Console output levels
 const (
-	ConsoleOutputAll      = "all"      // Show all log messages
+	ConsoleOutputAll       = "all"       // Show all log messages
 	ConsoleOutputImportant = "important" // Show only important messages (INFO, SUCCESS, WARNING, ERROR)
-	ConsoleOutputMinimal  = "minimal"  // Show only SUCCESS, WARNING, ERROR
-	ConsoleOutputCritical = "critical" // Show only WARNING and ERROR
-	ConsoleOutputNone     = "none"     // Don't show any messages on console
+	ConsoleOutputMinimal   = "minimal"   // Show only SUCCESS, WARNING, ERROR
+	ConsoleOutputCritical  = "critical"  // Show only WARNING and ERROR
+	ConsoleOutputNone      = "none"      // Don't show any messages on console
 )
 
 var (
 	// Logger instance
-	debugLogger  *log.Logger
+	debugLogger *log.Logger
 
 	// File handle for logger
 	debugLogFile *os.File
@@ -42,17 +45,17 @@ var (
 // InitLoggers initializes the consolidated debug logger
 func InitLoggers(logDir string, debugEnabled bool) error {
 	// Create log directory if it doesn't exist
-	if err := os.MkdirAll(logDir, 0755); err != nil {
+	if err := os.MkdirAll(logDir, 0755); err != nil { //nolint:mnd // standard directory permissions, single use
 		return fmt.Errorf("failed to create log directory: %v", err)
 	}
 
 	// Define log file path - only use a single debug file
 	debugLogPath := filepath.Join(logDir, "byoh-agent-debug.log")
-	
+
 	// Always create a new log file when the command is run
 	// Open debug log file with truncate flag to overwrite any existing content
 	var err error
-	debugLogFile, err = os.OpenFile(debugLogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	debugLogFile, err = os.OpenFile(debugLogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644) //nolint:mnd // standard file permissions, single use
 	if err != nil {
 		return fmt.Errorf("failed to open debug log file: %v", err)
 	}
@@ -74,7 +77,7 @@ func CloseLoggers() {
 		// Add timestamp for session end
 		timestamp := time.Now().Format("2006-01-02 15:04:05")
 		fmt.Fprintf(debugLogFile, "\n===== BYOHCTL SESSION ENDED AT %s =====\n\n", timestamp)
-		
+
 		debugLogFile.Close()
 	}
 }
@@ -123,6 +126,8 @@ func shouldShowOnConsole(level string) bool {
 }
 
 // LogDebug logs a debug message to the debug log file
+//
+//nolint:goprintffuncname // public API used across packages; renaming is out of scope
 func LogDebug(format string, args ...interface{}) {
 	message := fmt.Sprintf(format, args...)
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
@@ -140,6 +145,8 @@ func LogDebug(format string, args ...interface{}) {
 }
 
 // LogInfo logs an info message to the debug log file
+//
+//nolint:goprintffuncname // public API used across packages; renaming is out of scope
 func LogInfo(format string, args ...interface{}) {
 	message := fmt.Sprintf(format, args...)
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
@@ -157,6 +164,8 @@ func LogInfo(format string, args ...interface{}) {
 }
 
 // LogSuccess logs a success message to the debug log file
+//
+//nolint:goprintffuncname // public API used across packages; renaming is out of scope
 func LogSuccess(format string, args ...interface{}) {
 	message := fmt.Sprintf(format, args...)
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
@@ -174,6 +183,8 @@ func LogSuccess(format string, args ...interface{}) {
 }
 
 // LogWarn logs a warning message to the debug log file
+//
+//nolint:goprintffuncname // public API used across packages; renaming is out of scope
 func LogWarn(format string, args ...interface{}) {
 	message := fmt.Sprintf(format, args...)
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
@@ -191,6 +202,8 @@ func LogWarn(format string, args ...interface{}) {
 }
 
 // LogError logs an error message to the debug log file
+//
+//nolint:goprintffuncname // public API used across packages; renaming is out of scope
 func LogError(format string, args ...interface{}) {
 	message := fmt.Sprintf(format, args...)
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
@@ -222,9 +235,9 @@ func TrackTime(start time.Time, name string) {
 // ProcessExists checks if a process with the given PID exists
 func ProcessExists(pid string) (bool, error) {
 	// Use the standard ps command to check if process exists
-	cmd := exec.Command("ps", "-p", pid)
+	cmd := exec.Command("ps", "-p", pid) //nolint:noctx // no ctx available, signature unchanged
 	err := cmd.Run()
-	
+
 	if err != nil {
 		if exitError, ok := err.(*exec.ExitError); ok {
 			// ps returns exit code 1 when the process doesn't exist
@@ -235,6 +248,6 @@ func ProcessExists(pid string) (bool, error) {
 		}
 		return false, fmt.Errorf("error checking process status: %v", err)
 	}
-	
+
 	return true, nil
 }

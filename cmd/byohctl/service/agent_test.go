@@ -1,7 +1,10 @@
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 package service
 
 import (
-	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -40,12 +43,6 @@ func (m *TestDirCreatorMock) MkdirAll(path string, perm os.FileMode) error {
 	return m.ReturnErr
 }
 
-// Helper function to restore original functions after tests
-func restoreExecFunctions() {
-	execCommand = exec.Command
-	execLookPath = exec.LookPath
-}
-
 // Setup a complete mocking environment for BYOH agent tests
 func setupMockExecEnvironment() func() {
 	oldExecCommand := execCommand
@@ -69,14 +66,15 @@ func setupMockExecEnvironment() func() {
 			if len(args) > 0 && args[0] == "pull" {
 				outputDir := ""
 				for i, arg := range args {
-					if arg == "-o" && i+1 < len(args) {
-						outputDir = args[i+1]
-						// Create the directory and mock package file
-						os.MkdirAll(outputDir, 0755)
-						mockFile := filepath.Join(outputDir, "pf9-byohost-agent.deb")
-						os.WriteFile(mockFile, []byte("mock package"), 0644)
-						break
+					if arg != "-o" || i+1 >= len(args) {
+						continue
 					}
+					outputDir = args[i+1]
+					// Create the directory and mock package file
+					_ = os.MkdirAll(outputDir, 0755)
+					mockFile := filepath.Join(outputDir, "pf9-byohost-agent.deb")
+					_ = os.WriteFile(mockFile, []byte("mock package"), 0644)
+					break
 				}
 			}
 			return cmd
@@ -114,24 +112,18 @@ var execLookPath = exec.LookPath
 // Mock command execution for testing
 func mockCommand(command string) *exec.Cmd {
 	cs := []string{"-c", ""}
-	cmd := exec.Command("echo")
+	cmd := exec.CommandContext(context.Background(), "echo")
 	cmd.Args = append([]string{"bash"}, cs...)
 	return cmd
 }
 
-// mockCommandWithError creates a mock command that fails with an error
-func mockCommandWithError(command string, errMsg string, exitCode int) *exec.Cmd {
-	cs := []string{"-c", fmt.Sprintf("echo '%s' >&2; exit %d", errMsg, exitCode)}
-	cmd := exec.Command("bash", cs...)
-	return cmd
-}
-
 // TestHelperProcess is not a real test, it's used to mock exec.Command
+//
+//nolint:gocyclo // one case per mocked command
 func TestHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
 		return
 	}
-	defer os.Exit(0)
 
 	// args are the command and arguments passed to the mock
 	args := os.Args
@@ -168,9 +160,9 @@ func TestHelperProcess(t *testing.T) {
 					outputDir = args[i+1]
 					// Create a mock file in the output directory
 					if outputDir != "" {
-						os.MkdirAll(outputDir, 0755)
+						_ = os.MkdirAll(outputDir, 0755)
 						mockFile := filepath.Join(outputDir, "pf9-byohost-agent.deb")
-						os.WriteFile(mockFile, []byte("mock package"), 0644)
+						_ = os.WriteFile(mockFile, []byte("mock package"), 0644)
 					}
 					break
 				}
@@ -239,11 +231,6 @@ func TestPrepareAgentDirectory(t *testing.T) {
 	}
 }
 
-// Helper to get the current operating system
-func getGOOS() string {
-	return "linux" // Mock to return linux for tests
-}
-
 // Test SetupAgent with mocked binary download
 func TestSetupAgent(t *testing.T) {
 	// Skip if not Linux
@@ -290,7 +277,7 @@ func TestSetupAgent(t *testing.T) {
 	// Mock downloadDebianPackage to create a mock package file
 	downloadDebianPackage = func(tempDir string) (string, error) {
 		packagePath := filepath.Join(tempDir, ByohAgentDebPackageFilename)
-		os.WriteFile(packagePath, []byte("mock package"), 0644)
+		_ = os.WriteFile(packagePath, []byte("mock package"), 0644)
 		return packagePath, nil
 	}
 
@@ -392,11 +379,11 @@ func TestEnsureRequiredPackagesMock(t *testing.T) {
 	execCommand = func(command string, args ...string) *exec.Cmd {
 		// lsof exits non-zero when the file is not locked — simulate apt available.
 		if command == "lsof" {
-			return exec.Command("bash", "-c", "exit 1")
+			return exec.CommandContext(t.Context(), "bash", "-c", "exit 1")
 		}
 		if command == "apt-get" ||
 			(command == "bash" && len(args) > 1 && args[0] == "-c" && strings.Contains(args[1], "apt-get")) {
-			return exec.Command("bash", "-c", "echo 'Package installation failed' >&2; exit 127")
+			return exec.CommandContext(t.Context(), "bash", "-c", "echo 'Package installation failed' >&2; exit 127")
 		}
 		return mockCommand(command)
 	}
@@ -425,7 +412,7 @@ func MockCommandWithError(exitCode int, errorMsg string) func(string, ...string)
 		}
 
 		// Create a command that will fail
-		cmd := exec.Command("sh", "-c", fmt.Sprintf("echo '%s' >&2; exit %d", errorMsg, exitCode))
+		cmd := exec.CommandContext(context.Background(), "sh", "-c", fmt.Sprintf("echo '%s' >&2; exit %d", errorMsg, exitCode))
 		return cmd
 	}
 }
@@ -449,13 +436,13 @@ func TestDownloadDebianPackage(t *testing.T) {
 	downloadDebianPackage = func(tempDir string) (string, error) {
 		packagePath := filepath.Join(tempDir, ByohAgentDebPackageFilename)
 		// Create the mock file
-		err := os.MkdirAll(tempDir, 0755)
-		if err != nil {
-			return "", err
+		mkdirErr := os.MkdirAll(tempDir, 0755)
+		if mkdirErr != nil {
+			return "", mkdirErr
 		}
-		err = os.WriteFile(packagePath, []byte("mock package contents"), 0644)
-		if err != nil {
-			return "", err
+		mkdirErr = os.WriteFile(packagePath, []byte("mock package contents"), 0644)
+		if mkdirErr != nil {
+			return "", mkdirErr
 		}
 		return packagePath, nil
 	}
@@ -556,7 +543,8 @@ func TestInstallDebianPackage(t *testing.T) {
 
 	// Create a mock package file
 	packageFile := filepath.Join(tempDir, "pf9-byohost-agent.deb")
-	if err := os.WriteFile(packageFile, []byte("mock package"), 0644); err != nil {
+	err = os.WriteFile(packageFile, []byte("mock package"), 0644)
+	if err != nil {
 		t.Fatalf("Failed to create mock package file: %v", err)
 	}
 
@@ -568,8 +556,8 @@ func TestInstallDebianPackage(t *testing.T) {
 
 	installDebianPackage = func(debFilePath string) error {
 		// Just verify the file exists
-		if _, err := os.Stat(debFilePath); os.IsNotExist(err) {
-			return fmt.Errorf("package file does not exist: %v", err)
+		if _, statErr := os.Stat(debFilePath); os.IsNotExist(statErr) {
+			return fmt.Errorf("package file does not exist: %v", statErr)
 		}
 		return nil
 	}
@@ -654,63 +642,11 @@ func TestInstallDebianPackageErrors(t *testing.T) {
 	}
 }
 
-// Wrap the original downloadDebianPackage function with one that uses our mocked exec functions
-func mockDownloadDebianPackage(outputDir string) (string, error) {
-	// Check if imgpkg is available
-	imgpkgPath, err := execLookPath("imgpkg")
-	if err != nil {
-		return "", fmt.Errorf("imgpkg not found in PATH: %v", err)
-	}
-
-	// Use a buffer to capture the command output
-	var outputBuffer bytes.Buffer
-	pullCmd := execCommand(imgpkgPath, "pull", "-i", byohAgentBundleURL(), "-o", outputDir)
-	pullCmd.Stdout = &outputBuffer
-	pullCmd.Stderr = &outputBuffer
-
-	if err := pullCmd.Run(); err != nil {
-		output := outputBuffer.String()
-		return "", fmt.Errorf("failed to pull package: %v\nOutput: %s", err, output)
-	}
-
-	// Check if we've downloaded the Debian package file
-	debFilePath := filepath.Join(outputDir, ByohAgentDebPackageFilename)
-	if _, err := os.Stat(debFilePath); err != nil {
-		return "", fmt.Errorf("could not find downloaded Debian package in %s", outputDir)
-	}
-
-	utils.LogSuccess("Downloaded package to %s", debFilePath)
-	return debFilePath, nil
-}
-
-// Wrap the original installDebianPackage function with one that uses our mocked exec functions
-func mockInstallDebianPackage(debFilePath string) error {
-	dpkgPath, err := execLookPath("dpkg")
-	if err != nil {
-		return fmt.Errorf("dpkg not found in PATH: %v", err)
-	}
-
-	// Install the package
-	utils.LogInfo("Installing package %s", debFilePath)
-
-	// Install the package
-	cmd := execCommand(dpkgPath, "-i", debFilePath)
-	output, err := cmd.CombinedOutput()
-	outputStr := string(output)
-
-	if err != nil {
-		return fmt.Errorf("failed to install package: %v\nOutput: %s", err, outputStr)
-	}
-
-	utils.LogSuccess("Successfully installed Debian package %s", debFilePath)
-	return nil
-}
-
 // Wrap the original ensureRequiredPackages function with one that uses our mocked exec functions
 func mockEnsureRequiredPackages() error {
 	// Fix any broken package state first
-	execCommand("dpkg", "--configure", "-a").Run()
-	execCommand("apt-get", "--fix-broken", "install", "-y").Run()
+	_ = execCommand("dpkg", "--configure", "-a").Run()
+	_ = execCommand("apt-get", "--fix-broken", "install", "-y").Run()
 
 	// Install imgpkg if needed
 	if _, err := execLookPath("imgpkg"); err != nil {
@@ -734,7 +670,7 @@ func mockEnsureRequiredPackages() error {
 		utils.LogInfo("Trying to fix and reinstall...")
 
 		// Try to fix broken dependencies
-		execCommand("apt-get", "--fix-broken", "install", "-y").Run()
+		_ = execCommand("apt-get", "--fix-broken", "install", "-y").Run()
 
 		// Try again with reinstall
 		retryCmd := execCommand("bash", "-c",
@@ -847,11 +783,11 @@ func TestMockEnsureRequiredPackagesFailure(t *testing.T) {
 		if command == "bash" && len(args) > 1 {
 			if strings.Contains(args[1], "apt-get update && apt-get install") {
 				// First installation attempt fails
-				return exec.Command("bash", "-c", "echo 'Failed to install packages' >&2; exit 1")
+				return exec.CommandContext(t.Context(), "bash", "-c", "echo 'Failed to install packages' >&2; exit 1")
 			} else if strings.Contains(args[1], "apt-get install -y --reinstall") {
 				// Second attempt (retry) also fails
 				retryAttempted = true
-				return exec.Command("bash", "-c", "echo 'Failed again to install packages' >&2; exit 1")
+				return exec.CommandContext(t.Context(), "bash", "-c", "echo 'Failed again to install packages' >&2; exit 1")
 			}
 		}
 		return mockCommand(command)
@@ -901,7 +837,7 @@ func TestMockEnsureRequiredPackagesRetrySucceeds(t *testing.T) {
 			if strings.Contains(args[1], "apt-get update && apt-get install") {
 				// First installation attempt fails
 				firstAttemptCalled = true
-				return exec.Command("bash", "-c", "echo 'Failed to install packages' >&2; exit 1")
+				return exec.CommandContext(t.Context(), "bash", "-c", "echo 'Failed to install packages' >&2; exit 1")
 			} else if strings.Contains(args[1], "apt-get install -y --reinstall") {
 				// Second attempt (retry) succeeds
 				retryAttempted = true
@@ -980,8 +916,8 @@ func TestAgentSetupProcess(t *testing.T) {
 	downloadDebianPackage = func(outputDir string) (string, error) {
 		// Create a dummy package file
 		packagePath := filepath.Join(outputDir, ByohAgentDebPackageFilename)
-		os.MkdirAll(outputDir, 0755)
-		os.WriteFile(packagePath, []byte("mock package"), 0644)
+		_ = os.MkdirAll(outputDir, 0755)
+		_ = os.WriteFile(packagePath, []byte("mock package"), 0644)
 		return packagePath, nil
 	}
 
@@ -1061,8 +997,8 @@ func TestAgentSetupFailures(t *testing.T) {
 			mockDownloadPackage: func(outputDir string) (string, error) {
 				// Create a dummy package file
 				packagePath := filepath.Join(outputDir, ByohAgentDebPackageFilename)
-				os.MkdirAll(outputDir, 0755)
-				os.WriteFile(packagePath, []byte("mock package"), 0644)
+				_ = os.MkdirAll(outputDir, 0755)
+				_ = os.WriteFile(packagePath, []byte("mock package"), 0644)
 				return packagePath, nil
 			},
 			mockInstallPackage: func(debFilePath string) error {

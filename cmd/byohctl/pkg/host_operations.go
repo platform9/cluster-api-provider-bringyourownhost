@@ -42,8 +42,9 @@ func (DefaultHostIO) Purge() error {
 }
 
 // PerformHostOperation performs the common steps for host deauthorisation or decommissioning.
+//
+//nolint:gocyclo,funlen,gocritic // sequential host operation steps; refactor out of scope
 func PerformHostOperation(ctx context.Context, client *client.Client, io HostIO, operationType HostOperationType, namespace string, force bool) error {
-
 	// Deauthorise and decommission host steps -
 	// 1. Check if the host is already onboarded ( by checking the respective byohost object in the management cluster)
 	// 2. If the host is onboarded - Check if machineRef is set to the byohost object; If not set, just delete the byohost object and exit
@@ -66,9 +67,9 @@ func PerformHostOperation(ctx context.Context, client *client.Client, io HostIO,
 		if operationType == OperationDecommission {
 			if !force {
 				// Ask user to proceed with host cleanup or not
-				continueDecommission, err := io.Confirm("Do you want to proceed with host cleanup? (y/n)")
-				if err != nil {
-					return fmt.Errorf("failed to get user input: %v", err)
+				continueDecommission, confirmErr := io.Confirm("Do you want to proceed with host cleanup? (y/n)")
+				if confirmErr != nil {
+					return fmt.Errorf("failed to get user input: %v", confirmErr)
 				}
 				if !continueDecommission {
 					utils.LogInfo("Host cleanup declined by user; skipping dpkg purge")
@@ -77,8 +78,8 @@ func PerformHostOperation(ctx context.Context, client *client.Client, io HostIO,
 			} else {
 				utils.LogInfo("--force set: proceeding with host cleanup despite unreachable management plane")
 			}
-			if err := io.Purge(); err != nil {
-				return fmt.Errorf("failed to run dpkg purge: %v", err)
+			if purgeErr := io.Purge(); purgeErr != nil {
+				return fmt.Errorf("failed to run dpkg purge: %v", purgeErr)
 			}
 			utils.LogSuccess("Successfully ran dpkg purge")
 			return nil
@@ -90,7 +91,7 @@ func PerformHostOperation(ctx context.Context, client *client.Client, io HostIO,
 			utils.LogInfo("--force set: management plane unreachable or ByoHost missing; treating deauthorise as a no-op")
 			return nil
 		}
-		return fmt.Errorf("Cannot proceed ahead with the deauthorisation. Either restart the pf9-byohost-agent service or decommission and re-onboard.")
+		return fmt.Errorf("Cannot proceed ahead with the deauthorisation. Either restart the pf9-byohost-agent service or decommission and re-onboard.") //nolint:staticcheck // user-facing message kept unchanged
 	}
 
 	utils.LogSuccess("Successfully retrieved ByoHosts object from the management plane")
@@ -134,12 +135,12 @@ func PerformHostOperation(ctx context.Context, client *client.Client, io HostIO,
 		fmt.Println("Info: Machine deployment replica count is 1. This is the last node in the cluster.")
 
 		// Ask user to continue de-auth or not
-		continueDeauth, err := io.Confirm("Do you want to continue with de-auth? (y/n)")
-		if err != nil {
-			return fmt.Errorf("failed to get user input: %v", err)
+		continueDeauth, confirmErr := io.Confirm("Do you want to continue with de-auth? (y/n)")
+		if confirmErr != nil {
+			return fmt.Errorf("failed to get user input: %v", confirmErr)
 		}
 		if !continueDeauth {
-			return fmt.Errorf("Info: De-auth cancelled by user.")
+			return fmt.Errorf("Info: De-auth cancelled by user.") //nolint:staticcheck,misspell // user-facing message kept unchanged
 		}
 
 		// Since this is the last machine in the cluster, annotate machine objects to exclude the node drain
@@ -188,17 +189,17 @@ func PerformHostOperation(ctx context.Context, client *client.Client, io HostIO,
 }
 
 // Helper function to consolidate decommissioning logic when no machineRef is set
-func performHostDecommissionWithNoMachineRef(ctx context.Context, client *client.Client, io HostIO, namespace string) error {
+func performHostDecommissionWithNoMachineRef(ctx context.Context, byohClient *client.Client, io HostIO, namespace string) error {
 	utils.LogInfo("Deleting ByoHosts object and running dpkg purge")
 
-	if err := client.DeleteByoHostObject(namespace); err != nil {
+	if err := byohClient.DeleteByoHostObject(namespace); err != nil {
 		return fmt.Errorf("failed to delete ByoHosts object: %v", err)
 	}
 
 	utils.LogSuccess("Successfully deleted ByoHosts object")
 
-	if err := io.Purge(); err != nil {
-		return fmt.Errorf("failed to run dpkg purge: %v", err)
+	if purgeErr := io.Purge(); purgeErr != nil {
+		return fmt.Errorf("failed to run dpkg purge: %v", purgeErr)
 	}
 
 	utils.LogSuccess("Successfully ran dpkg purge")

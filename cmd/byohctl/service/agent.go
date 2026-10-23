@@ -1,3 +1,6 @@
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 // Package service contains BYOH agent setup functions
 package service
 
@@ -11,6 +14,19 @@ import (
 	"path/filepath"
 
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils"
+)
+
+// Command, package and argument names used more than once in this file.
+const (
+	cmdImgpkg      = "imgpkg"
+	cmdDpkg        = "dpkg"
+	cmdAptGet      = "apt-get"
+	argYes         = "-y"
+	argInstall     = "install"
+	pkgEbtables    = "ebtables"
+	pkgConntrack   = "conntrack"
+	pkgSocat       = "socat"
+	pkgLibseccomp2 = "libseccomp2"
 )
 
 // execCommand is a variable so tests can replace it with a mock.
@@ -27,7 +43,7 @@ type Package struct {
 }
 
 func isPackageInstalled(packageName string) bool {
-	cmd := exec.Command("dpkg", "-l", packageName)
+	cmd := exec.Command(cmdDpkg, "-l", packageName) //nolint:noctx // no context available in this helper without changing its signature
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return false
@@ -38,8 +54,8 @@ func isPackageInstalled(packageName string) bool {
 
 var requiredPackages = []Package{
 	{
-		Name:          "imgpkg",
-		VerifyCommand: "imgpkg",
+		Name:          cmdImgpkg,
+		VerifyCommand: cmdImgpkg,
 		CustomInstaller: func() error {
 			resp, err := http.Get(ImgPkgURL)
 			if err != nil {
@@ -57,7 +73,7 @@ var requiredPackages = []Package{
 				return fmt.Errorf("failed to write file: %v", err)
 			}
 
-			if err := os.Chmod(ImgPkgPath, 0755); err != nil {
+			if err := os.Chmod(ImgPkgPath, 0755); err != nil { //nolint:mnd // standard executable file mode
 				return fmt.Errorf("failed to make file executable: %v", err)
 			}
 
@@ -66,39 +82,39 @@ var requiredPackages = []Package{
 		},
 	},
 	{
-		Name:           "dpkg",
-		VerifyCommand:  "dpkg",
-		PackageName:    "dpkg",
-		InstallCommand: "apt-get",
-		InstallArgs:    []string{"install", "-y", "dpkg"},
+		Name:           cmdDpkg,
+		VerifyCommand:  cmdDpkg,
+		PackageName:    cmdDpkg,
+		InstallCommand: cmdAptGet,
+		InstallArgs:    []string{argInstall, argYes, cmdDpkg},
 	},
 	{
-		Name:           "ebtables",
-		VerifyCommand:  "ebtables",
-		PackageName:    "ebtables",
-		InstallCommand: "apt-get",
-		InstallArgs:    []string{"install", "-y", "ebtables"},
+		Name:           pkgEbtables,
+		VerifyCommand:  pkgEbtables,
+		PackageName:    pkgEbtables,
+		InstallCommand: cmdAptGet,
+		InstallArgs:    []string{argInstall, argYes, pkgEbtables},
 	},
 	{
-		Name:           "conntrack",
-		VerifyCommand:  "conntrack",
-		PackageName:    "conntrack",
-		InstallCommand: "apt-get",
-		InstallArgs:    []string{"install", "-y", "conntrack"},
+		Name:           pkgConntrack,
+		VerifyCommand:  pkgConntrack,
+		PackageName:    pkgConntrack,
+		InstallCommand: cmdAptGet,
+		InstallArgs:    []string{argInstall, argYes, pkgConntrack},
 	},
 	{
-		Name:           "socat",
-		VerifyCommand:  "socat",
-		PackageName:    "socat",
-		InstallCommand: "apt-get",
-		InstallArgs:    []string{"install", "-y", "socat"},
+		Name:           pkgSocat,
+		VerifyCommand:  pkgSocat,
+		PackageName:    pkgSocat,
+		InstallCommand: cmdAptGet,
+		InstallArgs:    []string{argInstall, argYes, pkgSocat},
 	},
 	{
-		Name:           "libseccomp2",
-		VerifyCommand:  "libseccomp2",
-		PackageName:    "libseccomp2",
-		InstallCommand: "apt-get",
-		InstallArgs:    []string{"install", "-y", "libseccomp2"},
+		Name:           pkgLibseccomp2,
+		VerifyCommand:  pkgLibseccomp2,
+		PackageName:    pkgLibseccomp2,
+		InstallCommand: cmdAptGet,
+		InstallArgs:    []string{argInstall, argYes, pkgLibseccomp2},
 	},
 }
 
@@ -140,7 +156,6 @@ func PrepareAgentDirectory(byohDir string) error {
 }
 
 var ensureRequiredPackages = func() error {
-
 	// do apt-get update before proceeding with installing required packages
 	utils.LogSuccess("Updating apt packages...Might take few seconds")
 
@@ -149,14 +164,14 @@ var ensureRequiredPackages = func() error {
 	}
 
 	// do apt-get update
-	if _, err := RunWithStdout("apt-get", "update"); err != nil {
+	if _, err := RunWithStdout(cmdAptGet, "update"); err != nil {
 		return fmt.Errorf("failed to update apt packages: %v", err)
 	}
 
 	utils.LogInfo("Checking for required packages...")
 
 	// Fix any broken package state first
-	output, err := exec.Command("apt-get", "--fix-broken", "install", "-y").CombinedOutput()
+	output, err := exec.Command(cmdAptGet, "--fix-broken", argInstall, argYes).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to fix broken packages: %v\nOutput: %s", err, string(output))
 	}
@@ -178,7 +193,7 @@ var ensureRequiredPackages = func() error {
 		}
 
 		utils.LogInfo("Installing %s...", pkg.Name)
-		output, err := exec.Command(pkg.InstallCommand, pkg.InstallArgs...).CombinedOutput()
+		output, err := exec.Command(pkg.InstallCommand, pkg.InstallArgs...).CombinedOutput() //nolint:gosec // G204: command and args come from the hard-coded requiredPackages table, not user input
 		if err != nil {
 			return fmt.Errorf("failed to install %s: %v\nOutput: %s", pkg.Name, err, string(output))
 		}
@@ -192,9 +207,9 @@ var ensureRequiredPackages = func() error {
 var downloadDebianPackage = func(tempDir string) (string, error) {
 	utils.LogInfo("Downloading BYOH agent Debian package from %s", byohAgentBundleURL())
 
-	imgpkgPath, _ := exec.LookPath("imgpkg")
+	imgpkgPath, _ := exec.LookPath(cmdImgpkg)
 
-	pullArgs := []string{"pull", "-i", byohAgentBundleURL(), "-o", tempDir}
+	pullArgs := []string{"pull", "-i", byohAgentBundleURL(), "-o", tempDir} //nolint:goconst // "-o" is the imgpkg output flag; the other occurrences are in tests, and a shared constant for a single production use adds nothing
 	if byohAgentBundleInsecure() {
 		pullArgs = append(pullArgs, "--registry-insecure")
 	}
@@ -221,7 +236,7 @@ var downloadDebianPackage = func(tempDir string) (string, error) {
 }
 
 var installDebianPackage = func(debFilePath string) error {
-	dpkgPath, _ := exec.LookPath("dpkg")
+	dpkgPath, _ := exec.LookPath(cmdDpkg)
 
 	// Install the package
 	utils.LogInfo("Installing package %s", debFilePath)
@@ -240,7 +255,7 @@ var installDebianPackage = func(debFilePath string) error {
 }
 
 var PurgeDebianPackage = func() error {
-	dpkgPath, _ := exec.LookPath("dpkg")
+	dpkgPath, _ := exec.LookPath(cmdDpkg)
 
 	// Purge the package
 	cmd := exec.Command(dpkgPath, "--purge", ByohAgentServiceName)
@@ -257,7 +272,6 @@ var PurgeDebianPackage = func() error {
 
 // RunWithStdout runs a command locally returning stdout and err
 func RunWithStdout(name string, args ...string) (string, error) {
-
 	cmd := execCommand(name, args...)
 	byt, err := cmd.Output()
 	stderr := ""
