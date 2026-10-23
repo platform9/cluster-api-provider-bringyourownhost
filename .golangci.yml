@@ -142,6 +142,9 @@ linters:
           - goheader
         path: installer/internal/algo/common_ubuntu_test\.go$
     paths:
+      # byohctl was a separate Go module that this config never covered. Remove
+      # this once its existing findings are fixed.
+      - ^cmd/
       - .*dummy.go
       - .*fakes/
       - third_party$
