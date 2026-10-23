@@ -101,8 +101,8 @@ var (
 	pathToHostAgentBinary string
 
 	// pathToByohctlBinary is built once here, alongside pathToHostAgentBinary, and shared across
-	// ParallelNodes -- byohctl is its own Go module (see CLAUDE.md), so it can't be built with
-	// gexec.BuildWithEnvironment from this (root-module) process the way the agent binary is.
+	// ParallelNodes -- it is built through cmd/byohctl's Makefile (see buildByohctlBinary), not
+	// gexec.BuildWithEnvironment the way the agent binary is.
 	pathToByohctlBinary string
 
 	// Together with ensureLocalAgentBundleRegistry
@@ -214,9 +214,8 @@ func parseSharedSuiteData(data []byte) (sharedSuiteData, error) {
 
 // buildByohctlBinary builds byohctl for the docker host containers' architecture (which follows
 // the host running this suite -- Docker Desktop on Apple Silicon runs arm64 containers -- not a
-// fixed default), via cmd/byohctl's own Makefile rather than a hand-rolled `go build`. byohctl is
-// its own Go module (see CLAUDE.md), so it can't be built with gexec.BuildWithEnvironment the way
-// the agent binary above is.
+// fixed default), via cmd/byohctl's own Makefile rather than a hand-rolled `go build`, so the
+// version ldflags match a release build.
 func buildByohctlBinary(ctx context.Context) (string, error) {
 	repoRootBytes, err := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel").Output() // #nosec G204 -- fixed args, no user input
 	if err != nil {
