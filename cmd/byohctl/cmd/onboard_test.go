@@ -1,3 +1,6 @@
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 package cmd
 
 import (
@@ -14,6 +17,7 @@ import (
 	"golang.org/x/term"
 )
 
+//nolint:funlen // one flat test covering every flag
 func TestOnboardFlags(t *testing.T) {
 	// Store original values to restore later
 	origUsername := username
@@ -212,7 +216,7 @@ func createTempConfigFile(t *testing.T, content string) string {
 	if err != nil {
 		t.Fatalf("Failed to create temp config file: %v", err)
 	}
-	if _, err := tmpfile.Write([]byte(content)); err != nil {
+	if _, err := tmpfile.WriteString(content); err != nil {
 		t.Fatalf("Failed to write to temp config file: %v", err)
 	}
 	tmpfile.Close()
@@ -562,7 +566,7 @@ func TestInteractivePassword(t *testing.T) {
 var readPassword func(fd int) ([]byte, error) = term.ReadPassword
 
 func ubuntuOSRelease(versionID string) string {
-	return fmt.Sprintf("PRETTY_NAME=\"Ubuntu %s LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"%s\"\nID=ubuntu\nID_LIKE=debian\n", versionID, versionID)
+	return fmt.Sprintf("PRETTY_NAME=%q\nNAME=\"Ubuntu\"\nVERSION_ID=%q\nID=ubuntu\nID_LIKE=debian\n", "Ubuntu "+versionID+" LTS", versionID)
 }
 
 // requireUnsupportedOS and requireOSDetection assert which typed error a case produced, so the

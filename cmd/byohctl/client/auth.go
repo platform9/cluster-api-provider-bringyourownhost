@@ -16,6 +16,9 @@ import (
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils"
 )
 
+// passwordKey is the form field name and OAuth2 grant type for password auth.
+const passwordKey = "password"
+
 type AuthClient struct {
 	client      *http.Client
 	fqdn        string
@@ -39,14 +42,15 @@ func (c *AuthClient) GetToken(username, password string) (string, error) {
 	utils.LogDebug("Getting authentication token for user %s", username)
 	tokenEndpoint := fmt.Sprintf("https://%s/dex/token", c.fqdn)
 	formData := url.Values{
-		"grant_type":    {"password"},
+		"grant_type":    {passwordKey},
 		"client_id":     {"kubernetes"},
 		"client_secret": {c.clientToken},
 		"username":      {username},
-		"password":      {password},
+		passwordKey:     {password},
 		"scope":         {"openid offline_access groups federated:id email"},
 	}
 
+	//nolint:noctx // GetToken takes no context; changing its signature is out of scope
 	req, err := http.NewRequest("POST", tokenEndpoint, strings.NewReader(formData.Encode()))
 	if err != nil {
 		return "", utils.LogErrorf("failed to create authentication request: %v", err)

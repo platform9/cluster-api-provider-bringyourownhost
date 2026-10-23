@@ -35,10 +35,17 @@ var (
 	hostNamespace           string
 )
 
+const (
+	onboardCommandName = "onboard"
+	etcOSReleasePath   = "/etc/os-release"
+	ubuntuID           = "ubuntu"
+	defaultTenant      = "service"
+)
+
 var bootstrapAgentConfDir = "/etc/pf9-byohost-agent.service.d"
 
 var onboardCmd = &cobra.Command{
-	Use:   "onboard",
+	Use:   onboardCommandName,
 	Short: "Onboard a host to Platform9",
 	Long: `Onboard a host to Platform9 management plane.
 This command will:
@@ -71,13 +78,14 @@ func AddOnboardFlags(cmd *cobra.Command,
 	clientToken *string, domain *string, tenant *string, verbosity *string, regionName *string, configFile *string,
 	bootstrapKubeconfigPath *string, hostNamespace *string,
 ) {
+
 	cmd.Flags().StringVarP(fqdn, "url", "u", "", "Platform9 FQDN")
 	cmd.Flags().StringVarP(username, "username", "e", "", "Platform9 username")
 	cmd.Flags().StringVarP(password, "password", "p", "", "Platform9 password")
 	cmd.Flags().BoolVar(passwordInteractive, "password-interactive", false, "Enter password interactively")
 	cmd.Flags().StringVarP(clientToken, "client-token", "c", "", "Client token for authentication")
 	cmd.Flags().StringVarP(domain, "domain", "d", "default", "Platform9 domain")
-	cmd.Flags().StringVarP(tenant, "tenant", "t", "service", "Platform9 tenant")
+	cmd.Flags().StringVarP(tenant, "tenant", "t", defaultTenant, "Platform9 tenant")
 	cmd.Flags().StringVarP(verbosity, "verbosity", "v", "minimal", "Log verbosity level. Requires one of: all, important, minimal, critical.\nOmitting the flag will show minimal verbosity")
 	cmd.MarkFlagsMutuallyExclusive("password", "password-interactive")
 	cmd.Flags().StringVarP(regionName, "region", "r", "", "Platform9 region where you want to onboard this host")
@@ -109,7 +117,7 @@ var supportedUbuntuVersions = []string{"20.04", "22.04", "24.04"}
 
 // osReleasePaths are searched in order. /usr/lib/os-release is the fallback for stateless
 // systems, matching agent/registration/host_registrar.go's getOperatingSystem.
-var osReleasePaths = []string{"/etc/os-release", "/usr/lib/os-release"}
+var osReleasePaths = []string{etcOSReleasePath, "/usr/lib/os-release"}
 
 // UnsupportedOSError reports that the host's OS was identified but is not one the agent supports.
 // Typed so callers and tests can match it with errors.As instead of matching on message text.
@@ -157,7 +165,7 @@ func checkSupportedPlatform() error {
 	}
 
 	// ID, not ID_LIKE: Ubuntu derivatives are not what the bundles are built and tested against.
-	if osRelease["ID"] != "ubuntu" {
+	if osRelease["ID"] != ubuntuID {
 		return &UnsupportedOSError{Detected: described}
 	}
 
@@ -270,7 +278,8 @@ func writeBootstrapCredential(byohDir, bootstrapKubeconfigPath, namespace string
 		return fmt.Errorf("failed to create %s: %w", bootstrapAgentConfDir, err)
 	}
 	destPath := filepath.Join(bootstrapAgentConfDir, "bootstrap-kubeconfig.yaml")
-	if err := os.WriteFile(destPath, data, 0o600); err != nil {
+	// #nosec G703 -- path is the fixed bootstrap directory plus a constant filename
+	if err := os.WriteFile(destPath, data, 0o600); err != nil { //nolint:mnd // 0o600 is the standard mode for a secret file
 		return fmt.Errorf("failed to write %s: %w", destPath, err)
 	}
 	namespaceFile := filepath.Join(byohDir, "namespace")
@@ -297,7 +306,7 @@ func mergeConfigWithFlags(cfg *OnboardConfig) {
 	if domain == "default" && cfg.Domain != "" {
 		domain = cfg.Domain
 	}
-	if tenant == "service" && cfg.Tenant != "" {
+	if tenant == defaultTenant && cfg.Tenant != "" {
 		tenant = cfg.Tenant
 	}
 	if verbosity == "minimal" && cfg.Verbosity != "" {
@@ -313,6 +322,7 @@ func mergeConfigWithFlags(cfg *OnboardConfig) {
 	}
 }
 
+//nolint:gocyclo,funlen // onboarding is one linear sequence of steps; splitting is out of scope here
 func runOnboard(cmd *cobra.Command, args []string) {
 	// If config file is provided, load it and use values as defaults for unset flags
 	if configFile != "" {
@@ -417,10 +427,10 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	homeDir, err = os.UserHomeDir()
 	if err != nil {
 		utils.LogError("Error getting home directory: %v", err)
-		os.Exit(1)
+		os.Exit(1) //nolint:gocritic // os.Exit skipping deferred logger cleanup is existing behavior
 	}
 	byohDir = filepath.Join(homeDir, service.ByohConfigDir)
-	if err := service.PrepareAgentDirectory(byohDir); err != nil {
+	if err = service.PrepareAgentDirectory(byohDir); err != nil {
 		utils.LogError("Failed to prepare agent directory: %v", err)
 		os.Exit(1)
 	}
@@ -428,7 +438,7 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	if usingBootstrapKubeconfig {
 		utils.LogDebug("Using bootstrap kubeconfig %s, namespace %s", bootstrapKubeconfigPath, hostNamespace)
 		utils.LogInfo("Handing bootstrap credential to the agent")
-		if err := writeBootstrapCredential(byohDir, bootstrapKubeconfigPath, hostNamespace); err != nil {
+		if err = writeBootstrapCredential(byohDir, bootstrapKubeconfigPath, hostNamespace); err != nil {
 			utils.LogError("Failed to write bootstrap credential: %v", err)
 			os.Exit(1)
 		}
@@ -437,7 +447,8 @@ func runOnboard(cmd *cobra.Command, args []string) {
 
 		utils.LogDebug("Getting authentication token for user %s", username)
 		authClient := client.NewAuthClient(fqdn, clientToken, insecure)
-		token, err := authClient.GetToken(username, password)
+		var token string
+		token, err = authClient.GetToken(username, password)
 		if err != nil {
 			utils.LogError("Failed to get authentication token: %v", err)
 			os.Exit(1)
@@ -446,17 +457,19 @@ func runOnboard(cmd *cobra.Command, args []string) {
 		k8sClient := client.NewK8sClient(fqdn, domain, tenant, token, regionName, insecure)
 
 		utils.LogInfo("Saving kubeconfig from bootstrap secret")
-		if err := k8sClient.SaveKubeConfig("byoh-bootstrap-kc"); err != nil {
+		if err = k8sClient.SaveKubeConfig("byoh-bootstrap-kc"); err != nil {
 			utils.LogError("Failed to save kubeconfig: %v", err)
 			os.Exit(1)
 		}
 
 		// Check if region where user wants to onboard to is available for this tenant or not
 		// If not available, roll back the onboarding process
-		available, regions, err := k8sClient.CheckRegionAvailability(cmd.Context(), regionName)
+		var available bool
+		var regions []string
+		available, regions, err = k8sClient.CheckRegionAvailability(cmd.Context(), regionName)
 		if err != nil {
 			utils.LogError("Failed to check region availability, rolling back onboarding process: %v", err)
-			if err := k8sClient.DeleteSavedKubeconfig(); err != nil {
+			if err = k8sClient.DeleteSavedKubeconfig(); err != nil {
 				utils.LogError("Failed to delete saved kubeconfig while rolling back onboarding process: %v", err)
 			}
 			os.Exit(1)
@@ -466,7 +479,7 @@ func runOnboard(cmd *cobra.Command, args []string) {
 			if len(regions) > 0 {
 				utils.LogInfo("Available regions: %v", regions)
 			}
-			if err := k8sClient.DeleteSavedKubeconfig(); err != nil {
+			if err = k8sClient.DeleteSavedKubeconfig(); err != nil {
 				utils.LogError("Failed to delete saved kubeconfig while rolling back onboarding process: %v", err)
 			}
 			os.Exit(1)
@@ -481,15 +494,15 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	*/
 	regionFile := filepath.Join(byohDir, "region")
 	regionLabel := service.PcdKaapiRegionKey + "=" + regionName
-	if err := os.WriteFile(regionFile, []byte(regionLabel), service.DefaultFilePerms); err != nil {
-		utils.LogError("Failed to save region name: %v", err)
+	if writeErr := os.WriteFile(regionFile, []byte(regionLabel), service.DefaultFilePerms); writeErr != nil {
+		utils.LogError("Failed to save region name: %v", writeErr)
 		os.Exit(1)
 	}
 
 	// Create packages directory for downloads
 	pkgDir := filepath.Join(byohDir, "packages")
-	if err := os.MkdirAll(pkgDir, service.DefaultDirPerms); err != nil {
-		utils.LogError("Failed to create packages directory: %v", err)
+	if mkdirErr := os.MkdirAll(pkgDir, service.DefaultDirPerms); mkdirErr != nil {
+		utils.LogError("Failed to create packages directory: %v", mkdirErr)
 		os.Exit(1)
 	}
 

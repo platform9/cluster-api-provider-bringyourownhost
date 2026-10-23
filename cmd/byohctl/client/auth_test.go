@@ -1,4 +1,6 @@
-// client/auth_test.go
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 package client
 
 import (
@@ -28,21 +30,27 @@ func TestNewAuthClient(t *testing.T) {
 		}
 
 		// Parse form data
-		r.ParseForm()
+		err := r.ParseForm()
+		if err != nil {
+			t.Errorf("Failed to parse form: %v", err)
+		}
 		if r.FormValue("username") != "testuser" {
 			t.Errorf("Unexpected username: expected testuser, got %s", r.FormValue("username"))
 		}
 
-		if r.FormValue("password") != "testpass" {
-			t.Errorf("Unexpected password: expected testpass, got %s", r.FormValue("password"))
+		if r.FormValue(passwordKey) != "testpass" {
+			t.Errorf("Unexpected password: expected testpass, got %s", r.FormValue(passwordKey))
 		}
 
 		// Return mock token response
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{
+		_, err = w.Write([]byte(`{
             "id_token": "test-id-token"
         }`))
+		if err != nil {
+			t.Errorf("Failed to write response: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -68,14 +76,15 @@ func TestNewAuthClient(t *testing.T) {
 	// Use HTTP explicitly for the test
 	tokenEndpoint := fmt.Sprintf("http://%s/dex/token", authClient.fqdn)
 	formData := url.Values{
-		"grant_type":    {"password"},
+		"grant_type":    {passwordKey},
 		"client_id":     {"kubernetes"},
 		"client_secret": {authClient.clientToken},
 		"username":      {"testuser"},
-		"password":      {"testpass"},
+		passwordKey:     {"testpass"},
 		"scope":         {"openid offline_access groups federated:id email"},
 	}
 
+	//nolint:noctx // test request against a local httptest server
 	req, _ := http.NewRequest("POST", tokenEndpoint, strings.NewReader(formData.Encode()))
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 
@@ -88,7 +97,10 @@ func TestNewAuthClient(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 
 	var tokenResp types.TokenResponse
-	json.Unmarshal(body, &tokenResp)
+	err = json.Unmarshal(body, &tokenResp)
+	if err != nil {
+		t.Fatalf("Failed to parse token response: %v", err)
+	}
 
 	// Verify token
 	if tokenResp.IDToken != "test-id-token" {

@@ -4,13 +4,7 @@
 package cmd
 
 import (
-	"fmt"
-	"os"
-
-	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/client"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/pkg"
-	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/service"
-	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -35,31 +29,5 @@ func init() {
 }
 
 func runDecommission(cmd *cobra.Command, args []string) {
-
-	utils.SetConsoleOutputLevel(verbosity)
-
-	if _, err := os.Stat(service.KubeconfigFilePath); os.IsNotExist(err) {
-		fmt.Printf("kubeconfig file not found at %s. Please onboard the host first.\n", service.KubeconfigFilePath)
-		os.Exit(1)
-	}
-
-	namespace, err := client.GetNamespaceFromConfig(service.KubeconfigFilePath)
-	if err != nil {
-		fmt.Println("Failed to get namespace from kubeconfig: " + err.Error())
-		os.Exit(1)
-	}
-
-	k8sClient, err := client.GetK8sClient(service.KubeconfigFilePath)
-	if err != nil {
-		fmt.Println("Failed to get Kubernetes client: " + err.Error())
-		os.Exit(1)
-	}
-
-	err = pkg.PerformHostOperation(cmd.Context(), k8sClient, pkg.DefaultHostIO{}, pkg.OperationDecommission, namespace, decommissionForce)
-	if err != nil {
-		fmt.Println("Failed to decommission host. " + err.Error())
-		os.Exit(1)
-	}
-
-	utils.LogSuccess("Successfully decommissioned host from the pf9 kaapi management cluster")
+	runHostOperation(cmd, pkg.OperationDecommission, decommissionForce, "Failed to decommission host. ", "Successfully decommissioned host from the pf9 kaapi management cluster")
 }

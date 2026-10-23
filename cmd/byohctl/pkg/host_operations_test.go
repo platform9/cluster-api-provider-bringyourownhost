@@ -4,16 +4,13 @@
 package pkg
 
 import (
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
-	capiv1beta1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+	capiv1beta1 "sigs.k8s.io/cluster-api/api/core/v1beta1" //nolint:staticcheck // tracked for follow-up migration off the deprecated API
 
 	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/client"
@@ -21,30 +18,12 @@ import (
 
 const testNamespace = "byoh-ns"
 
-func testHostname(t *testing.T) string {
-	t.Helper()
-	h, err := os.Hostname()
-	require.NoError(t, err)
-	return h
-}
-
 func testScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	s := runtime.NewScheme()
 	require.NoError(t, infrastructurev1beta1.AddToScheme(s))
 	require.NoError(t, capiv1beta1.AddToScheme(s))
 	return s
-}
-
-func newByoHost(t *testing.T, machineRef *corev1.ObjectReference) *infrastructurev1beta1.ByoHost {
-	t.Helper()
-	return &infrastructurev1beta1.ByoHost{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      testHostname(t),
-			Namespace: testNamespace,
-		},
-		Status: infrastructurev1beta1.ByoHostStatus{MachineRef: machineRef},
-	}
 }
 
 func fakeClient(t *testing.T, objs ...runtime.Object) *client.Client {
