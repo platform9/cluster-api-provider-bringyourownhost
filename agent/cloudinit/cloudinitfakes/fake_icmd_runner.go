@@ -5,7 +5,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/cloudinit"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/agent/cloudinit"
 )
 
 type FakeICmdRunner struct {

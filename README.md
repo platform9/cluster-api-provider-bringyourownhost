@@ -6,8 +6,8 @@
 <a href="https://github.com/platform9/cluster-api-provider-bringyourownhost/actions?query=event%3Apush+branch%3Amain+workflow%3ACI+">
 <img src="https://github.com/platform9/cluster-api-provider-bringyourownhost/actions/workflows/ci.yml/badge.svg?branch=main&event=push"></a>
 <!-- go doc / reference card -->
-<a href="https://pkg.go.dev/github.com/vmware-tanzu/cluster-api-provider-bringyourownhost">
-<img src="https://pkg.go.dev/badge/github.com/vmware-tanzu/cluster-api-provider-bringyourownhost.svg"></a>
+<a href="https://pkg.go.dev/github.com/platform9/cluster-api-provider-bringyourownhost">
+<img src="https://pkg.go.dev/badge/github.com/platform9/cluster-api-provider-bringyourownhost.svg"></a>
 <!-- codecov badge -->
 <a href="https://codecov.io/gh/platform9/cluster-api-provider-bringyourownhost">
 <img src="https://codecov.io/gh/platform9/cluster-api-provider-bringyourownhost/branch/main/graph/badge.svg"></a>
@@ -47,7 +47,7 @@ For an IPv6 or dual-stack control-plane endpoint, see [IPv6 and dual-stack suppo
 
 ## Community, discussion, contribution, and support
 
-BYOH was originally created by the [VMware Tanzu](https://github.com/vmware-tanzu/cluster-api-provider-bringyourownhost) team as a Cluster API sub-project. It has since been adopted by [Platform9](https://platform9.com), who now maintains this fork.
+BYOH was originally created by the [VMware Tanzu](https://github.com/platform9/cluster-api-provider-bringyourownhost) team as a Cluster API sub-project. It has since been adopted by [Platform9](https://platform9.com), who now maintains this fork.
 
 The best way to ask questions, report bugs, or discuss the project is to open an issue on the [issue tracker](https://github.com/platform9/cluster-api-provider-bringyourownhost/issues).
 

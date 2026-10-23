@@ -72,7 +72,7 @@ version::ldflags() {
         local key=${1}
         local val=${2}
         ldflags+=(
-            "-X 'github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/version.${key}=${val}'"
+            "-X 'github.com/platform9/cluster-api-provider-bringyourownhost/agent/version.${key}=${val}'"
         )
     }
 

@@ -7,9 +7,9 @@ package feature_test
 import (
 	"testing"
 
+	"github.com/platform9/cluster-api-provider-bringyourownhost/feature"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/feature"
 	"k8s.io/component-base/featuregate"
 )
 

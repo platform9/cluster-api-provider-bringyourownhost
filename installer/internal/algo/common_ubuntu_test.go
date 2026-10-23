@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/installer/internal/algo"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/installer/internal/algo"
 )
 
 func TestBaseUbuntuInstallerUninstallKernelModuleCleanup(t *testing.T) {

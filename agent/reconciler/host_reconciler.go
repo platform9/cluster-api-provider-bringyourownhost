@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/cloudinit"
-	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/registration"
-	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/agent/version"
-	"github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/common"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/agent/cloudinit"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/agent/registration"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/agent/version"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	infrastructurev1beta1 "github.com/vmware-tanzu/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
+	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 )
 
 // HostReconciler encapsulates the data/logic needed to reconcile a ByoHost
