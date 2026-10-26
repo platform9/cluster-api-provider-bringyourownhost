@@ -158,11 +158,12 @@ spec:
                 identity:
                   description: |-
                     Identity is the certificate identity of this host, in the form
-                    byoh:host:<hostName>:<suffix>. The admission webhook sets it from the
-                    authenticated requester when the host is created, never from the request
-                    body. It does not change for the life of the host. Renewal is authorized
-                    against it, so a certificate with any other identity cannot renew even
-                    while it is still cryptographically valid.
+                    byoh:host:<tenant>:<hostName>-<suffix>. The tenant is the ByoHost's
+                    namespace. The admission webhook sets the identity from the authenticated
+                    requester when the host is created, never from the request body. It does
+                    not change for the life of the host. Renewal is authorized against it, so
+                    a certificate with any other identity cannot renew even while it is still
+                    cryptographically valid.
                   type: string
                 installationSecret:
                   description: |-
@@ -324,6 +325,11 @@ spec:
                   properties:
                     architecture:
                       description: The Architecture reported by the host.
+                      type: string
+                    hostName:
+                      description: |-
+                        HostName is the normalized host name, written by the agent. The
+                        Kubernetes Node is named this.
                       type: string
                     osimage:
                       description: OS Image reported by the host.
@@ -878,6 +884,11 @@ spec:
                   properties:
                     architecture:
                       description: The Architecture reported by the host.
+                      type: string
+                    hostName:
+                      description: |-
+                        HostName is the normalized host name, written by the agent. The
+                        Kubernetes Node is named this.
                       type: string
                     osimage:
                       description: OS Image reported by the host.
@@ -1578,9 +1589,12 @@ spec:
                 hostName:
                   description: |-
                     HostName is the host this object onboards. The CSR approver compares it
-                    against the name a certificate request asks for, so one object can only
-                    ever produce a certificate for this host.
+                    against the host name part of the certificate identity, so one object
+                    can only ever produce a certificate for this host.
                   type: string
+                  x-kubernetes-validations:
+                    - message: hostName is immutable
+                      rule: self == oldSelf
                 insecure-skip-tls-verify:
                   default: false
                   description: InsecureSkipTLSVerify skips the validity check for the server's certificate. This will make your HTTPS connections insecure.
@@ -1590,6 +1604,9 @@ spec:
                 - certificate-authority-data
                 - hostName
               type: object
+              x-kubernetes-validations:
+                - message: createdBy is immutable
+                  rule: has(self.createdBy) == has(oldSelf.createdBy) && (!has(self.createdBy) || self.createdBy == oldSelf.createdBy)
             status:
               description: BootstrapKubeconfigStatus defines the observed state of BootstrapKubeconfig
               properties:

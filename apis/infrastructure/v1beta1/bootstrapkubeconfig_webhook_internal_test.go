@@ -123,12 +123,6 @@ func TestBootstrapKubeconfig_ValidateCreateUpdateErrors(t *testing.T) {
 			hostName: testHostName,
 			wantErr:  "expected a BootstrapKubeconfig",
 		},
-		{
-			name:     "update that changes the host name is rejected",
-			oldObj:   validObj(),
-			hostName: "example-worker-2",
-			wantErr:  "hostName is immutable",
-		},
 	}
 
 	for _, tc := range testCases {
@@ -181,60 +175,6 @@ func TestBootstrapKubeconfig_validateHostName(t *testing.T) {
 			obj := &BootstrapKubeconfig{Spec: BootstrapKubeconfigSpec{HostName: tc.hostName}}
 
 			err := obj.validateHostName()
-
-			if tc.wantErr == "" {
-				assert.NoError(t, err)
-				return
-			}
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), tc.wantErr)
-		})
-	}
-}
-
-func TestValidateImmutableFields(t *testing.T) {
-	base := func() *BootstrapKubeconfig {
-		return &BootstrapKubeconfig{
-			Spec: BootstrapKubeconfigSpec{
-				HostName:  testHostName,
-				CreatedBy: testRequester,
-			},
-		}
-	}
-
-	testCases := []struct {
-		name    string
-		mutate  func(*BootstrapKubeconfig)
-		wantErr string
-	}{
-		{
-			name:   "an unchanged spec is accepted",
-			mutate: func(_ *BootstrapKubeconfig) {},
-		},
-		{
-			name:    "changing the host name is rejected",
-			mutate:  func(o *BootstrapKubeconfig) { o.Spec.HostName = "example-worker-2" },
-			wantErr: "hostName is immutable",
-		},
-		{
-			name:    "changing the creator is rejected, so the credential grant cannot be redirected",
-			mutate:  func(o *BootstrapKubeconfig) { o.Spec.CreatedBy = "someone-else@example.com" },
-			wantErr: "createdBy is immutable",
-		},
-		{
-			name:    "changing an unrelated field is accepted",
-			mutate:  func(o *BootstrapKubeconfig) { o.Spec.InsecureSkipTLSVerify = true },
-			wantErr: "",
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			oldObj := base()
-			newObj := base()
-			tc.mutate(newObj)
-
-			err := validateImmutableFields(oldObj, newObj)
 
 			if tc.wantErr == "" {
 				assert.NoError(t, err)
