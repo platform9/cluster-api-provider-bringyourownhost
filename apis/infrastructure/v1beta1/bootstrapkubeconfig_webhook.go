@@ -97,8 +97,7 @@ func (r *BootstrapKubeconfig) ValidateUpdate(_ context.Context, oldObj, newObj r
 	if !ok {
 		return nil, fmt.Errorf("expected a BootstrapKubeconfig but got a %T", newObj)
 	}
-	oldBootstrapKubeconfig, ok := oldObj.(*BootstrapKubeconfig)
-	if !ok {
+	if _, ok := oldObj.(*BootstrapKubeconfig); !ok {
 		return nil, fmt.Errorf("expected a BootstrapKubeconfig but got a %T", oldObj)
 	}
 	bootstrapkubeconfiglog.Info("validate update", "name", bootstrapKubeconfig.Name)
@@ -108,10 +107,6 @@ func (r *BootstrapKubeconfig) ValidateUpdate(_ context.Context, oldObj, newObj r
 	}
 
 	if err := bootstrapKubeconfig.validateCAData(); err != nil {
-		return nil, err
-	}
-
-	if err := validateImmutableFields(oldBootstrapKubeconfig, bootstrapKubeconfig); err != nil {
 		return nil, err
 	}
 
@@ -181,33 +176,6 @@ func (r *BootstrapKubeconfig) validateHostName() error {
 	if normalized != r.Spec.HostName {
 		detail := fmt.Sprintf("host name is not normalized, use %q", normalized)
 		return field.Invalid(path, r.Spec.HostName, detail)
-	}
-
-	return nil
-}
-
-// validateImmutableFields rejects a change to any field that identifies who the
-// object was issued for. The defaulting webhook only runs on create, so without
-// this an edit could point the credential's RBAC grant at a different identity.
-func validateImmutableFields(oldObj, newObj *BootstrapKubeconfig) error {
-	immutableFields := []struct {
-		name    string
-		changed bool
-	}{
-		{
-			name:    "hostName",
-			changed: oldObj.Spec.HostName != newObj.Spec.HostName,
-		},
-		{
-			name:    "createdBy",
-			changed: oldObj.Spec.CreatedBy != newObj.Spec.CreatedBy,
-		},
-	}
-
-	for _, f := range immutableFields {
-		if f.changed {
-			return field.Forbidden(field.NewPath("spec").Child(f.name), f.name+" is immutable")
-		}
 	}
 
 	return nil
