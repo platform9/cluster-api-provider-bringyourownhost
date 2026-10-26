@@ -75,6 +75,7 @@ func TestHandleCreateUpdate_DecodesFromRawOnly(t *testing.T) {
 
 	resp := v.Handle(t.Context(), admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
 		Operation: admissionv1.Create,
+		Namespace: testNamespace,
 		UserInfo:  v1.UserInfo{Username: byohHostOneUser},
 		Object: runtime.RawExtension{
 			Raw:    raw,
