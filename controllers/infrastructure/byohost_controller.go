@@ -112,7 +112,7 @@ func lastHeartbeatWriteTime(byoHost *infrastructurev1beta1.ByoHost) *metav1.Time
 				LastHeartbeatTime json.RawMessage `json:"f:lastHeartbeatTime"`
 			} `json:"f:status"`
 		}
-		if err := json.Unmarshal(entry.FieldsV1.Raw, &fields); err != nil {
+		if err := json.Unmarshal(entry.FieldsV1.GetRawBytes(), &fields); err != nil {
 			continue
 		}
 		if fields.Status.LastHeartbeatTime != nil {
