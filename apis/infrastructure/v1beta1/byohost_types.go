@@ -74,11 +74,12 @@ type ByoHostSpec struct {
 	DesiredAgent *DesiredAgentSpec `json:"desiredAgent,omitempty"`
 
 	// Identity is the certificate identity of this host, in the form
-	// byoh:host:<hostName>:<suffix>. The admission webhook sets it from the
-	// authenticated requester when the host is created, never from the request
-	// body. It does not change for the life of the host. Renewal is authorized
-	// against it, so a certificate with any other identity cannot renew even
-	// while it is still cryptographically valid.
+	// byoh:host:<tenantNamespace>:<normalizedHostName>-<suffix>. The tenant
+	// namespace is the ByoHost's namespace. The admission webhook sets the
+	// identity from the authenticated requester when the host is created, never
+	// from the request body. It does not change for the life of the host.
+	// Renewal is authorized against it, so a certificate with any other
+	// identity cannot renew even while it is still cryptographically valid.
 	// +optional
 	Identity string `json:"identity,omitempty"`
 }
@@ -129,6 +130,10 @@ type HostInfo struct {
 
 	// The Architecture reported by the host.
 	Architecture string `json:"architecture,omitempty"`
+
+	// NormalizedHostName is the normalized host name, written by the agent. The
+	// Kubernetes Node is named this.
+	NormalizedHostName string `json:"normalizedHostName,omitempty"`
 }
 
 // ByoHostStatus defines the observed state of ByoHost

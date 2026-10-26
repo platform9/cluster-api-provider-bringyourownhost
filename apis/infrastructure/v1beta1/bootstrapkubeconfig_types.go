@@ -29,6 +29,7 @@ const (
 )
 
 // BootstrapKubeconfigSpec defines the desired state of BootstrapKubeconfig
+// +kubebuilder:validation:XValidation:rule="has(self.createdBy) == has(oldSelf.createdBy) && (!has(self.createdBy) || self.createdBy == oldSelf.createdBy)",message="createdBy is immutable"
 type BootstrapKubeconfigSpec struct {
 	// APIServer is the address of the kubernetes cluster (https://hostname:port).
 	APIServer string `json:"apiserver"`
@@ -42,8 +43,9 @@ type BootstrapKubeconfigSpec struct {
 	CertificateAuthorityData string `json:"certificate-authority-data"`
 
 	// HostName is the host this object onboards. The CSR approver compares it
-	// against the name a certificate request asks for, so one object can only
-	// ever produce a certificate for this host.
+	// against the host name part of the certificate identity, so one object
+	// can only ever produce a certificate for this host.
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="hostName is immutable"
 	HostName string `json:"hostName"`
 
 	// CreatedBy is the authenticated identity that created this object. The
