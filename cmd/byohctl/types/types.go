@@ -7,6 +7,15 @@ type TokenResponse struct {
 	IDToken string `json:"id_token"`
 }
 
+// KeystoneTokenResponse is the part of a Keystone v3 token response byohctl reads.
+type KeystoneTokenResponse struct {
+	Token struct {
+		Project struct {
+			ID string `json:"id"`
+		} `json:"project"`
+	} `json:"token"`
+}
+
 type Secret struct {
 	Data map[string]string `json:"data"`
 }

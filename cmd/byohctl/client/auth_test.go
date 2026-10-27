@@ -107,3 +107,111 @@ func TestNewAuthClient(t *testing.T) {
 		t.Errorf("Unexpected token: expected test-id-token, got %s", tokenResp.IDToken)
 	}
 }
+
+func TestGetProjectID(t *testing.T) {
+	testCases := []struct {
+		name          string
+		domain        string
+		status        int
+		response      string
+		wantDomainKey string
+		wantDomainVal string
+		wantID        string
+		wantErr       bool
+	}{
+		{
+			name:          "default domain is scoped by ID",
+			domain:        "default",
+			status:        http.StatusCreated,
+			response:      `{"token": {"project": {"id": "0123456789abcdef"}}}`,
+			wantDomainKey: "id",
+			wantDomainVal: "default",
+			wantID:        "0123456789abcdef",
+		},
+		{
+			name:          "other domain is scoped by name",
+			domain:        "Team_A",
+			status:        http.StatusCreated,
+			response:      `{"token": {"project": {"id": "fedcba9876543210"}}}`,
+			wantDomainKey: "name",
+			wantDomainVal: "Team_A",
+			wantID:        "fedcba9876543210",
+		},
+		{
+			name:          "keystone rejects the login",
+			domain:        "default",
+			status:        http.StatusUnauthorized,
+			response:      `{"error": {"code": 401}}`,
+			wantDomainKey: "id",
+			wantDomainVal: "default",
+			wantErr:       true,
+		},
+		{
+			name:          "response has no project",
+			domain:        "default",
+			status:        http.StatusCreated,
+			response:      `{"token": {}}`,
+			wantDomainKey: "id",
+			wantDomainVal: "default",
+			wantErr:       true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/keystone/v3/auth/tokens" {
+					t.Errorf("Unexpected path: %s", r.URL.Path)
+				}
+				var body struct {
+					Auth struct {
+						Identity struct {
+							Password struct {
+								User struct {
+									Name     string            `json:"name"`
+									Domain   map[string]string `json:"domain"`
+									Password string            `json:"password"`
+								} `json:"user"`
+							} `json:"password"`
+						} `json:"identity"`
+						Scope struct {
+							Project struct {
+								Name   string            `json:"name"`
+								Domain map[string]string `json:"domain"`
+							} `json:"project"`
+						} `json:"scope"`
+					} `json:"auth"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Errorf("Failed to decode request: %v", err)
+				}
+				user := body.Auth.Identity.Password.User
+				if user.Name != "testuser" || user.Password != "testpass" || user.Domain["id"] != "default" {
+					t.Errorf("Unexpected user in request: %+v", user)
+				}
+				project := body.Auth.Scope.Project
+				if project.Name != "service" || project.Domain[tc.wantDomainKey] != tc.wantDomainVal {
+					t.Errorf("Unexpected project scope in request: %+v", project)
+				}
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.response))
+			}))
+			defer ts.Close()
+
+			authClient := NewAuthClient(strings.TrimPrefix(ts.URL, "https://"), "test-client-token", true)
+			projectID, err := authClient.GetProjectID("testuser", "testpass", tc.domain, "service")
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("Expected an error, got project ID %q", projectID)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("GetProjectID returned error: %v", err)
+			}
+			if projectID != tc.wantID {
+				t.Errorf("Expected project ID %s, got %s", tc.wantID, projectID)
+			}
+		})
+	}
+}
