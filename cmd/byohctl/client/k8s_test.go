@@ -315,3 +315,75 @@ func TestAgentLogOutput(t *testing.T) {
 		t.Errorf("Agent log file doesn't exist at expected path: %s", agentLogPath)
 	}
 }
+
+// Test GetSecret finding the secret in the ID-based or the legacy tenant namespace
+func TestGetSecretTenantNamespace(t *testing.T) {
+	const (
+		projectID = "0123456789abcdef"
+		idPath    = "/oidc-proxy/0123456789abcdef/region/api/v1/namespaces/127-01234567/secrets/kubeconfig"
+		namePath  = "/oidc-proxy/127-test-domain-test-tenant/region/api/v1/namespaces/127-test-domain-test-tenant/secrets/kubeconfig"
+	)
+	testCases := []struct {
+		name          string
+		projectID     string
+		foundAt       string
+		wantPaths     []string
+		wantNamespace string
+		wantErr       bool
+	}{
+		{
+			name:          "ID-based namespace",
+			projectID:     projectID,
+			foundAt:       idPath,
+			wantPaths:     []string{idPath},
+			wantNamespace: "127-01234567",
+		},
+		{
+			name:          "falls back to the legacy namespace",
+			projectID:     projectID,
+			foundAt:       namePath,
+			wantPaths:     []string{idPath, namePath},
+			wantNamespace: "127-test-domain-test-tenant",
+		},
+		{
+			name:          "no project ID only tries the legacy namespace",
+			foundAt:       namePath,
+			wantPaths:     []string{namePath},
+			wantNamespace: "127-test-domain-test-tenant",
+		},
+		{
+			name:      "found in neither",
+			projectID: projectID,
+			wantPaths: []string{idPath, namePath},
+			wantErr:   true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotPaths []string
+			ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPaths = append(gotPaths, r.URL.Path)
+				if r.URL.Path != tc.foundAt {
+					w.WriteHeader(http.StatusForbidden)
+					return
+				}
+				_ = json.NewEncoder(w).Encode(types.Secret{Data: map[string]string{"config": "a3ViZWNvbmZpZw=="}})
+			}))
+			defer ts.Close()
+
+			client := NewK8sClient(strings.TrimPrefix(ts.URL, "https://"), "test-domain", "test-tenant", "test-token", "region", true)
+			client.SetProjectID(tc.projectID)
+
+			_, err := client.GetSecret("kubeconfig")
+			assert.Equal(t, tc.wantPaths, gotPaths)
+			if tc.wantErr {
+				assert.Error(t, err)
+				assert.Equal(t, "127-test-domain-test-tenant", client.getNamespace())
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantNamespace, client.getNamespace())
+		})
+	}
+}
