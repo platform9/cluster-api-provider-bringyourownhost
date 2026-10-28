@@ -6,6 +6,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -24,6 +25,7 @@ import (
 	"github.com/platform9/cluster-api-provider-bringyourownhost/agent/registration"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/agent/version"
 	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/hostname"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/test/builder"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/test/e2e"
 	certv1 "k8s.io/api/certificates/v1"
@@ -601,16 +603,10 @@ var _ = Describe("Agent", func() {
 			output, _, err := runner.ExecByoDockerHost(byoHostContainer)
 			Expect(err).NotTo(HaveOccurred())
 			defer e2e.StreamDockerLog(output, agentLogFile)()
-			byohCSRLookupKey := types.NamespacedName{Name: fmt.Sprintf(registration.ByohCSRNameFormat, hostName)}
-			byohCSR := &certv1.CertificateSigningRequest{}
-
-			Eventually(func(ctx SpecContext) string {
-				err := k8sClient.Get(ctx, byohCSRLookupKey, byohCSR)
-				if err != nil {
-					return err.Error()
-				}
-				return byohCSR.Name
-			}, 10, 1).WithContext(ctx).Should(Equal(fmt.Sprintf(registration.ByohCSRNameFormat, hostName)))
+			Eventually(func(ctx SpecContext) error {
+				_, err := findByohCSR(ctx, ns.Name, hostName)
+				return err
+			}, 10, 1).WithContext(ctx).Should(Succeed())
 		})
 		It("should persist private key", func(ctx SpecContext) {
 			// start agent
@@ -625,7 +621,7 @@ var _ = Describe("Agent", func() {
 				AttachStdin:  false,
 				AttachStdout: true,
 				AttachStderr: true,
-				Cmd:          []string{"cat", registration.TmpPrivateKey},
+				Cmd:          []string{"cat", "/root/.byoh/" + registration.PrivateKeyFileName},
 			})
 			Expect(err).ShouldNot(HaveOccurred())
 			result, err := cli.ContainerExecAttach(ctx, response.ID, container.ExecAttachOptions{})
@@ -667,7 +663,7 @@ var _ = Describe("Agent", func() {
 
 			// Approve CSR
 			Eventually(func() (done bool) {
-				byohCSR, kerr := clientSet.CertificatesV1().CertificateSigningRequests().Get(ctx, fmt.Sprintf(registration.ByohCSRNameFormat, hostName), metav1.GetOptions{})
+				byohCSR, kerr := findByohCSR(ctx, ns.Name, hostName)
 				if kerr != nil {
 					return false
 				}
@@ -677,11 +673,11 @@ var _ = Describe("Agent", func() {
 					Message: "approved",
 					Status:  corev1.ConditionTrue,
 				})
-				_, err = clientSet.CertificatesV1().CertificateSigningRequests().UpdateApproval(ctx, fmt.Sprintf(registration.ByohCSRNameFormat, hostName), byohCSR, metav1.UpdateOptions{})
+				_, err = clientSet.CertificatesV1().CertificateSigningRequests().UpdateApproval(ctx, byohCSR.Name, byohCSR, metav1.UpdateOptions{})
 				return err == nil
 			}, time.Second*4).Should(BeTrue())
 			// Issue Certificate
-			byohCSR, err := clientSet.CertificatesV1().CertificateSigningRequests().Get(ctx, fmt.Sprintf(registration.ByohCSRNameFormat, hostName), metav1.GetOptions{})
+			byohCSR, err := findByohCSR(ctx, ns.Name, hostName)
 			Expect(err).ShouldNot(HaveOccurred())
 			var FakeCert = `
 -----BEGIN CERTIFICATE-----
@@ -748,7 +744,7 @@ var _ = Describe("Agent Unit Tests", func() {
 
 			_, err = bootstrapKubeConf.Write(testbootstrapKubeconfigInvalid)
 			Expect(err).NotTo(HaveOccurred())
-			err = handleBootstrapFlow(ctx, klogr.New(), "test-host") //nolint: staticcheck // klogr predates the textlogger migration; see main.go
+			err = handleBootstrapFlow(ctx, klogr.New(), "test-tenant", "test-host", "") //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).Should(HaveOccurred())
 			Expect(err.Error()).Should(ContainSubstring("client config load failed"))
 		})
@@ -775,7 +771,7 @@ users:
 `)
 			_, err = bootstrapKubeConf.Write(testbootstrapKubeconfigValid)
 			Expect(err).NotTo(HaveOccurred())
-			err = handleBootstrapFlow(ctx, klogr.New(), "") //nolint: staticcheck // klogr predates the textlogger migration; see main.go
+			err = handleBootstrapFlow(ctx, klogr.New(), "test-tenant", "", "") //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).Should(HaveOccurred())
 			Expect(err.Error()).Should(ContainSubstring("kubeconfig generation failed: hostname is not valid"))
 		})
@@ -821,7 +817,7 @@ users:
 			var config *restclient.Config
 			config, err = registration.LoadRESTClientConfig(bootstrapKubeConfig)
 			Expect(err).NotTo(HaveOccurred())
-			err = certRotation(ctx, klogr.New(), "test-host", config) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
+			err = certRotation(ctx, klogr.New(), "test-tenant", "test-host", "", config) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
 		})
 		It("should return if certificate needs rotation", func(ctx SpecContext) {
@@ -852,8 +848,30 @@ users:
 			var config *restclient.Config
 			config, err = registration.LoadRESTClientConfig(bootstrapKubeConfig)
 			Expect(err).NotTo(HaveOccurred())
-			err = certRotation(ctx, klogr.New(), "test-host", config) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
+			err = certRotation(ctx, klogr.New(), "test-tenant", "test-host", "", config) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
 		})
 	})
 })
+
+// findByohCSR returns the CSR an agent in tenant created for hostName. The CSR
+// name ends in a random part, so it is found by its prefix.
+func findByohCSR(ctx context.Context, tenant, hostName string) (*certv1.CertificateSigningRequest, error) {
+	normalized, err := hostname.Normalize(hostName)
+	if err != nil {
+		return nil, err
+	}
+	prefix := fmt.Sprintf(registration.ByohCSRNameFormat, tenant, normalized, "")
+
+	list, err := clientSet.CertificatesV1().CertificateSigningRequests().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	for i := range list.Items {
+		if strings.HasPrefix(list.Items[i].Name, prefix) {
+			return &list.Items[i], nil
+		}
+	}
+
+	return nil, fmt.Errorf("no CSR with prefix %q", prefix)
+}

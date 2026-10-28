@@ -41,6 +41,7 @@ import (
 
 	"github.com/platform9/cluster-api-provider-bringyourownhost/agent/registration"
 	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/hostname"
 )
 
 // certificatePEMBlockType is the PEM block type certRotation insists on.
@@ -292,6 +293,18 @@ func TestSetupTemplateParser(t *testing.T) {
 	}
 }
 
+func TestNormalizedHostName(t *testing.T) {
+	osHostName, err := os.Hostname()
+	require.NoError(t, err)
+
+	want, err := hostname.Normalize(osHostName)
+	require.NoError(t, err)
+
+	got, err := normalizedHostName()
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+}
+
 func TestCertRotation(t *testing.T) {
 	// A certificate 90% through its life is inside the 20% renewal window;
 	// one 10% through is not.
@@ -336,7 +349,7 @@ func TestCertRotation(t *testing.T) {
 			var messages []string
 			logger := recordingLogger(&messages)
 
-			err := certRotation(t.Context(), logger, "test-host", &rest.Config{
+			err := certRotation(t.Context(), logger, "test-tenant", "test-host", "", &rest.Config{
 				TLSClientConfig: rest.TLSClientConfig{CertData: tc.certData},
 			})
 
