@@ -199,7 +199,5 @@ func TestState_MarkIssued(t *testing.T) {
 		CSRUID:           "4b6c",
 	}
 	assert.Equal(t, want, st)
-	reloaded, err := loadState(dir)
-	require.NoError(t, err)
-	assert.Equal(t, want, reloaded)
+	assert.Equal(t, want, readState(t, dir))
 }
