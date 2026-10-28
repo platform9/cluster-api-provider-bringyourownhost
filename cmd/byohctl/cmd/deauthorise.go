@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -48,9 +49,12 @@ func runHostOperation(cmd *cobra.Command, operation pkg.HostOperationType, force
 		os.Exit(1)
 	}
 
-	namespace, err := client.GetNamespaceFromConfig(service.KubeconfigFilePath)
-	if err != nil {
-		fmt.Println("Failed to get namespace from kubeconfig: " + err.Error())
+	namespace, byoHostName, err := client.GetHostRefFromConfig(service.KubeconfigFilePath)
+	// A kubeconfig without a client certificate belongs to a token-onboarded host. Its ByoHost
+	// is named after the OS host name, which is looked up below once the client exists.
+	tokenHost := errors.Is(err, client.ErrNoClientCertificate)
+	if err != nil && !tokenHost {
+		fmt.Println("Failed to get host identity from kubeconfig: " + err.Error())
 		os.Exit(1)
 	}
 
@@ -60,7 +64,21 @@ func runHostOperation(cmd *cobra.Command, operation pkg.HostOperationType, force
 		os.Exit(1)
 	}
 
-	err = pkg.PerformHostOperation(cmd.Context(), k8sClient, pkg.DefaultHostIO{}, operation, namespace, force)
+	if tokenHost {
+		namespace, err = client.GetNamespaceFromConfig(service.KubeconfigFilePath)
+		if err != nil {
+			fmt.Println("Failed to get namespace from kubeconfig: " + err.Error())
+			os.Exit(1)
+		}
+		osHostname, hostnameErr := os.Hostname()
+		if hostnameErr != nil {
+			fmt.Println("Failed to get the OS host name: " + hostnameErr.Error())
+			os.Exit(1)
+		}
+		byoHostName = k8sClient.ResolveTokenHostName(namespace, osHostname)
+	}
+
+	err = pkg.PerformHostOperation(cmd.Context(), k8sClient, pkg.DefaultHostIO{}, operation, namespace, byoHostName, force)
 	if err != nil {
 		fmt.Println(failureMsg + err.Error())
 		os.Exit(1)
