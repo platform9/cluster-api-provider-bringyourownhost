@@ -175,17 +175,16 @@ func newScheme() *runtime.Scheme {
 }
 
 func setupTemplateParser() *cloudinit.TemplateParser {
-	var templateParser *cloudinit.TemplateParser
-	if registration.LocalHostRegistrar.ByoHostInfo.DefaultNetworkInterfaceName == "" {
-		templateParser = nil
-	} else {
-		templateParser = &cloudinit.TemplateParser{
-			Template: registration.HostInfo{
-				DefaultNetworkInterfaceName: registration.LocalHostRegistrar.ByoHostInfo.DefaultNetworkInterfaceName,
-			},
-		}
+	info := registration.LocalHostRegistrar.ByoHostInfo
+	if info.DefaultNetworkInterfaceName == "" && info.ByoHostName == "" {
+		return nil
 	}
-	return templateParser
+	return &cloudinit.TemplateParser{
+		Template: registration.HostInfo{
+			DefaultNetworkInterfaceName: info.DefaultNetworkInterfaceName,
+			ByoHostName:                 info.ByoHostName,
+		},
+	}
 }
 
 // newManager builds the agent's controller manager. Its cache is scoped to
@@ -420,8 +419,9 @@ func main() {
 		os.Exit(1)
 	}
 	registration.LocalHostRegistrar = &registration.HostRegistrar{
-		K8sClient: k8sClient,
-		Identity:  hostIdentity,
+		K8sClient:   k8sClient,
+		Identity:    hostIdentity,
+		ByoHostInfo: registration.HostInfo{ByoHostName: byoHostName},
 	}
 	err = registration.LocalHostRegistrar.Register(ctx, byoHostName, namespace, labels)
 	if err != nil {
