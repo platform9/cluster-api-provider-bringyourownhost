@@ -6,6 +6,7 @@ package registration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -15,7 +16,7 @@ import (
 	"strings"
 
 	"github.com/jackpal/gateway"
-	"github.com/pkg/errors"
+	pkgerrors "github.com/pkg/errors"
 	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,22 +36,29 @@ type HostInfo struct {
 	DefaultNetworkInterfaceName string
 }
 
+// ErrIdentityConflict means a ByoHost with the same name exists and belongs to
+// a different identity.
+var ErrIdentityConflict = errors.New("byohost belongs to another identity")
+
 // HostRegistrar used to register a host.
 type HostRegistrar struct {
 	K8sClient   client.Client
 	ByoHostInfo HostInfo
+	// Identity is the common name of the agent's client certificate.
+	Identity string
 }
 
 // Register is called on agent startup
 // This function registers the byohost as available capacity in the management cluster
-// If the CR is already present, we consider this to be a restart / reboot of the agent process
-func (hr *HostRegistrar) Register(ctx context.Context, hostName, namespace string, hostLabels map[string]string) error {
+// If the CR is already present for the same identity, we consider this to be a restart / reboot of the agent process
+// If it has another identity it is never patched and ErrIdentityConflict is returned
+func (hr *HostRegistrar) Register(ctx context.Context, byoHostName, namespace string, hostLabels map[string]string) error {
 	klog.Info("Registering ByoHost")
 	byoHost := &infrastructurev1beta1.ByoHost{}
-	err := hr.K8sClient.Get(ctx, types.NamespacedName{Name: hostName, Namespace: namespace}, byoHost)
+	err := hr.K8sClient.Get(ctx, types.NamespacedName{Name: byoHostName, Namespace: namespace}, byoHost)
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
-			klog.Errorf("error getting host %s in namespace %s, err=%v", hostName, namespace, err)
+			klog.Errorf("error getting host %s in namespace %s, err=%v", byoHostName, namespace, err)
 			return err
 		}
 		byoHost = &infrastructurev1beta1.ByoHost{
@@ -59,7 +67,7 @@ func (hr *HostRegistrar) Register(ctx context.Context, hostName, namespace strin
 				APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
 			},
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      hostName,
+				Name:      byoHostName,
 				Namespace: namespace,
 				Labels:    hostLabels,
 			},
@@ -68,9 +76,12 @@ func (hr *HostRegistrar) Register(ctx context.Context, hostName, namespace strin
 		}
 		err = hr.K8sClient.Create(ctx, byoHost)
 		if err != nil {
-			klog.Errorf("error creating host %s in namespace %s, err=%v", hostName, namespace, err)
+			klog.Errorf("error creating host %s in namespace %s, err=%v", byoHostName, namespace, err)
 			return err
 		}
+	} else if hr.Identity != "" && byoHost.Spec.Identity != "" && byoHost.Spec.Identity != hr.Identity {
+		return fmt.Errorf("byohost %s/%s was created by %q and this agent is %q, decommission the host first: %w",
+			namespace, byoHostName, byoHost.Spec.Identity, hr.Identity, ErrIdentityConflict)
 	}
 
 	// run it at startup or reboot
@@ -172,7 +183,7 @@ func (hr *HostRegistrar) getHostInfo() (infrastructurev1beta1.HostInfo, error) {
 	hostInfo.OSName = runtime.GOOS
 
 	if distribution, err := getOperatingSystem(os.ReadFile); err != nil {
-		return hostInfo, errors.Wrap(err, "failed to get host operating system image")
+		return hostInfo, pkgerrors.Wrap(err, "failed to get host operating system image")
 	} else {
 		hostInfo.OSImage = distribution
 	}

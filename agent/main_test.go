@@ -136,8 +136,8 @@ func newReconcilerTestManager(t *testing.T) ctrl.Manager {
 
 func testAgentOptions() *agentOptions {
 	return &agentOptions{
-		hostName:  "test-host",
-		namespace: "default",
+		byoHostName: "test-host-abc12",
+		namespace:   "default",
 		// Off so parallel tests never fight over a port.
 		metricsBindAddress:  "0",
 		downloadPath:        "/var/lib/byoh/bundles",
@@ -153,12 +153,18 @@ func testAgentOptions() *agentOptions {
 func certPEM(t *testing.T, lifetime, remaining time.Duration) []byte {
 	t.Helper()
 
+	return certPEMWithCommonName(t, "byoh-test", lifetime, remaining)
+}
+
+func certPEMWithCommonName(t *testing.T, commonName string, lifetime, remaining time.Duration) []byte {
+	t.Helper()
+
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: "byoh-test"},
+		Subject:      pkix.Name{CommonName: commonName},
 		NotBefore:    time.Now().Add(-lifetime),
 		NotAfter:     time.Now().Add(remaining),
 	}
@@ -305,6 +311,104 @@ func TestNormalizedHostName(t *testing.T) {
 	assert.Equal(t, want, got)
 }
 
+func TestResolveByoHostName(t *testing.T) {
+	const (
+		hostName = "example-worker-1"
+		identity = "byoh:host:example-tenant:example-worker-1-abc12"
+	)
+
+	certConfig := func(t *testing.T, commonName string) *rest.Config {
+		t.Helper()
+
+		return &rest.Config{
+			TLSClientConfig: rest.TLSClientConfig{CertData: certPEMWithCommonName(t, commonName, time.Minute, time.Hour)},
+		}
+	}
+
+	// stateDir returns a state directory whose state file holds stateIdentity.
+	stateDir := func(t *testing.T, stateIdentity string) string {
+		t.Helper()
+
+		dir := t.TempDir()
+		data := fmt.Sprintf(`{"version":1,"phase":"issued","identity":%q}`, stateIdentity)
+		err := os.WriteFile(filepath.Join(dir, registration.StateFileName), []byte(data), 0o600)
+		require.NoError(t, err)
+
+		return dir
+	}
+
+	testCases := []struct {
+		name         string
+		stateDir     string
+		config       *rest.Config
+		wantIdentity string
+		wantName     string
+		wantErr      bool
+	}{
+		{
+			name:         "name comes from the client certificate identity",
+			config:       certConfig(t, identity),
+			wantIdentity: identity,
+			wantName:     "example-worker-1-abc12",
+		},
+		{
+			name:         "name comes from the state file identity",
+			stateDir:     stateDir(t, identity),
+			config:       &rest.Config{},
+			wantIdentity: identity,
+			wantName:     "example-worker-1-abc12",
+		},
+		{
+			name:     "no identity keeps the host name",
+			config:   &rest.Config{},
+			wantName: hostName,
+		},
+		{
+			name:    "client certificate that is not a host identity is an error",
+			config:  certConfig(t, "byoh-test"),
+			wantErr: true,
+		},
+		{
+			name:     "state file identity that is not a host identity is an error",
+			stateDir: stateDir(t, "byoh-test"),
+			config:   &rest.Config{},
+			wantErr:  true,
+		},
+		{
+			name:     "state file host identity that does not parse is an error",
+			stateDir: stateDir(t, "byoh:host:example-tenant"),
+			config:   &rest.Config{},
+			wantErr:  true,
+		},
+		{
+			name:    "host identity that does not parse is an error",
+			config:  certConfig(t, "byoh:host:example-tenant"),
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := tc.stateDir
+			if dir == "" {
+				dir = t.TempDir()
+			}
+
+			gotIdentity, gotName, err := resolveByoHostName(dir, tc.config, hostName)
+
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Empty(t, gotIdentity)
+				assert.Empty(t, gotName)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantIdentity, gotIdentity)
+			assert.Equal(t, tc.wantName, gotName)
+		})
+	}
+}
+
 func TestCertRotation(t *testing.T) {
 	// A certificate 90% through its life is inside the 20% renewal window;
 	// one 10% through is not.
@@ -429,7 +533,7 @@ func TestNewManagerScopesCacheToThisHost(t *testing.T) {
 	direct, err := client.New(agentCfg, client.Options{Scheme: scheme})
 	require.NoError(t, err)
 
-	for _, name := range []string{opts.hostName, "other-host"} {
+	for _, name := range []string{opts.byoHostName, "other-host"} {
 		host := &infrastructurev1beta1.ByoHost{}
 		host.Name = name
 		host.Namespace = opts.namespace
@@ -449,5 +553,5 @@ func TestNewManagerScopesCacheToThisHost(t *testing.T) {
 	}, 30*time.Second, 100*time.Millisecond)
 
 	require.Len(t, hosts.Items, 1)
-	assert.Equal(t, opts.hostName, hosts.Items[0].Name)
+	assert.Equal(t, opts.byoHostName, hosts.Items[0].Name)
 }
