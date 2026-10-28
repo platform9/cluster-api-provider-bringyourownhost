@@ -4,20 +4,29 @@
 package client
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/types"
 )
 
@@ -314,4 +323,128 @@ func TestAgentLogOutput(t *testing.T) {
 	if _, err := os.Stat(agentLogPath); os.IsNotExist(err) {
 		t.Errorf("Agent log file doesn't exist at expected path: %s", agentLogPath)
 	}
+}
+
+// writeHostKubeconfig writes a kubeconfig whose user holds the given certificate, inline or by
+// file path, and returns the kubeconfig path.
+func writeHostKubeconfig(t *testing.T, certPEM []byte, inline bool) string {
+	t.Helper()
+	dir := t.TempDir()
+	userFields := ""
+	if certPEM != nil {
+		if inline {
+			userFields = "    client-certificate-data: " + base64.StdEncoding.EncodeToString(certPEM) + "\n"
+		} else {
+			certPath := filepath.Join(dir, "client.crt")
+			require.NoError(t, os.WriteFile(certPath, certPEM, 0o600))
+			userFields = "    client-certificate: " + certPath + "\n"
+		}
+	}
+	kubeconfig := "apiVersion: v1\nkind: Config\ncurrent-context: ctx\n" +
+		"clusters:\n- name: c\n  cluster:\n    server: https://example.invalid\n" +
+		"contexts:\n- name: ctx\n  context:\n    cluster: c\n    user: u\n    namespace: default\n" +
+		"users:\n- name: u\n  user:\n" + userFields
+	if certPEM == nil {
+		kubeconfig = strings.TrimSuffix(kubeconfig, "  user:\n") + "  user: {}\n"
+	}
+	path := filepath.Join(dir, "config")
+	require.NoError(t, os.WriteFile(path, []byte(kubeconfig), 0o600))
+	return path
+}
+
+func newCertPEM(t *testing.T, commonName string) []byte {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: commonName},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	require.NoError(t, err)
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+}
+
+func TestGetHostRefFromConfig(t *testing.T) {
+	validCert := newCertPEM(t, infrastructurev1beta1.FormatHostIdentity("tenant-a", "worker-1", "abc12"))
+
+	tests := []struct {
+		name          string
+		certPEM       []byte
+		inline        bool
+		wantNamespace string
+		wantName      string
+		wantErr       string
+	}{
+		{
+			name:          "inline certificate data",
+			certPEM:       validCert,
+			inline:        true,
+			wantNamespace: "tenant-a",
+			wantName:      "worker-1-abc12",
+		},
+		{
+			name:          "certificate file path",
+			certPEM:       validCert,
+			wantNamespace: "tenant-a",
+			wantName:      "worker-1-abc12",
+		},
+		{
+			name:    "no certificate",
+			wantErr: "no client certificate",
+		},
+		{
+			name:    "common name is not a host identity",
+			certPEM: newCertPEM(t, "kubernetes-admin"),
+			inline:  true,
+			wantErr: "not a host identity",
+		},
+		{
+			name:    "certificate is not PEM",
+			certPEM: []byte("not a certificate"),
+			inline:  true,
+			wantErr: "no PEM CERTIFICATE block",
+		},
+		{
+			name:    "PEM block is not a certificate",
+			certPEM: pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte("key")}),
+			inline:  true,
+			wantErr: "no PEM CERTIFICATE block",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeHostKubeconfig(t, tt.certPEM, tt.inline)
+
+			namespace, name, err := GetHostRefFromConfig(path)
+
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantNamespace, namespace)
+			assert.Equal(t, tt.wantName, name)
+		})
+	}
+}
+
+func TestGetHostRefFromConfig_UnreadableConfig(t *testing.T) {
+	_, _, err := GetHostRefFromConfig(filepath.Join(t.TempDir(), "missing"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "error reading kubeconfig")
+}
+
+func TestGetHostRefFromConfig_UnknownContext(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config")
+	err := os.WriteFile(path, []byte("apiVersion: v1\nkind: Config\ncurrent-context: nope\n"), 0o600)
+	require.NoError(t, err)
+
+	_, _, err = GetHostRefFromConfig(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "current context")
 }

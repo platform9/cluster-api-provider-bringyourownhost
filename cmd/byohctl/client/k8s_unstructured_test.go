@@ -13,6 +13,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	capiv1beta1 "sigs.k8s.io/cluster-api/api/core/v1beta1" //nolint:staticcheck // v1beta1 is the API version the cluster serves
+
+	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 )
 
 const deploymentNameLabel = "cluster.x-k8s.io/deployment-name"
@@ -176,4 +178,45 @@ func TestScaleDownMachineDeployment_MissingLabel(t *testing.T) {
 	err = c.ScaleDownMachineDeployment(t.Context(), obj, "ns1")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "does not have a machine deployment name")
+}
+
+func TestGetAndDeleteByoHostObject(t *testing.T) {
+	scheme := newTestScheme(t)
+	require.NoError(t, infrastructurev1beta1.AddToScheme(scheme))
+
+	tests := []struct {
+		name      string
+		namespace string
+		hostName  string
+		wantErr   bool
+	}{
+		{name: "found by unique name in tenant namespace", namespace: "tenant-a", hostName: "worker-1-abc12"},
+		{name: "bare hostname does not match unique name", namespace: "tenant-a", hostName: "worker-1", wantErr: true},
+		{name: "same name in another namespace does not match", namespace: "default", hostName: "worker-1-abc12", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			seeded := &infrastructurev1beta1.ByoHost{
+				ObjectMeta: metav1.ObjectMeta{Namespace: "tenant-a", Name: "worker-1-abc12"},
+			}
+			dynamicClient := dynamicfake.NewSimpleDynamicClient(scheme, seeded)
+			c := &Client{DynamicClient: dynamicClient}
+
+			got, getErr := c.GetByoHostObject(tt.namespace, tt.hostName)
+			deleteErr := c.DeleteByoHostObject(tt.namespace, tt.hostName)
+
+			if tt.wantErr {
+				assert.Error(t, getErr)
+				assert.Error(t, deleteErr)
+				return
+			}
+			require.NoError(t, getErr)
+			assert.Equal(t, "worker-1-abc12", got.Name)
+			assert.Equal(t, "tenant-a", got.Namespace)
+			require.NoError(t, deleteErr)
+			_, err := c.GetByoHostObject(tt.namespace, tt.hostName)
+			assert.Error(t, err, "ByoHost should be gone after delete")
+		})
+	}
 }
