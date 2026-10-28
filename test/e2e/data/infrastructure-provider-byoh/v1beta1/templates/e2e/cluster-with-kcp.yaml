@@ -172,6 +172,7 @@ spec:
       path: /etc/kubernetes/manifests/kube-vip.yaml
     initConfiguration:
       nodeRegistration:
+        name: "{{ .HostName }}"
         ignorePreflightErrors:
         - Swap
         - SystemVerification
@@ -184,6 +185,7 @@ spec:
           resolv-conf: /etc/kubernetes/resolv.conf
     joinConfiguration:
       nodeRegistration:
+        name: "{{ .HostName }}"
         ignorePreflightErrors:
         - Swap
         - SystemVerification
