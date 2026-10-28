@@ -24,6 +24,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gexec"
 	infraproviderv1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/hostname"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/test/builder"
 	certv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -508,18 +509,25 @@ func Byf(format string, a ...interface{}) {
 	By(fmt.Sprintf(format, a...))
 }
 
-func generateBootstrapKubeconfig(ctx context.Context, clusterProxy framework.ClusterProxy, name string) string {
+// generateBootstrapKubeconfig creates a BootstrapKubeconfig in namespace for the host named
+// hostName and returns the bootstrap kubeconfig data. The namespace must be the one the agent
+// runs with, because it becomes the tenant in the host certificate identity. The host name is
+// normalized and stored in the BootstrapKubeconfig spec.
+func generateBootstrapKubeconfig(ctx context.Context, clusterProxy framework.ClusterProxy, name, namespace, hostName string) string {
 	config, _ := clientcmd.LoadFromFile(clusterProxy.GetKubeconfigPath())
 	name = "kind-" + name
 
 	server := config.Clusters[name].Server
 	caData := b64.StdEncoding.EncodeToString(config.Clusters[name].CertificateAuthorityData)
 	skipTLS := config.Clusters[name].InsecureSkipTLSVerify
-	bootstrapKubeconfigCRD := builder.BootstrapKubeconfig("default", "test-config").
+	normalizedHostName, err := hostname.Normalize(hostName)
+	Expect(err).NotTo(HaveOccurred(), "host name %q cannot be used in a BootstrapKubeconfig", hostName)
+	bootstrapKubeconfigCRD := builder.BootstrapKubeconfig(namespace, "bootstrap-"+normalizedHostName+"-"+util.RandomString(5)).
 		WithServer(server).
 		WithSkipTLSVerify(skipTLS).
 		WithCAData(caData).
 		Build()
+	bootstrapKubeconfigCRD.Spec.HostName = normalizedHostName
 	Expect(clusterProxy.GetClient().Create(ctx, bootstrapKubeconfigCRD)).NotTo(HaveOccurred(), "failed to create test BootstrapKubeconfig CRD")
 
 	bootstrapKubeconfigLookupKey := types.NamespacedName{
