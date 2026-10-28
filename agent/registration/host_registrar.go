@@ -35,9 +35,12 @@ var (
 	ErrIdentityConflict = errors.New("byohost belongs to another identity")
 )
 
-// HostInfo contains information about the host network interface.
+// HostInfo contains information about the host.
 type HostInfo struct {
 	DefaultNetworkInterfaceName string
+	// HostName is the normalized host name. Cloud-init bootstrap data reads it
+	// as .HostName.
+	HostName string
 }
 
 // HostRegistrar used to register a host.
@@ -181,6 +184,7 @@ func (hr *HostRegistrar) getHostInfo() (infrastructurev1beta1.HostInfo, error) {
 
 	hostInfo.Architecture = runtime.GOARCH
 	hostInfo.OSName = runtime.GOOS
+	hostInfo.NormalizedHostName = hr.ByoHostInfo.HostName
 
 	if distribution, err := getOperatingSystem(os.ReadFile); err != nil {
 		return hostInfo, pkgerrors.Wrap(err, "failed to get host operating system image")
