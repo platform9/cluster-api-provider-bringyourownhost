@@ -193,6 +193,18 @@ spec:
           replicas: 1
 ```
 
+### Node registration name
+
+The BYOH agent replaces `{{ .ByoHostName }}` in the bootstrap data with the name of the host's ByoHost. kubeadm registers the Node under that name, and the ByoMachine controller looks up the workload cluster Node by it.
+
+Every kubeadm init and join configuration must therefore set `nodeRegistration.name: "{{ .ByoHostName }}"`. This applies to the control plane and to every worker bootstrap template. Without it, kubeadm registers the Node under another name and the controller cannot find it.
+
+```yaml
+joinConfiguration:
+  nodeRegistration:
+    name: "{{ .ByoHostName }}"
+```
+
 ### How to use with clusterctl?
 
 To create a cluster using clusterctl with managed topology, use `topology` flavor and set following environment variables :

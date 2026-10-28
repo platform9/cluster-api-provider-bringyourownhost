@@ -35,9 +35,12 @@ var (
 	ErrIdentityConflict = errors.New("byohost belongs to another identity")
 )
 
-// HostInfo contains information about the host network interface.
+// HostInfo contains information about the host.
 type HostInfo struct {
 	DefaultNetworkInterfaceName string
+	// ByoHostName is the name of the host's ByoHost. Cloud-init bootstrap data
+	// reads it as .ByoHostName.
+	ByoHostName string
 }
 
 // HostRegistrar used to register a host.
