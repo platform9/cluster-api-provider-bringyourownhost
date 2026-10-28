@@ -116,7 +116,9 @@ func (l *labelFlags) Set(value string) error {
 // agentOptions is the flag-derived configuration the manager and the host
 // reconciler need.
 type agentOptions struct {
-	hostName            string
+	// byoHostName is the name of this host's ByoHost, which the cache is
+	// scoped to.
+	byoHostName         string
 	namespace           string
 	metricsBindAddress  string
 	downloadPath        string
@@ -195,7 +197,7 @@ func newManager(config *rest.Config, opts *agentOptions) (ctrl.Manager, error) {
 			DefaultNamespaces: map[string]cache.Config{opts.namespace: {}},
 			ByObject: map[client.Object]cache.ByObject{
 				&infrastructurev1beta1.ByoHost{}: {
-					Field: fields.SelectorFromSet(fields.Set{"metadata.name": opts.hostName}),
+					Field: fields.SelectorFromSet(fields.Set{"metadata.name": opts.byoHostName}),
 				},
 			},
 		},
@@ -294,6 +296,32 @@ func certRotation(ctx context.Context, logger logr.Logger, tenant, hostName, ide
 	return nil
 }
 
+// resolveByoHostName returns the identity of this agent and the name of its
+// ByoHost. An agent with neither a state file nor a client certificate
+// authenticates with a token and names its ByoHost after the host, with an
+// empty identity. Any other identity must be a host identity, and the ByoHost
+// name is derived from it. An identity that is not a host identity, in the
+// state file or in the client certificate, is an error.
+func resolveByoHostName(stateDir string, config *rest.Config, hostName string) (identity, byoHostName string, err error) {
+	identity, err = registration.ResolveIdentity(stateDir, config)
+	if errors.Is(err, registration.ErrNoIdentity) {
+		return "", hostName, nil
+	}
+	if err != nil {
+		return "", "", err
+	}
+	if !strings.HasPrefix(identity, infrastructurev1beta1.HostIdentityPrefix) {
+		return "", "", fmt.Errorf("the state file or client certificate holds an identity that is not a host identity (want prefix %q)", infrastructurev1beta1.HostIdentityPrefix)
+	}
+
+	byoHostName, err = registration.ByoHostNameFromIdentity(identity)
+	if err != nil {
+		return "", "", err
+	}
+
+	return identity, byoHostName, nil
+}
+
 func getConfig(logger logr.Logger) *rest.Config {
 	config, err := registration.LoadRESTClientConfig(registration.GetBYOHConfigPath())
 	if err != nil {
@@ -362,15 +390,18 @@ func main() {
 	// Handle restart flow or if the ~/.byoh/config already exists
 	config := getConfig(logger)
 	k8sClient := getClient(logger, config)
-	identity, err := registration.ResolveIdentity(filepath.Dir(registration.GetBYOHConfigPath()), config)
-	if err != nil && !errors.Is(err, registration.ErrNoIdentity) {
-		logger.Error(err, "could not determine the host identity")
+	identity, byoHostName, err := resolveByoHostName(filepath.Dir(registration.GetBYOHConfigPath()), config, hostName)
+	if err != nil {
+		logger.Error(err, "could not determine the ByoHost name")
 		os.Exit(1)
 	}
-	registration.LocalHostRegistrar = &registration.HostRegistrar{K8sClient: k8sClient}
-	err = registration.LocalHostRegistrar.Register(ctx, hostName, namespace, labels)
+	registration.LocalHostRegistrar = &registration.HostRegistrar{
+		K8sClient: k8sClient,
+		Identity:  identity,
+	}
+	err = registration.LocalHostRegistrar.Register(ctx, byoHostName, namespace, labels)
 	if err != nil {
-		logger.Error(err, "error registering host %s registration in namespace %s", hostName, namespace)
+		logger.Error(err, "error registering host", "byoHost", byoHostName, "namespace", namespace)
 		return
 	}
 
@@ -387,7 +418,7 @@ func main() {
 	}
 
 	opts := &agentOptions{
-		hostName:            hostName,
+		byoHostName:         byoHostName,
 		namespace:           namespace,
 		metricsBindAddress:  metricsbindaddress,
 		downloadPath:        downloadpath,
