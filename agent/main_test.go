@@ -252,24 +252,43 @@ func TestLabelFlagsString(t *testing.T) {
 	}
 }
 
-// The parser exists only to substitute the host's network interface name into
-// bootstrap data, so an unknown interface must leave it nil rather than
-// producing a parser that substitutes an empty string.
+// The parser exists only to substitute host details into bootstrap data, so
+// a host with neither a default interface nor a host name must leave it nil
+// rather than producing a parser that substitutes empty strings.
 func TestSetupTemplateParser(t *testing.T) {
 	testCases := []struct {
 		name          string
 		interfaceName string
+		hostName      string
+		template      string
 		wantParser    bool
+		want          string
 	}{
 		{
-			name:          "no default interface discovered",
-			interfaceName: "",
-			wantParser:    false,
+			name:       "no interface and no host name",
+			wantParser: false,
 		},
 		{
-			name:          "default interface discovered",
+			name:          "default interface only",
 			interfaceName: "eth0",
+			template:      "iface={{ .DefaultNetworkInterfaceName }} host={{ .HostName }}",
 			wantParser:    true,
+			want:          "iface=eth0 host=",
+		},
+		{
+			name:       "host name only",
+			hostName:   "example-worker-1",
+			template:   "iface={{ .DefaultNetworkInterfaceName }} host={{ .HostName }}",
+			wantParser: true,
+			want:       "iface= host=example-worker-1",
+		},
+		{
+			name:          "interface and host name",
+			interfaceName: "eth0",
+			hostName:      "example-worker-1",
+			template:      "iface={{ .DefaultNetworkInterfaceName }} host={{ .HostName }}",
+			wantParser:    true,
+			want:          "iface=eth0 host=example-worker-1",
 		},
 	}
 
@@ -281,6 +300,7 @@ func TestSetupTemplateParser(t *testing.T) {
 			registration.LocalHostRegistrar = &registration.HostRegistrar{
 				ByoHostInfo: registration.HostInfo{
 					DefaultNetworkInterfaceName: tc.interfaceName,
+					HostName:                    tc.hostName,
 				},
 			}
 
@@ -292,9 +312,9 @@ func TestSetupTemplateParser(t *testing.T) {
 			}
 
 			require.NotNil(t, parser)
-			info, ok := parser.Template.(registration.HostInfo)
-			require.True(t, ok, "template should carry host info")
-			assert.Equal(t, tc.interfaceName, info.DefaultNetworkInterfaceName)
+			got, err := parser.ParseTemplate(tc.template)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
