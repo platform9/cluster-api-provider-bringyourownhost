@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
 )
 
 const (
@@ -182,6 +184,20 @@ func (s *State) save(dir string) (err error) {
 func (s *State) markIssued(dir string) error {
 	s.Phase = PhaseIssued
 	return s.save(dir)
+}
+
+// matches reports whether the identity in st is for this tenant namespace and
+// normalized host name, so a changed --namespace or hostname never reuses an
+// old identity.
+func (s *State) matches(tenantNamespace, normalizedHostName string) error {
+	stateIdentity, err := identity.Parse(s.Identity)
+	if err != nil {
+		return fmt.Errorf("state has an unusable identity: %w", err)
+	}
+	if stateIdentity.TenantNamespace != tenantNamespace || stateIdentity.NormalizedHostName != normalizedHostName {
+		return fmt.Errorf("state belongs to tenant %q and host %q, not %q and %q", stateIdentity.TenantNamespace, stateIdentity.NormalizedHostName, tenantNamespace, normalizedHostName)
+	}
+	return nil
 }
 
 // removeOnboardingFiles deletes the state file and the private key in dir.
