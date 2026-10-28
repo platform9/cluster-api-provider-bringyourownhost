@@ -170,6 +170,7 @@ spec:
             path: /etc/kubernetes/manifests/kube-vip.yaml
         initConfiguration:
           nodeRegistration:
+            name: "{{ .HostName }}"
             criSocket: /var/run/containerd/containerd.sock
             ignorePreflightErrors:
             - Swap
@@ -177,6 +178,7 @@ spec:
             - FileAvailable--etc-kubernetes-kubelet.conf
         joinConfiguration:
           nodeRegistration:
+            name: "{{ .HostName }}"
             criSocket: /var/run/containerd/containerd.sock
             ignorePreflightErrors:
             - Swap
