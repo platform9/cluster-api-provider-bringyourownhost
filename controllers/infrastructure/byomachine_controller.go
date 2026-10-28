@@ -404,8 +404,16 @@ func (r *ByoMachineReconciler) ClusterToByoMachines(logger logr.Logger) handler.
 // setNodeProviderID patches the provider id to the node using
 // client pointing to workload cluster
 func (r *ByoMachineReconciler) setNodeProviderID(ctx context.Context, remoteClient client.Client, host *infrav1.ByoHost) (string, error) {
+	// kubeadm names the Node after the host's normalized hostname, which the
+	// agent reports in status. Hosts that never reported it (token based or
+	// older agents) are registered under their hostname.
+	nodeName := host.Status.HostDetails.HostName
+	if nodeName == "" {
+		nodeName = host.Name
+	}
+
 	node := &corev1.Node{}
-	key := client.ObjectKey{Name: host.Name, Namespace: host.Namespace}
+	key := client.ObjectKey{Name: nodeName, Namespace: host.Namespace}
 	err := remoteClient.Get(ctx, key, node)
 	if err != nil {
 		return "", err
