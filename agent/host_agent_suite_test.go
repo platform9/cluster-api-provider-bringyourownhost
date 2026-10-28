@@ -23,6 +23,7 @@ import (
 	"github.com/platform9/cluster-api-provider-bringyourownhost/test/e2e"
 	corev1 "k8s.io/api/core/v1"
 	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -41,6 +42,7 @@ var (
 	k8sClient                  client.Client
 	clientSet                  clientset.Interface
 	tmpFilePrefix              = "kubeconfigFile-"
+	testBootstrapToken         = "abcdef.0123456789abcdef"
 	defaultByoMachineName      = "my-byomachine"
 	agentLogFile               = "/tmp/agent-integration.log"
 	execLogFile                = "/tmp/agent-exec.log"
@@ -150,6 +152,17 @@ func writeKubeConfig() {
 	Expect(err).NotTo(HaveOccurred())
 
 	kubeConfigData, err := user.KubeConfig()
+	Expect(err).NotTo(HaveOccurred())
+
+	// The agent reads the token id of its bootstrap kubeconfig. The API server
+	// authenticates with the client certificate first, so the token is only
+	// there to give the agent a bootstrap token id.
+	kubeConfigObj, err := clientcmd.Load(kubeConfigData)
+	Expect(err).NotTo(HaveOccurred())
+	for _, authInfo := range kubeConfigObj.AuthInfos {
+		authInfo.Token = testBootstrapToken
+	}
+	kubeConfigData, err = clientcmd.Write(*kubeConfigObj)
 	Expect(err).NotTo(HaveOccurred())
 
 	_, err = getKubeConfig().Write(kubeConfigData)

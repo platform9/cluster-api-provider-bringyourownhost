@@ -41,6 +41,8 @@ import (
 
 	"github.com/platform9/cluster-api-provider-bringyourownhost/agent/registration"
 	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/hostname"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
 )
 
 // certificatePEMBlockType is the PEM block type certRotation insists on.
@@ -292,6 +294,71 @@ func TestSetupTemplateParser(t *testing.T) {
 	}
 }
 
+func TestLocalNormalizedHostName(t *testing.T) {
+	osHostName, err := os.Hostname()
+	require.NoError(t, err)
+
+	want, err := hostname.Normalize(osHostName)
+	require.NoError(t, err)
+
+	got, err := localNormalizedHostName()
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+}
+
+func TestStartCertificateRotation(t *testing.T) {
+	const rotationEnabled = "true"
+
+	// A valid identity with the flag set starts a goroutine that polls until the
+	// process exits, so it is not started here.
+	hostIdentity := identity.HostIdentity{
+		TenantNamespace:    "example-tenant",
+		NormalizedHostName: "example-worker-1",
+		Suffix:             "abc12",
+	}
+
+	testCases := []struct {
+		name         string
+		flag         string
+		hostIdentity string
+		wantErr      bool
+	}{
+		{
+			name:         "rotation flag is not set",
+			flag:         "",
+			hostIdentity: hostIdentity.String(),
+			wantErr:      false,
+		},
+		{
+			name:         "host without an identity",
+			flag:         rotationEnabled,
+			hostIdentity: "",
+			wantErr:      false,
+		},
+		{
+			name:         "invalid identity",
+			flag:         rotationEnabled,
+			hostIdentity: "byoh:host:example-tenant",
+			wantErr:      true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CERTIFICATE_ROTATION", tc.flag)
+
+			err := startCertificateRotation(t.Context(), logr.Discard(), tc.hostIdentity, &rest.Config{})
+
+			if tc.wantErr {
+				var identityErr *identity.HostIdentityError
+				require.ErrorAs(t, err, &identityErr)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestCertRotation(t *testing.T) {
 	// A certificate 90% through its life is inside the 20% renewal window;
 	// one 10% through is not.
@@ -331,12 +398,19 @@ func TestCertRotation(t *testing.T) {
 		},
 	}
 
+	hostIdentity := identity.HostIdentity{
+		TenantNamespace:    "test-tenant",
+		NormalizedHostName: "test-host",
+		Suffix:             "abc12",
+	}
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			var messages []string
+
 			logger := recordingLogger(&messages)
 
-			err := certRotation(t.Context(), logger, "test-host", &rest.Config{
+			err := certRotation(t.Context(), logger, hostIdentity, &rest.Config{
 				TLSClientConfig: rest.TLSClientConfig{CertData: tc.certData},
 			})
 

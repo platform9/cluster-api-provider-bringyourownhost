@@ -15,6 +15,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
 )
 
 func TestState_SaveAndLoad(t *testing.T) {
@@ -265,6 +267,63 @@ func TestState_SaveIsAtomicUnderConcurrency(t *testing.T) {
 	assert.Equal(t, StateFileName, entries[0].Name())
 }
 
+func TestState_Matches(t *testing.T) {
+	t.Parallel()
+
+	thisHost := identity.HostIdentity{
+		TenantNamespace:    testTenantNamespace,
+		NormalizedHostName: testNormalizedHostName,
+		Suffix:             "abc12",
+	}
+	anotherTenant := thisHost
+	anotherTenant.TenantNamespace = "other-tenant"
+	anotherHost := thisHost
+	anotherHost.NormalizedHostName = "other-host"
+
+	testCases := []struct {
+		name     string
+		identity string
+		wantErr  bool
+	}{
+		{
+			name:     "identity of this tenant and host",
+			identity: thisHost.String(),
+			wantErr:  false,
+		},
+		{
+			name:     "identity of another tenant",
+			identity: anotherTenant.String(),
+			wantErr:  true,
+		},
+		{
+			name:     "identity of another host",
+			identity: anotherHost.String(),
+			wantErr:  true,
+		},
+		{
+			name:     "unparsable identity",
+			identity: "not-an-identity",
+			wantErr:  true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			st := &State{Identity: tc.identity}
+
+			err := st.matches(testTenantNamespace, testNormalizedHostName)
+
+			if tc.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
+}
+
 func TestRemoveOnboardingFiles(t *testing.T) {
 	t.Parallel()
 
@@ -360,7 +419,5 @@ func TestState_MarkIssued(t *testing.T) {
 		CSRUID:           "4b6c",
 	}
 	assert.Equal(t, want, st)
-	reloaded, err := loadState(dir)
-	require.NoError(t, err)
-	assert.Equal(t, want, reloaded)
+	assert.Equal(t, want, readState(t, dir))
 }
