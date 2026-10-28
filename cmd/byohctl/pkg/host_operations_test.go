@@ -103,7 +103,7 @@ func TestPerformHostOperation(t *testing.T) {
 			k8sClient := fakeClient(t, tt.objs...)
 			io := &stubIO{confirmResp: tt.confirmResp}
 
-			err := PerformHostOperation(t.Context(), k8sClient, io, tt.operation, testNamespace, tt.force)
+			err := PerformHostOperation(t.Context(), k8sClient, io, tt.operation, testNamespace, "worker-1-abc12", tt.force)
 
 			if tt.wantErr {
 				require.Error(t, err)
