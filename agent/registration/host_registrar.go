@@ -31,9 +31,12 @@ var (
 	LocalHostRegistrar *HostRegistrar
 )
 
-// HostInfo contains information about the host network interface.
+// HostInfo contains information about the host.
 type HostInfo struct {
 	DefaultNetworkInterfaceName string
+	// HostName is the normalized host name. Bootstrap data can use it as
+	// {{ .HostName }}.
+	HostName string
 }
 
 // ErrIdentityConflict means a ByoHost with the same name exists and belongs to
@@ -181,6 +184,7 @@ func (hr *HostRegistrar) getHostInfo() (infrastructurev1beta1.HostInfo, error) {
 
 	hostInfo.Architecture = runtime.GOARCH
 	hostInfo.OSName = runtime.GOOS
+	hostInfo.HostName = hr.ByoHostInfo.HostName
 
 	if distribution, err := getOperatingSystem(os.ReadFile); err != nil {
 		return hostInfo, pkgerrors.Wrap(err, "failed to get host operating system image")
