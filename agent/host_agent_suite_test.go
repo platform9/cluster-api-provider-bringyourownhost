@@ -7,7 +7,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"go/build"
 	"os"
 	"path/filepath"
@@ -20,8 +19,11 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gexec"
+	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/hostname"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/test/e2e"
 	corev1 "k8s.io/api/core/v1"
+	utilrand "k8s.io/apimachinery/pkg/util/rand"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -51,9 +53,12 @@ var (
 	fakeInstallationSecret     = "fake-installation-secret"
 	testEnv                    *envtest.Environment
 	dockerClient               *dClient.Client
-	// hostNameSuffix is a per-run Unix timestamp appended to os.Hostname() to make
-	// container names unique across test runs, preventing conflicts from stale containers.
+	// hostNameSuffix is a per-run random suffix of the host identity. It makes the
+	// ByoHost and container names unique across test runs, preventing conflicts from
+	// stale containers.
 	hostNameSuffix string
+	// testHostName is os.Hostname() in the form used in a host identity.
+	testHostName string
 	// suiteCtx spans the whole suite. A ByoHostRunner's context is created in a
 	// BeforeEach but its docker calls continue through the spec and into AfterEach,
 	// so it cannot be rooted on a per-node SpecContext, which Ginkgo cancels as
@@ -87,7 +92,11 @@ func setKubeConfig(kubeConfig *os.File) {
 
 var _ = BeforeSuite(func() {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
-	hostNameSuffix = fmt.Sprintf("%d", time.Now().Unix())
+	hostNameSuffix = utilrand.String(5)
+	osHostName, err := os.Hostname()
+	Expect(err).NotTo(HaveOccurred())
+	testHostName, err = hostname.Normalize(osHostName)
+	Expect(err).NotTo(HaveOccurred())
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
 			filepath.Join("..", "config", "crd", "bases"),
@@ -146,7 +155,7 @@ func writeKubeConfig() {
 	}(getKubeConfig())
 
 	user, err := testEnv.ControlPlane.AddUser(envtest.User{
-		Name:   "envtest-admin",
+		Name:   infrastructurev1beta1.FormatHostIdentity("default", testHostName, hostNameSuffix),
 		Groups: []string{"system:masters"},
 	}, nil)
 	Expect(err).NotTo(HaveOccurred())
@@ -169,14 +178,14 @@ func writeKubeConfig() {
 	Expect(err).NotTo(HaveOccurred())
 }
 
-func setupTestInfra(ctx context.Context, hostname, kubeconfig string, namespace *corev1.Namespace) *e2e.ByoHostRunner {
+func setupTestInfra(ctx context.Context, hostName, kubeconfig string, namespace *corev1.Namespace) *e2e.ByoHostRunner {
 	byohostRunner := e2e.ByoHostRunner{
 		Context:               ctx,
 		Namespace:             namespace.Name,
 		PathToHostAgentBinary: pathToLinuxHostAgentBinary,
 		DockerClient:          dockerClient,
 		NetworkInterface:      "host",
-		ByoHostName:           hostname,
+		ByoHostName:           hostName,
 		Port:                  testEnv.ControlPlane.APIServer.Port,
 		CommandArgs: map[string]string{
 			"--namespace": namespace.Name,

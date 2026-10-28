@@ -53,9 +53,7 @@ var _ = Describe("Agent", func() {
 			ns = builder.Namespace("testns").Build()
 			Expect(k8sClient.Create(ctx, ns)).NotTo(HaveOccurred(), "failed to create test namespace")
 
-			hostName, err = os.Hostname()
-			Expect(err).NotTo(HaveOccurred())
-			hostName += "-" + hostNameSuffix
+			hostName = testHostName + "-" + hostNameSuffix
 			runner = setupTestInfra(suiteCtx, hostName, getKubeConfig().Name(), ns)
 
 			byoHostContainer, err = runner.SetupByoDockerHost()
@@ -117,9 +115,7 @@ var _ = Describe("Agent", func() {
 			ns = builder.Namespace("testns").Build()
 			Expect(k8sClient.Create(ctx, ns)).NotTo(HaveOccurred(), "failed to create test namespace")
 			var err error
-			hostName, err = os.Hostname()
-			Expect(err).NotTo(HaveOccurred())
-			hostName += "-" + hostNameSuffix
+			hostName = testHostName + "-" + hostNameSuffix
 
 			runner = setupTestInfra(suiteCtx, hostName, getKubeConfig().Name(), ns)
 			runner.CommandArgs["--label"] = "site=apac"
@@ -451,9 +447,7 @@ var _ = Describe("Agent", func() {
 			ns = builder.Namespace("testns").Build()
 			Expect(k8sClient.Create(ctx, ns)).NotTo(HaveOccurred(), "failed to create test namespace")
 
-			hostName, err = os.Hostname()
-			Expect(err).NotTo(HaveOccurred())
-			hostName += "-" + hostNameSuffix
+			hostName = testHostName + "-" + hostNameSuffix
 			runner = setupTestInfra(suiteCtx, hostName, getKubeConfig().Name(), ns)
 
 			byoHostContainer, err = runner.SetupByoDockerHost()
@@ -500,9 +494,7 @@ var _ = Describe("Agent", func() {
 			Expect(k8sClient.Create(ctx, ns)).NotTo(HaveOccurred(), "failed to create test namespace")
 
 			var err error
-			hostName, err = os.Hostname()
-			Expect(err).NotTo(HaveOccurred())
-			hostName += "-" + hostNameSuffix
+			hostName = testHostName + "-" + hostNameSuffix
 
 			runner = setupTestInfra(suiteCtx, hostName, getKubeConfig().Name(), ns)
 			runner.CommandArgs["--bootstrap-kubeconfig"] = "/root/config"
