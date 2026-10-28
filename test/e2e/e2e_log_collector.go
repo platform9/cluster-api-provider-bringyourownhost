@@ -35,10 +35,15 @@ func (c byoHostLogCollector) CollectMachineLog(ctx context.Context, mgmtClient c
 		return fmt.Errorf("no ByoHost attached to Machine %s/%s", m.Namespace, m.Name)
 	}
 
-	// The ByoHost is named after its container's hostname, which is also the container name. With
-	// an empty cluster name, DockerLogCollector uses the Machine name as the container name as is.
+	// The host name in the ByoHost identity is the container name (the e2e hosts have lowercase
+	// hostnames, so normalizing leaves them unchanged). With an empty cluster name,
+	// DockerLogCollector uses the Machine name as the container name as is.
+	_, containerName, _, err := infraproviderv1.ParseHostIdentity(hosts.Items[0].Spec.Identity)
+	if err != nil {
+		return fmt.Errorf("parsing identity of ByoHost %s/%s: %w", hosts.Items[0].Namespace, hosts.Items[0].Name, err)
+	}
 	hostMachine := m.DeepCopy()
-	hostMachine.Name = hosts.Items[0].Name
+	hostMachine.Name = containerName
 	hostMachine.Spec.ClusterName = ""
 	return c.DockerLogCollector.CollectMachineLog(ctx, mgmtClient, hostMachine, outputPath)
 }
