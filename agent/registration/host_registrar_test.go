@@ -118,8 +118,9 @@ func TestHostRegistrar_Register(t *testing.T) {
 			k8sClient := newRegistrarClient(t, objs...)
 			key := types.NamespacedName{Name: registrarByoHostName, Namespace: registrarNamespace}
 			hr := &HostRegistrar{
-				K8sClient: k8sClient,
-				Identity:  tc.agentIdentity,
+				K8sClient:   k8sClient,
+				Identity:    tc.agentIdentity,
+				ByoHostInfo: HostInfo{HostName: registrarNormalizedHostName},
 			}
 
 			err := hr.Register(t.Context(), registrarByoHostName, registrarNamespace, tc.labels)
@@ -134,11 +135,13 @@ func TestHostRegistrar_Register(t *testing.T) {
 				assert.Contains(t, err.Error(), identityTwo)
 				assert.Contains(t, err.Error(), "decommission")
 				assert.Equal(t, tc.existing.Spec, stored.Spec)
+				assert.Empty(t, stored.Status.HostDetails.NormalizedHostName, "a conflicting ByoHost is not patched")
 				assert.NotContains(t, stored.Labels, infrastructurev1beta1.HostArchitectureLabel)
 				return
 			}
 
 			require.NoError(t, err)
+			assert.Equal(t, registrarNormalizedHostName, stored.Status.HostDetails.NormalizedHostName)
 			assert.Contains(t, stored.Labels, infrastructurev1beta1.HostArchitectureLabel)
 			assert.Subset(t, stored.Labels, tc.wantLabels)
 		})
