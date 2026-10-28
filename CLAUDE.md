@@ -60,6 +60,13 @@ make webhook-test      # ./apis/infrastructure/v1beta1
 make test-e2e-linux-vm GINKGO_FOCUS="test description"   # e2e, scoped to one spec (macOS-safe)
 ```
 
+`test-e2e` and `test-e2e-linux-vm` stop at a `[Y/n]` prompt (`take-user-input`, `Makefile:339`).
+When running them non-interactively (agent sessions, Herdr panes), pipe `yes` to answer the prompt:
+
+```bash
+yes | make test-e2e GINKGO_FOCUS="test description"
+```
+
 **Known gap:** `controller-test`/`agent-test`/`webhook-test` don't expose a focus/skip variable the
 way `test-e2e` does via `GINKGO_FOCUS`. If you genuinely need to scope one of those down to a
 single spec while iterating, it's fine to drop to `ginkgo -focus "description" <pkg>` or
