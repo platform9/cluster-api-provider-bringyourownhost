@@ -135,6 +135,15 @@ verify-generated: ## Run every generator and fail if a generated file differs fr
 		exit 1; \
 	fi
 
+install-git-hooks: ## Install the pre-push hook that runs verify-generated into this clone's .git.
+	@hook="$$(git rev-parse --git-path hooks)/pre-push"; \
+	if [ -e "$$hook" ] && [ ! -L "$$hook" ]; then \
+		echo "$$hook exists and is not a symlink: move it aside first"; \
+		exit 1; \
+	fi; \
+	ln -sf "$(PROJECT_DIR)/hack/git-hooks/pre-push" "$$hook"; \
+	echo "Installed $$hook"
+
 fmt: ## Run go fmt against code.
 	go fmt ./...
 
