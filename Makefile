@@ -117,6 +117,24 @@ manifests: controller-gen yq ## Generate WebhookConfiguration, ClusterRole and C
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
 
+# Generated files the CI drift checks compare against the commit.
+# charts/Chart.yaml and charts/values.yaml are stamped with the build version
+# by `make helm`, so only charts/templates is compared.
+GENERATED_PATHS := apis config test/e2e/data charts/templates
+
+verify-generated: ## Run every generator and fail if a generated file differs from the commit.
+	@if [ -n "$$(git status --porcelain --untracked-files=no)" ]; then \
+		echo "verify-generated needs a tree with no tracked changes: commit or stash first"; \
+		exit 1; \
+	fi
+	$(MAKE) generate manifests cluster-templates-v1beta1 cluster-templates-e2e helm
+	@if [ -n "$$(git status --porcelain -- $(GENERATED_PATHS))" ]; then \
+		echo "Generated files are out of date. Commit the result:"; \
+		git status --porcelain -- $(GENERATED_PATHS); \
+		git diff -- $(GENERATED_PATHS); \
+		exit 1; \
+	fi
+
 fmt: ## Run go fmt against code.
 	go fmt ./...
 
