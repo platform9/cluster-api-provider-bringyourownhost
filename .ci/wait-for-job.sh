@@ -6,7 +6,7 @@ set -Eeuo pipefail
 # different, independently-triggered workflow file, so this fills that gap.
 #
 # Usage: wait-for-job.sh <workflow-file> <job-name> <sha>
-# Required env: GH_TOKEN, GITHUB_REPOSITORY
+# Required env: GH_TOKEN, GITHUB_REPOSITORY, GITHUB_EVENT_NAME
 # Optional env: MAX_ATTEMPTS (default 60), POLL_INTERVAL_SECONDS (default 30)
 # On success, appends "run_id=<id>" to $GITHUB_OUTPUT (if set) and exits 0.
 
@@ -20,7 +20,7 @@ main() {
 
   while ((attempt <= max_attempts)); do
     local run_id
-    run_id=$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow "${workflow}" --commit "${sha}" \
+    run_id=$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow "${workflow}" --commit "${sha}" --event "${GITHUB_EVENT_NAME}" \
       --json databaseId --jq '.[0].databaseId // empty')
 
     if [[ -n "${run_id}" ]]; then
