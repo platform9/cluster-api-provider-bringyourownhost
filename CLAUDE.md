@@ -147,6 +147,15 @@ make manifests  # updates config/crd/bases/ and config/rbac/
 
 Markers in type files (e.g. `// +kubebuilder:object:root=true`) drive controller-gen; don't edit generated files by hand.
 
+The CRDs and deepcopy files are not the only generated files. The e2e cluster templates (`make cluster-templates-v1beta1 cluster-templates-e2e`) and the helm chart templates (`make helm`) are generated too, and CI fails a PR whose generated files differ from the commit.
+
+After changing anything under `apis/`, `config/`, `charts/` or `test/e2e/data/`, regenerate with the targets above and commit the result. Before every push, run:
+```bash
+make verify-generated   # runs every generator CI checks, fails if a generated file changes
+```
+
+It needs a tree with no tracked changes, so commit or stash first. Run `make install-git-hooks` once per clone to have a `pre-push` hook run it in the current worktree whenever you push the checked-out branch (`git push --no-verify` skips it).
+
 ## Linting
 
 Config is in `.golangci.yml` (v2 schema, timeout 10 min). Key enabled linters include `gosec`, `staticcheck`, `errcheck`, `gocyclo`, and `depguard`. Run `make lint` before submitting; CI enforces this via `golangci-lint-action@v9`, which reads its version from the Makefile's `GOLANGCI_LINT_VERSION` through `make golangci-lint-version`.
