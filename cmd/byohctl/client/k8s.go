@@ -121,7 +121,7 @@ func (c *K8sClient) legacyNamespace() string {
 	return fmt.Sprintf("%s-%s-%s", fqdnPrefix, c.domain, tenant)
 }
 
-// getNamespace returns the namespace GetSecret found, else the legacy one.
+// getNamespace returns the namespace from the saved kubeconfig or GetSecret, else the legacy one.
 func (c *K8sClient) getNamespace() string {
 	if c.namespace != "" {
 		return c.namespace
@@ -246,6 +246,12 @@ func (c *K8sClient) SaveKubeConfig(secretName string) error {
 
 	if err = os.WriteFile(kubeconfigPath, kubeconfig, service.DefaultFilePerms); err != nil {
 		return fmt.Errorf("failed to write kubeconfig: %v", err)
+	}
+
+	// The kubeconfig context holds the real tenant namespace; oidc-proxy may map the secret request
+	// to a namespace other than the one in its URL (e.g. a legacy tenant reached by project ID).
+	if ns, nsErr := GetNamespaceFromConfig(kubeconfigPath); nsErr == nil && ns != "" {
+		c.namespace = ns
 	}
 
 	// Success
