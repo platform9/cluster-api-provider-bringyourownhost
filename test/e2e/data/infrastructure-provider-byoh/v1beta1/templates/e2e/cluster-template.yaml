@@ -27,7 +27,6 @@ spec:
     spec:
       joinConfiguration:
         nodeRegistration:
-          name: "{{ .HostName }}"
           ignorePreflightErrors:
           - Swap
           - SystemVerification
@@ -37,6 +36,7 @@ spec:
             cgroup-driver: systemd
             eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
             resolv-conf: /etc/kubernetes/resolv.conf
+          name: '{{ .HostName }}'
       preKubeadmCommands:
       - |
         cat <<'EOF' > /etc/kubernetes/resolv.conf
@@ -169,7 +169,6 @@ spec:
       path: /etc/kubernetes/manifests/kube-vip.yaml
     initConfiguration:
       nodeRegistration:
-        name: "{{ .HostName }}"
         criSocket: /var/run/containerd/containerd.sock
         ignorePreflightErrors:
         - Swap
@@ -180,9 +179,9 @@ spec:
           cgroup-driver: systemd
           eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
           resolv-conf: /etc/kubernetes/resolv.conf
+        name: '{{ .HostName }}'
     joinConfiguration:
       nodeRegistration:
-        name: "{{ .HostName }}"
         criSocket: /var/run/containerd/containerd.sock
         ignorePreflightErrors:
         - Swap
@@ -193,6 +192,7 @@ spec:
           cgroup-driver: systemd
           eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
           resolv-conf: /etc/kubernetes/resolv.conf
+        name: '{{ .HostName }}'
     postKubeadmCommands:
     - '[[ -s /etc/kubernetes/super-admin.conf ]] || { rm -f /etc/kubernetes/super-admin.conf
       && kubeadm init phase kubeconfig super-admin; }'
