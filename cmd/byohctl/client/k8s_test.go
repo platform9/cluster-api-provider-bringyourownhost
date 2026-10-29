@@ -316,6 +316,36 @@ func TestAgentLogOutput(t *testing.T) {
 	}
 }
 
+func TestSaveKubeConfigNamespace(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	// Legacy tenant reached by project ID: the kubeconfig's namespace wins.
+	kubeconfig := `apiVersion: v1
+kind: Config
+current-context: byoh-127-test-domain-test-tenant
+contexts:
+- name: byoh-127-test-domain-test-tenant
+  context:
+    cluster: c
+    namespace: 127-test-domain-test-tenant
+    user: byoh
+`
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(types.Secret{
+			Data: map[string]string{"config": base64.StdEncoding.EncodeToString([]byte(kubeconfig))},
+		})
+	}))
+	defer ts.Close()
+
+	host := strings.TrimPrefix(ts.URL, "https://")
+	client := NewK8sClient(host, "test-domain", "test-tenant", "test-token", "region", false)
+	client.client = ts.Client()
+	client.SetProjectID("0123456789abcdef")
+
+	require.NoError(t, client.SaveKubeConfig("kubeconfig"))
+	assert.Equal(t, "127-test-domain-test-tenant", client.getNamespace())
+}
+
 // Test GetSecret finding the secret in the ID-based or the legacy tenant namespace
 func TestGetSecretTenantNamespace(t *testing.T) {
 	const (
