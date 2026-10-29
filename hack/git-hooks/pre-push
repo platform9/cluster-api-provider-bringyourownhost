@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+
+# Copyright 2026 Platform9, Inc. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# pre-push: run `make verify-generated` in this worktree when the branch being
+# pushed is the one checked out. Other pushed refs are not checked: the
+# generators run against the working tree, so they can only vouch for HEAD.
+# Tag pushes and branch deletions are skipped. Bypass with `git push --no-verify`.
+#
+# Install with `make install-git-hooks`.
+
+set -euo pipefail
+
+readonly ZERO_SHA=0000000000000000000000000000000000000000
+
+log() {
+	echo "$(date +%H:%M:%S) pre-push: $*"
+}
+
+main() {
+	local head_sha local_ref local_sha remote_ref remote_sha verify=false
+	head_sha=$(git rev-parse HEAD)
+
+	# shellcheck disable=SC2034 # the hook protocol sends four fields, only two are used
+	while read -r local_ref local_sha remote_ref remote_sha; do
+		[[ "$local_ref" == refs/heads/* ]] || continue
+		[[ "$local_sha" != "$ZERO_SHA" ]] || continue
+		if [[ "$local_sha" == "$head_sha" ]]; then
+			verify=true
+		else
+			log "not checking $local_ref, it is not the checked-out commit"
+		fi
+	done
+
+	[[ "$verify" == true ]] || return 0
+
+	local log_file
+	log_file=$(mktemp)
+	log "verify-generated on ${head_sha:0:8}"
+	if ! make verify-generated >"$log_file" 2>&1; then
+		tail -n 30 "$log_file"
+		log "verify-generated failed, full log: $log_file"
+		return 1
+	fi
+	rm -f "$log_file"
+}
+
+main "$@"
