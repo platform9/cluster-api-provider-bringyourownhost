@@ -87,30 +87,17 @@ const defaultDomainID = "default"
 
 // GetProjectID returns the Keystone project ID of tenant in domain via a project-scoped login.
 func (c *AuthClient) GetProjectID(username, password, domain, tenant string) (string, error) {
+	var body types.KeystoneAuthRequest
+	body.Auth.Identity.Methods = []string{passwordKey}
+	body.Auth.Identity.Password.User.Name = username
+	body.Auth.Identity.Password.User.Domain.ID = defaultDomainID
+	body.Auth.Identity.Password.User.Password = password
+	body.Auth.Scope.Project.Name = tenant
 	// --domain defaults to "default" but the domain is named "Default", so scope by ID.
-	projectDomain := map[string]string{"name": domain}
 	if strings.EqualFold(domain, defaultDomainID) {
-		projectDomain = map[string]string{"id": defaultDomainID}
-	}
-	body := map[string]interface{}{
-		"auth": map[string]interface{}{
-			"identity": map[string]interface{}{
-				"methods": []string{passwordKey},
-				passwordKey: map[string]interface{}{
-					"user": map[string]interface{}{
-						"name":      username,
-						"domain":    map[string]string{"id": defaultDomainID},
-						passwordKey: password,
-					},
-				},
-			},
-			"scope": map[string]interface{}{
-				"project": map[string]interface{}{
-					"name":   tenant,
-					"domain": projectDomain,
-				},
-			},
-		},
+		body.Auth.Scope.Project.Domain.ID = defaultDomainID
+	} else {
+		body.Auth.Scope.Project.Domain.Name = domain
 	}
 	payload, err := json.Marshal(body)
 	if err != nil {
