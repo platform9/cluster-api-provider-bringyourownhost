@@ -5,8 +5,10 @@ package client
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net"
@@ -20,7 +22,6 @@ import (
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/service"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/types"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils"
-	"gopkg.in/yaml.v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -76,24 +77,48 @@ func NewK8sClient(fqdn, domain, tenant, token, regionName string, insecure bool)
 	return client
 }
 
-// GetNamespaceFromConfig returns the namespace from the kubeconfig
-func GetNamespaceFromConfig(kubeconfigPath string) (string, error) {
-	// Read the kubeconfig file and get the namespace
-	data, err := os.ReadFile(kubeconfigPath)
+// GetHostRefFromConfig returns the ByoHost namespace (the tenant) and name that the client
+// certificate in the kubeconfig identifies. The certificate common name is the host identity.
+func GetHostRefFromConfig(kubeconfigPath string) (namespace, name string, err error) {
+	config, err := clientcmd.LoadFromFile(kubeconfigPath)
 	if err != nil {
-		return "", fmt.Errorf("error reading kubeconfig: %v", err)
+		return "", "", fmt.Errorf("error reading kubeconfig %s: %w", kubeconfigPath, err)
 	}
 
-	var config service.Config
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return "", fmt.Errorf("error parsing kubeconfig: %v", err)
+	kubeContext, ok := config.Contexts[config.CurrentContext]
+	if !ok {
+		return "", "", fmt.Errorf("current context %q not found in kubeconfig %s", config.CurrentContext, kubeconfigPath)
 	}
-	for _, context := range config.Contexts {
-		if context.Name == config.CurrentContext {
-			return context.Context.Namespace, nil
+	authInfo, ok := config.AuthInfos[kubeContext.AuthInfo]
+	if !ok {
+		return "", "", fmt.Errorf("user %q of context %q not found in kubeconfig %s", kubeContext.AuthInfo, config.CurrentContext, kubeconfigPath)
+	}
+
+	certPEM := authInfo.ClientCertificateData
+	if len(certPEM) == 0 && authInfo.ClientCertificate != "" {
+		certPEM, err = os.ReadFile(authInfo.ClientCertificate)
+		if err != nil {
+			return "", "", fmt.Errorf("error reading client certificate: %w", err)
 		}
 	}
-	return "", fmt.Errorf("namespace not found in kubeconfig")
+	if len(certPEM) == 0 {
+		return "", "", fmt.Errorf("kubeconfig %s has no client certificate for user %q", kubeconfigPath, kubeContext.AuthInfo)
+	}
+
+	block, _ := pem.Decode(certPEM)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return "", "", fmt.Errorf("client certificate in kubeconfig %s has no PEM CERTIFICATE block", kubeconfigPath)
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return "", "", fmt.Errorf("error parsing client certificate: %w", err)
+	}
+
+	tenant, hostName, suffix, err := infrastructurev1beta1.ParseHostIdentity(cert.Subject.CommonName)
+	if err != nil {
+		return "", "", fmt.Errorf("client certificate common name is not a host identity: %w", err)
+	}
+	return tenant, infrastructurev1beta1.ByoHostName(hostName, suffix), nil
 }
 
 // getNamespace returns the namespace for the client
@@ -257,17 +282,12 @@ func GetK8sClient(kubeconfigPath string) (*Client, error) {
 	}, nil
 }
 
-// GetByoHosts gets ByoHost object in the given namespace.
-func (client *Client) GetByoHostObject(namespace string) (*infrastructurev1beta1.ByoHost, error) {
+// GetByoHostObject gets the named ByoHost object in the given namespace.
+func (client *Client) GetByoHostObject(namespace, name string) (*infrastructurev1beta1.ByoHost, error) {
 	byohostGVR := infrastructurev1beta1.GroupVersion.WithResource("byohosts")
 
-	hostName, err := os.Hostname()
-	if err != nil {
-		return nil, fmt.Errorf("error getting hostname: %v", err)
-	}
-
 	// Get the byohost object
-	unstructuredObj, err := client.DynamicClient.Resource(byohostGVR).Namespace(namespace).Get(context.Background(), hostName, metav1.GetOptions{})
+	unstructuredObj, err := client.DynamicClient.Resource(byohostGVR).Namespace(namespace).Get(context.Background(), name, metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("error getting ByoHosts: %v", err)
 	}
@@ -282,17 +302,12 @@ func (client *Client) GetByoHostObject(namespace string) (*infrastructurev1beta1
 	return byoHost, nil
 }
 
-// DeleteByoHostObject deletes the ByoHost object in the given namespace.
-func (client *Client) DeleteByoHostObject(namespace string) error {
+// DeleteByoHostObject deletes the named ByoHost object in the given namespace.
+func (client *Client) DeleteByoHostObject(namespace, name string) error {
 	byohostGVR := infrastructurev1beta1.GroupVersion.WithResource("byohosts")
 
-	hostName, err := os.Hostname()
-	if err != nil {
-		return fmt.Errorf("error getting hostname: %v", err)
-	}
-
 	// Delete the byohost object
-	err = client.DynamicClient.Resource(byohostGVR).Namespace(namespace).Delete(context.Background(), hostName, metav1.DeleteOptions{})
+	err := client.DynamicClient.Resource(byohostGVR).Namespace(namespace).Delete(context.Background(), name, metav1.DeleteOptions{})
 	if err != nil {
 		return err
 	}
@@ -400,7 +415,7 @@ func (client *Client) GetMachineDeploymentReplicaCount(ctx context.Context, mach
 }
 
 // WaitForMachineRefToBeUnset waits for the machineRef to be unset from the byohost object status field
-func (client *Client) WaitForMachineRefToBeUnset(ctx context.Context, byoHost *infrastructurev1beta1.ByoHost, namespace string) error {
+func (client *Client) WaitForMachineRefToBeUnset(ctx context.Context, byoHost *infrastructurev1beta1.ByoHost, namespace, name string) error {
 	startTime := time.Now()
 
 	for {
@@ -415,7 +430,7 @@ func (client *Client) WaitForMachineRefToBeUnset(ctx context.Context, byoHost *i
 		}
 
 		// Get the current byohost object
-		byoHost, err := client.GetByoHostObject(namespace)
+		byoHost, err := client.GetByoHostObject(namespace, name)
 		if err != nil {
 			return fmt.Errorf("error getting byohost object: %v", err)
 		}
