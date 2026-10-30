@@ -41,6 +41,7 @@ import (
 
 	"github.com/platform9/cluster-api-provider-bringyourownhost/agent/registration"
 	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/hostname"
 )
 
 // certificatePEMBlockType is the PEM block type certRotation insists on.
@@ -135,8 +136,8 @@ func newReconcilerTestManager(t *testing.T) ctrl.Manager {
 
 func testAgentOptions() *agentOptions {
 	return &agentOptions{
-		hostName:  "test-host",
-		namespace: "default",
+		byoHostName: "test-host-abc12",
+		namespace:   "default",
 		// Off so parallel tests never fight over a port.
 		metricsBindAddress:  "0",
 		downloadPath:        "/var/lib/byoh/bundles",
@@ -152,12 +153,18 @@ func testAgentOptions() *agentOptions {
 func certPEM(t *testing.T, lifetime, remaining time.Duration) []byte {
 	t.Helper()
 
+	return certPEMWithCommonName(t, "byoh-test", lifetime, remaining)
+}
+
+func certPEMWithCommonName(t *testing.T, commonName string, lifetime, remaining time.Duration) []byte {
+	t.Helper()
+
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: "byoh-test"},
+		Subject:      pkix.Name{CommonName: commonName},
 		NotBefore:    time.Now().Add(-lifetime),
 		NotAfter:     time.Now().Add(remaining),
 	}
@@ -245,24 +252,43 @@ func TestLabelFlagsString(t *testing.T) {
 	}
 }
 
-// The parser exists only to substitute the host's network interface name into
-// bootstrap data, so an unknown interface must leave it nil rather than
-// producing a parser that substitutes an empty string.
+// The parser exists only to substitute host details into bootstrap data, so
+// a host with neither a default interface nor a host name must leave it nil
+// rather than producing a parser that substitutes empty strings.
 func TestSetupTemplateParser(t *testing.T) {
 	testCases := []struct {
 		name          string
 		interfaceName string
+		hostName      string
+		template      string
 		wantParser    bool
+		want          string
 	}{
 		{
-			name:          "no default interface discovered",
-			interfaceName: "",
-			wantParser:    false,
+			name:       "no interface and no host name",
+			wantParser: false,
 		},
 		{
-			name:          "default interface discovered",
+			name:          "default interface only",
 			interfaceName: "eth0",
+			template:      "iface={{ .DefaultNetworkInterfaceName }} host={{ .HostName }}",
 			wantParser:    true,
+			want:          "iface=eth0 host=",
+		},
+		{
+			name:       "host name only",
+			hostName:   "example-worker-1",
+			template:   "iface={{ .DefaultNetworkInterfaceName }} host={{ .HostName }}",
+			wantParser: true,
+			want:       "iface= host=example-worker-1",
+		},
+		{
+			name:          "interface and host name",
+			interfaceName: "eth0",
+			hostName:      "example-worker-1",
+			template:      "iface={{ .DefaultNetworkInterfaceName }} host={{ .HostName }}",
+			wantParser:    true,
+			want:          "iface=eth0 host=example-worker-1",
 		},
 	}
 
@@ -274,6 +300,7 @@ func TestSetupTemplateParser(t *testing.T) {
 			registration.LocalHostRegistrar = &registration.HostRegistrar{
 				ByoHostInfo: registration.HostInfo{
 					DefaultNetworkInterfaceName: tc.interfaceName,
+					HostName:                    tc.hostName,
 				},
 			}
 
@@ -285,9 +312,119 @@ func TestSetupTemplateParser(t *testing.T) {
 			}
 
 			require.NotNil(t, parser)
-			info, ok := parser.Template.(registration.HostInfo)
-			require.True(t, ok, "template should carry host info")
-			assert.Equal(t, tc.interfaceName, info.DefaultNetworkInterfaceName)
+			got, err := parser.ParseTemplate(tc.template)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestNormalizedHostName(t *testing.T) {
+	osHostName, err := os.Hostname()
+	require.NoError(t, err)
+
+	want, err := hostname.Normalize(osHostName)
+	require.NoError(t, err)
+
+	got, err := normalizedHostName()
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+}
+
+func TestResolveByoHostName(t *testing.T) {
+	const (
+		hostName = "example-worker-1"
+		identity = "byoh:host:example-tenant:example-worker-1-abc12"
+	)
+
+	certConfig := func(t *testing.T, commonName string) *rest.Config {
+		t.Helper()
+
+		return &rest.Config{
+			TLSClientConfig: rest.TLSClientConfig{CertData: certPEMWithCommonName(t, commonName, time.Minute, time.Hour)},
+		}
+	}
+
+	// stateDir returns a state directory whose state file holds stateIdentity.
+	stateDir := func(t *testing.T, stateIdentity string) string {
+		t.Helper()
+
+		dir := t.TempDir()
+		data := fmt.Sprintf(`{"version":1,"phase":"issued","identity":%q}`, stateIdentity)
+		err := os.WriteFile(filepath.Join(dir, registration.StateFileName), []byte(data), 0o600)
+		require.NoError(t, err)
+
+		return dir
+	}
+
+	testCases := []struct {
+		name         string
+		stateDir     string
+		config       *rest.Config
+		wantIdentity string
+		wantName     string
+		wantErr      bool
+	}{
+		{
+			name:         "name comes from the client certificate identity",
+			config:       certConfig(t, identity),
+			wantIdentity: identity,
+			wantName:     "example-worker-1-abc12",
+		},
+		{
+			name:         "name comes from the state file identity",
+			stateDir:     stateDir(t, identity),
+			config:       &rest.Config{},
+			wantIdentity: identity,
+			wantName:     "example-worker-1-abc12",
+		},
+		{
+			name:     "no identity keeps the host name",
+			config:   &rest.Config{},
+			wantName: hostName,
+		},
+		{
+			name:    "client certificate that is not a host identity is an error",
+			config:  certConfig(t, "byoh-test"),
+			wantErr: true,
+		},
+		{
+			name:     "state file identity that is not a host identity is an error",
+			stateDir: stateDir(t, "byoh-test"),
+			config:   &rest.Config{},
+			wantErr:  true,
+		},
+		{
+			name:     "state file host identity that does not parse is an error",
+			stateDir: stateDir(t, "byoh:host:example-tenant"),
+			config:   &rest.Config{},
+			wantErr:  true,
+		},
+		{
+			name:    "host identity that does not parse is an error",
+			config:  certConfig(t, "byoh:host:example-tenant"),
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := tc.stateDir
+			if dir == "" {
+				dir = t.TempDir()
+			}
+
+			gotIdentity, gotName, err := resolveByoHostName(dir, tc.config, hostName)
+
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Empty(t, gotIdentity)
+				assert.Empty(t, gotName)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantIdentity, gotIdentity)
+			assert.Equal(t, tc.wantName, gotName)
 		})
 	}
 }
@@ -336,7 +473,7 @@ func TestCertRotation(t *testing.T) {
 			var messages []string
 			logger := recordingLogger(&messages)
 
-			err := certRotation(t.Context(), logger, "test-host", &rest.Config{
+			err := certRotation(t.Context(), logger, "test-tenant", "test-host", "", &rest.Config{
 				TLSClientConfig: rest.TLSClientConfig{CertData: tc.certData},
 			})
 
@@ -416,7 +553,7 @@ func TestNewManagerScopesCacheToThisHost(t *testing.T) {
 	direct, err := client.New(agentCfg, client.Options{Scheme: scheme})
 	require.NoError(t, err)
 
-	for _, name := range []string{opts.hostName, "other-host"} {
+	for _, name := range []string{opts.byoHostName, "other-host"} {
 		host := &infrastructurev1beta1.ByoHost{}
 		host.Name = name
 		host.Namespace = opts.namespace
@@ -436,5 +573,5 @@ func TestNewManagerScopesCacheToThisHost(t *testing.T) {
 	}, 30*time.Second, 100*time.Millisecond)
 
 	require.Len(t, hosts.Items, 1)
-	assert.Equal(t, opts.hostName, hosts.Items[0].Name)
+	assert.Equal(t, opts.byoHostName, hosts.Items[0].Name)
 }

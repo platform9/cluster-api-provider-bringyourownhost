@@ -1,311 +1,711 @@
-// Copyright 2022 VMware, Inc. All Rights Reserved.
 // Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package registration_test
+// nolint: nolintlint,testpackage
+package registration
 
 import (
-	"context"
 	"crypto/x509"
 	"encoding/pem"
-	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"testing"
 	"time"
 
 	"github.com/go-logr/logr"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-	"github.com/platform9/cluster-api-provider-bringyourownhost/agent/registration"
-	"github.com/platform9/cluster-api-provider-bringyourownhost/test/builder"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	certv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/klog/v2/klogr"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/client-go/kubernetes/fake"
+	restclient "k8s.io/client-go/rest"
+	clienttesting "k8s.io/client-go/testing"
+	"k8s.io/client-go/util/keyutil"
+
+	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 )
 
-const csrApprovedMsg = "approved"
+const (
+	testTenant     = "example-tenant"
+	testHostName   = "example-worker-1"
+	testTokenID    = "abcdef"
+	testToken      = testTokenID + ".0123456789abcdef"
+	createdCSRUID  = "created-uid"
+	existingCSRUID = "existing-uid"
+	oldIdentity    = "byoh:host:" + testTenant + ":" + testHostName + "-old00"
+	oldCSRName     = "byoh-csr-" + testTenant + "-" + testHostName + "-old00"
+)
 
-// simulateByoAdmissionController approves the host's CSR and issues a certificate
-// for it, the way the ByoAdmission controller would. It sends exactly one value on
-// the returned channel before it exits: nil once the certificate is issued, or the
-// reason it gave up, so a spec can both wait for it and see what went wrong. A
-// canceled context is one of those reasons, since it means the certificate was
-// never issued.
-func simulateByoAdmissionController(ctx context.Context, hostName, cert string) <-chan error {
-	done := make(chan error, 1)
+// newTestByohCSR returns a ByohCSR that keeps its state in dir and talks to a
+// fake clientset holding objects. Every CSR the fake creates gets createdCSRUID.
+func newTestByohCSR(t *testing.T, dir string, objects ...runtime.Object) (*ByohCSR, *fake.Clientset) {
+	t.Helper()
 
-	go func() {
-		defer GinkgoRecover()
+	client := fake.NewClientset(objects...)
+	client.PrependReactor("create", "certificatesigningrequests", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		created, ok := action.(clienttesting.CreateAction).GetObject().(*certv1.CertificateSigningRequest)
+		require.True(t, ok)
+		created.UID = createdCSRUID
+		// Not handled, so the fake tracker stores the object with its UID.
+		return false, created, nil
+	})
 
-		csrClient := k8sClientSet.CertificatesV1().CertificateSigningRequests()
-		csrName := fmt.Sprintf(registration.ByohCSRNameFormat, hostName)
-
-		ticker := time.NewTicker(time.Millisecond * 100)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				done <- fmt.Errorf("gave up approving the CSR for %q: %w", hostName, ctx.Err())
-				return
-			case <-ticker.C:
-			}
-
-			// A failed Get means the host has not created its CSR yet, so keep polling.
-			byohCSR, err := csrClient.Get(ctx, csrName, metav1.GetOptions{})
-			if err != nil {
-				continue
-			}
-			byohCSR.Status.Conditions = append(byohCSR.Status.Conditions, certv1.CertificateSigningRequestCondition{
-				Type:    certv1.CertificateApproved,
-				Reason:  csrApprovedMsg,
-				Message: csrApprovedMsg,
-				Status:  corev1.ConditionTrue,
-			})
-			_, err = csrClient.UpdateApproval(ctx, csrName, byohCSR, metav1.UpdateOptions{})
-			if err != nil {
-				done <- fmt.Errorf("approve the CSR for %q: %w", hostName, err)
-				return
-			}
-
-			byohCSR, err = csrClient.Get(ctx, csrName, metav1.GetOptions{})
-			if err != nil {
-				done <- fmt.Errorf("re-read the approved CSR for %q: %w", hostName, err)
-				return
-			}
-			byohCSR.Status.Certificate = []byte(cert)
-			_, err = csrClient.UpdateStatus(ctx, byohCSR, metav1.UpdateOptions{})
-			if err != nil {
-				done <- fmt.Errorf("issue the certificate for %q: %w", hostName, err)
-				return
-			}
-			done <- nil
-			return
-		}
-	}()
-
-	return done
+	return &ByohCSR{
+		bootstrapClientConfig: &restclient.Config{BearerToken: testToken},
+		bootstrapClient:       client,
+		configPath:            filepath.Join(dir, "config"),
+		logger:                logr.Discard(),
+		expiryDuration:        time.Hour,
+	}, client
 }
 
-var _ = Describe("CSR Registration", func() {
-	var (
-		hostName           = "test-host"
-		fileDir            string
-		certExpiryDuration = int64((time.Hour * 24).Seconds())
-	)
-	Context("When bootstrap kubeconfig is provided", func() {
-		testDatabootstrapValid := []byte(`
-apiVersion: v1
-kind: Config
-clusters:
-- cluster:
-    certificate-authority-data: VGVzdA==
-    server: https://cluster-a.com
-  name: cluster-a
-contexts:
-- context:
-    cluster: cluster-a
-    namespace: ns-a
-    user: user-a
-  name: context-a
-current-context: context-a
-users:
-- name: user-a
-  user:
-    token: mytoken-a
-`)
-		testDatabootstrapInvalid := []byte(`
-apiVersion: v1
-kind: Config
-clusters:
-- cluster:
-    certificate-authority: ca.crt
-    server: https://cluster-a.com
-  name: cluster-a
-contexts:
-- context:
-    cluster: cluster-a
-    namespace: ns-a
-    user: user-a
-  name: context-a
-current-context: context-a
-users:
-- name: user-a
-  user:
-    token: mytoken-a
-`)
-		var testCert = `
------BEGIN CERTIFICATE-----
-MIIBvzCCAWWgAwIBAgIRAMd7Mz3fPrLm1aFUn02lLHowCgYIKoZIzj0EAwIwIzEh
-MB8GA1UEAwwYazNzLWNsaWVudC1jYUAxNjE2NDMxOTU2MB4XDTIxMDQxOTIxNTMz
-MFoXDTIyMDQxOTIxNTMzMFowMjEVMBMGA1UEChMMc3lzdGVtOm5vZGVzMRkwFwYD
-VQQDExBzeXN0ZW06bm9kZTp0ZXN0MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE
-Xd9aZm6nftepZpUwof9RSUZqZDgu7dplIiDt8nnhO5Bquy2jn7/AVx20xb0Xz0d2
-XLn3nn5M+lR2p3NlZmqWHaNrMGkwDgYDVR0PAQH/BAQDAgWgMBMGA1UdJQQMMAoG
-CCsGAQUFBwMBMAwGA1UdEwEB/wQCMAAwHwYDVR0jBBgwFoAU/fZa5enijRDB25DF
-NT1/vPUy/hMwEwYDVR0RBAwwCoIIRE5TOnRlc3QwCgYIKoZIzj0EAwIDSAAwRQIg
-b3JL5+Q3zgwFrciwfdgtrKv8MudlA0nu6EDQO7eaJbwCIQDegFyC4tjGPp/5JKqQ
-kovW9X7Ook/tTW0HyX6D6HRciA==
------END CERTIFICATE-----
-						`
-		BeforeEach(func(ctx SpecContext) {
-			csrList, err := k8sClientSet.CertificatesV1().CertificateSigningRequests().List(ctx, metav1.ListOptions{})
-			Expect(err).ShouldNot(HaveOccurred())
-			for _, csr := range csrList.Items {
-				err = k8sClientSet.CertificatesV1().CertificateSigningRequests().Delete(ctx, csr.Name, metav1.DeleteOptions{})
-				Expect(err).ShouldNot(HaveOccurred())
+func readState(t *testing.T, dir string) *state {
+	t.Helper()
+
+	got, err := loadState(dir)
+	require.NoError(t, err)
+	return got
+}
+
+func TestBootstrapTokenID(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name    string
+		token   string
+		want    string
+		wantErr bool
+	}{
+		{
+			name:  "valid bootstrap token returns only the id",
+			token: testToken,
+			want:  testTokenID,
+		},
+		{
+			name:    "no bearer token",
+			token:   "",
+			wantErr: true,
+		},
+		{
+			name:    "bearer token that is not a bootstrap token",
+			token:   "not-a-bootstrap-token",
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := bootstrapTokenID(&restclient.Config{BearerToken: tc.token})
+
+			if tc.wantErr {
+				require.Error(t, err)
+				return
 			}
-			registration.ConfigPath = "config"
-			fileDir, err = os.MkdirTemp("", "bootstrap")
-			Expect(err).ShouldNot(HaveOccurred())
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
 
-		})
+func TestNewCSRName(t *testing.T) {
+	t.Parallel()
 
-		AfterEach(func() {
-			err := os.RemoveAll(fileDir)
-			Expect(err).ToNot(HaveOccurred())
-		})
+	longHostName := strings.Repeat("a", 63)
+	wantPrefix := "byoh-csr-" + testTenant + "-" + testHostName + "-"
 
-		It("should return error if hostname is invalid", func(ctx SpecContext) {
-			CSRRegistrar, err := registration.NewByohCSR(cfg, logr.Discard(), certExpiryDuration)
-			Expect(err).ShouldNot(HaveOccurred())
-			_, _, err = CSRRegistrar.RequestBYOHClientCert(ctx, "")
-			Expect(err).To(MatchError("hostname is not valid"))
-		})
-		It("should return client config if bootstrap kubeconfig is valid", func() {
-			fileboot, err := os.CreateTemp(fileDir, "bootstrapkubeconfig")
-			Expect(err).ShouldNot(HaveOccurred())
-			err = os.WriteFile(fileboot.Name(), testDatabootstrapValid, os.FileMode(0755))
-			Expect(err).ShouldNot(HaveOccurred())
-			restConfig, err := registration.LoadRESTClientConfig(fileboot.Name())
-			Expect(err).ShouldNot(HaveOccurred())
-			Expect(restConfig).ToNot(BeNil())
-			Expect(restConfig.Host).To(Equal("https://cluster-a.com"))
-		})
-		It("should return error if bootstrap kubeconfig is invalid", func() {
-			fileboot, err := os.CreateTemp(fileDir, "bootstrapkubeconfig")
-			Expect(err).ShouldNot(HaveOccurred())
-			err = os.WriteFile(fileboot.Name(), testDatabootstrapInvalid, os.FileMode(0755))
-			Expect(err).ShouldNot(HaveOccurred())
-			restConfig, err := registration.LoadRESTClientConfig(fileboot.Name())
-			Expect(err).Should(HaveOccurred())
-			Expect(restConfig).To(BeNil())
-		})
-		It("should create csr if bootstrap kubeconfig is valid", func(ctx SpecContext) {
-			CSRRegistrar, err := registration.NewByohCSR(cfg, logr.Discard(), certExpiryDuration)
-			Expect(err).ShouldNot(HaveOccurred())
-			_, _, err = CSRRegistrar.RequestBYOHClientCert(ctx, hostName)
-			Expect(err).NotTo(HaveOccurred())
-			ByohCSR, err := k8sClientSet.CertificatesV1().CertificateSigningRequests().Get(ctx, fmt.Sprintf(registration.ByohCSRNameFormat, hostName), metav1.GetOptions{})
-			Expect(err).ShouldNot(HaveOccurred())
-			// Validate k8s CSR resource
-			Expect(ByohCSR.Spec.SignerName).Should(Equal(certv1.KubeAPIServerClientSignerName))
-			Expect(ByohCSR.Spec.Usages).Should(Equal([]certv1.KeyUsage{certv1.UsageClientAuth}))
-			Expect(*ByohCSR.Spec.ExpirationSeconds).Should(Equal(int32((time.Hour * 24).Seconds())))
-			// Validate Certificate Request
-			pemData, _ := pem.Decode(ByohCSR.Spec.Request)
-			Expect(pemData).ToNot(Equal(nil))
-			csr, err := x509.ParseCertificateRequest(pemData.Bytes)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(csr.Subject.CommonName).To(Equal(fmt.Sprintf(registration.ByohCSRCNFormat, hostName)))
-			Expect(csr.Subject.Organization[0]).To(Equal("byoh:hosts"))
+	first := newCSRName(testTenant, testHostName)
+	second := newCSRName(testTenant, testHostName)
+	assert.NotEqual(t, first, second, "every CSR gets a new random part")
+	assert.True(t, strings.HasPrefix(first, wantPrefix), first)
+	assert.Len(t, strings.TrimPrefix(first, wantPrefix), randomPartLength)
 
-			Expect(os.Remove(registration.TmpPrivateKey)).ShouldNot(HaveOccurred())
-		})
-		It("should fail creating CSR if the private key got changed", func(ctx SpecContext) {
-			byohCSR, err := builder.CertificateSigningRequest(
-				fmt.Sprintf(registration.ByohCSRNameFormat, hostName),
-				fmt.Sprintf(registration.ByohCSRCNFormat, hostName),
-				"byoh:hosts", 2048).Build()
-			Expect(err).NotTo(HaveOccurred())
-			_, err = k8sClientSet.CertificatesV1().CertificateSigningRequests().Create(ctx, byohCSR, metav1.CreateOptions{})
-			Expect(err).ShouldNot(HaveOccurred())
-			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
-			Expect(err).ShouldNot(HaveOccurred())
-			_, _, err = CSRRegistrar.RequestBYOHClientCert(ctx, hostName)
-			Expect(err).Should(HaveOccurred())
-			Expect(err.Error()).Should(ContainSubstring("retrieved csr is not compatible"))
+	longName := newCSRName(testTenant, longHostName)
+	assert.True(t, strings.HasPrefix(longName, "byoh-csr-"+testTenant+"-"+longHostName+"-"), longName)
+	assert.Empty(t, validation.IsDNS1123Subdomain(longName))
+}
 
-			Expect(os.Remove(registration.TmpPrivateKey)).ShouldNot(HaveOccurred())
-		})
-		It("should timeout if the CSR is not approved", func(ctx SpecContext) {
-			registration.CSRApprovalTimeout = time.Second * 5
-			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
-			Expect(err).ShouldNot(HaveOccurred())
-			err = CSRRegistrar.BootstrapKubeconfig(ctx, hostName)
-			Expect(err).Should(HaveOccurred())
-			Expect(err).To(MatchError("timed out waiting for the condition"))
-			Expect(os.Remove(registration.TmpPrivateKey)).ShouldNot(HaveOccurred())
-		})
-		It("should return error if not able to write kubeconfig", func(ctx SpecContext) {
-			admissionDone := simulateByoAdmissionController(ctx, hostName, testCert)
-			defer func() {
-				var admissionErr error
-				Eventually(admissionDone, time.Second*5).Should(Receive(&admissionErr))
-				Expect(admissionErr).ShouldNot(HaveOccurred())
-			}()
-			// A regular file can't be descended into as a directory component, so this
-			// deterministically fails writing the kubeconfig regardless of whether the
-			// test process is running as root or not (unlike a permission-denied path,
-			// which root would bypass). clientcmd.WriteToFile only calls MkdirAll when
-			// os.Stat on the parent finds nothing there; since the parent here exists
-			// (just as the wrong type), it skips straight to the write, which is what
-			// actually fails.
-			blockingFile, err := os.CreateTemp("", "byoh-csr-not-a-mount-")
-			Expect(err).ShouldNot(HaveOccurred())
-			Expect(blockingFile.Close()).ShouldNot(HaveOccurred())
-			defer func() {
-				Expect(os.Remove(blockingFile.Name())).ShouldNot(HaveOccurred())
-			}()
+func TestNewIdentity(t *testing.T) {
+	t.Parallel()
 
-			registration.ConfigPath = filepath.Join(blockingFile.Name(), "config")
-			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
-			Expect(err).ShouldNot(HaveOccurred())
-			err = CSRRegistrar.BootstrapKubeconfig(ctx, hostName)
-			Expect(err).Should(HaveOccurred())
-			Expect(err).To(MatchError(fmt.Sprintf("open %s: not a directory", registration.ConfigPath)))
-			Expect(os.Remove(registration.TmpPrivateKey)).ShouldNot(HaveOccurred())
+	identity := newIdentity(testTenant, testHostName)
+
+	tenant, hostName, suffix, err := infrastructurev1beta1.ParseHostIdentity(identity)
+	require.NoError(t, err)
+	assert.Equal(t, testTenant, tenant)
+	assert.Equal(t, testHostName, hostName)
+	assert.Len(t, suffix, 5)
+	assert.Regexp(t, "^[bcdfghjklmnpqrstvwxz2456789]{5}$", suffix)
+
+	assert.NotEqual(t, identity, newIdentity(testTenant, testHostName), "every onboarding gets a new suffix")
+}
+
+func TestState_Matches(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name     string
+		identity string
+		wantErr  bool
+	}{
+		{
+			name:     "same tenant and host name",
+			identity: "byoh:host:" + testTenant + ":" + testHostName + "-abc12",
+		},
+		{
+			name:     "different tenant",
+			identity: "byoh:host:other-tenant:" + testHostName + "-abc12",
+			wantErr:  true,
+		},
+		{
+			name:     "different host name",
+			identity: "byoh:host:" + testTenant + ":other-host-abc12",
+			wantErr:  true,
+		},
+		{
+			name:     "identity that does not parse",
+			identity: "not-an-identity",
+			wantErr:  true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			st := &state{Identity: tc.identity}
+
+			err := st.matches(testTenant, testHostName)
+
+			if tc.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
 		})
-		It("should create kubeconfig if csr is approved", func(ctx SpecContext) {
-			admissionDone := simulateByoAdmissionController(ctx, hostName, testCert)
-			defer func() {
-				var admissionErr error
-				Eventually(admissionDone, time.Second*5).Should(Receive(&admissionErr))
-				Expect(admissionErr).ShouldNot(HaveOccurred())
-			}()
-			CSRRegistrar, err := registration.NewByohCSR(cfg, klogr.New(), certExpiryDuration) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
-			Expect(err).ShouldNot(HaveOccurred())
-			err = CSRRegistrar.BootstrapKubeconfig(ctx, hostName)
-			Expect(err).ShouldNot(HaveOccurred())
-			Expect(registration.ConfigPath).To(BeARegularFile())
-			Expect(os.Remove(registration.ConfigPath)).ShouldNot(HaveOccurred())
+	}
+}
+
+func TestByohCSR_LoadOrCreateState(t *testing.T) {
+	t.Parallel()
+
+	const oldKey = "old-key"
+	oldState := func(tokenID string) *state {
+		return &state{
+			Version:          stateVersion,
+			Phase:            phasePending,
+			BootstrapTokenID: tokenID,
+			Identity:         oldIdentity,
+			CSRName:          oldCSRName,
+			CSRUID:           existingCSRUID,
+		}
+	}
+
+	testCases := []struct {
+		name string
+		// seed writes the files that an earlier run left behind.
+		seed        func(t *testing.T, dir string)
+		wantResumed bool
+	}{
+		{
+			name:        "no state file starts fresh",
+			seed:        func(_ *testing.T, _ string) {},
+			wantResumed: false,
+		},
+		{
+			name: "invalid JSON starts fresh",
+			seed: func(t *testing.T, dir string) {
+				t.Helper()
+				require.NoError(t, os.WriteFile(filepath.Join(dir, StateFileName), []byte("{"), 0o600))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, PrivateKeyFileName), []byte(oldKey), 0o600))
+			},
+			wantResumed: false,
+		},
+		{
+			name: "unknown version starts fresh",
+			seed: func(t *testing.T, dir string) {
+				t.Helper()
+				require.NoError(t, os.WriteFile(filepath.Join(dir, StateFileName), []byte(`{"version":99}`), 0o600))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, PrivateKeyFileName), []byte(oldKey), 0o600))
+			},
+			wantResumed: false,
+		},
+		{
+			name: "unknown phase starts fresh",
+			seed: func(t *testing.T, dir string) {
+				t.Helper()
+				contents := `{"version":1,"phase":"done","bootstrapTokenID":"` + testTokenID + `","identity":"` + oldIdentity + `"}`
+				require.NoError(t, os.WriteFile(filepath.Join(dir, StateFileName), []byte(contents), 0o600))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, PrivateKeyFileName), []byte(oldKey), 0o600))
+			},
+			wantResumed: false,
+		},
+		{
+			name: "different bootstrap token id starts fresh",
+			seed: func(t *testing.T, dir string) {
+				t.Helper()
+				require.NoError(t, oldState("uvwxyz").save(dir))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, PrivateKeyFileName), []byte(oldKey), 0o600))
+			},
+			wantResumed: false,
+		},
+		{
+			name: "same token id but a different tenant starts fresh",
+			seed: func(t *testing.T, dir string) {
+				t.Helper()
+				other := oldState(testTokenID)
+				other.Identity = "byoh:host:other-tenant:" + testHostName + "-old00"
+				require.NoError(t, other.save(dir))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, PrivateKeyFileName), []byte(oldKey), 0o600))
+			},
+			wantResumed: false,
+		},
+		{
+			name: "same token id but a different host name starts fresh",
+			seed: func(t *testing.T, dir string) {
+				t.Helper()
+				other := oldState(testTokenID)
+				other.Identity = "byoh:host:" + testTenant + ":other-host-old00"
+				require.NoError(t, other.save(dir))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, PrivateKeyFileName), []byte(oldKey), 0o600))
+			},
+			wantResumed: false,
+		},
+		{
+			name: "same token id but missing key starts fresh",
+			seed: func(t *testing.T, dir string) {
+				t.Helper()
+				require.NoError(t, oldState(testTokenID).save(dir))
+			},
+			wantResumed: false,
+		},
+		{
+			name: "same token id resumes and deletes nothing",
+			seed: func(t *testing.T, dir string) {
+				t.Helper()
+				require.NoError(t, oldState(testTokenID).save(dir))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, PrivateKeyFileName), []byte(oldKey), 0o600))
+			},
+			wantResumed: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			tc.seed(t, dir)
+			bcsr, _ := newTestByohCSR(t, dir)
+
+			st, keyData, resumed, err := bcsr.loadOrCreateState(dir, testTenant, testHostName, testTokenID, "")
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantResumed, resumed)
+			assert.Equal(t, testTokenID, st.BootstrapTokenID)
+
+			saved := readState(t, dir)
+			assert.Equal(t, st, saved)
+
+			keyOnDisk, err := os.ReadFile(filepath.Join(dir, PrivateKeyFileName))
+			require.NoError(t, err)
+			assert.Equal(t, keyOnDisk, keyData)
+
+			keyInfo, err := os.Stat(filepath.Join(dir, PrivateKeyFileName))
+			require.NoError(t, err)
+			assert.Equal(t, os.FileMode(0o600), keyInfo.Mode().Perm())
+			stateInfo, err := os.Stat(filepath.Join(dir, StateFileName))
+			require.NoError(t, err)
+			assert.Equal(t, os.FileMode(0o600), stateInfo.Mode().Perm())
+
+			if tc.wantResumed {
+				assert.Equal(t, oldState(testTokenID), st)
+				assert.Equal(t, []byte(oldKey), keyData)
+				return
+			}
+
+			// A fresh start gets a new identity, a new CSR name, no CSR UID and a
+			// key that can be parsed.
+			assert.Equal(t, phasePending, st.Phase)
+			assert.NotEqual(t, oldState(testTokenID).Identity, st.Identity)
+			assert.NotEqual(t, oldState(testTokenID).CSRName, st.CSRName)
+			assert.Empty(t, st.CSRUID)
+			_, err = keyutil.ParsePrivateKeyPEM(keyData)
+			assert.NoError(t, err)
+
+			tenant, hostName, _, err := infrastructurev1beta1.ParseHostIdentity(st.Identity)
+			require.NoError(t, err)
+			assert.Equal(t, testTenant, tenant)
+			assert.Equal(t, testHostName, hostName)
 		})
+	}
+}
+
+func TestByohCSR_EnsureCSR_Fresh(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	bcsr, client := newTestByohCSR(t, dir)
+
+	st, keyData, resumed, err := bcsr.loadOrCreateState(dir, testTenant, testHostName, testTokenID, "")
+	require.NoError(t, err)
+	require.False(t, resumed)
+	privateKey, err := keyutil.ParsePrivateKeyPEM(keyData)
+	require.NoError(t, err)
+
+	name, uid, err := bcsr.ensureCSR(t.Context(), dir, st, testTenant, testHostName, privateKey, resumed, false)
+	require.NoError(t, err)
+
+	assert.Equal(t, st.CSRName, name)
+	assert.Equal(t, createdCSRUID, string(uid))
+	saved := readState(t, dir)
+	assert.Equal(t, name, saved.CSRName)
+	assert.Equal(t, createdCSRUID, saved.CSRUID)
+
+	created, err := client.CertificatesV1().CertificateSigningRequests().Get(t.Context(), name, metav1.GetOptions{})
+	require.NoError(t, err)
+	block, _ := pem.Decode(created.Spec.Request)
+	require.NotNil(t, block)
+	request, err := x509.ParseCertificateRequest(block.Bytes)
+	require.NoError(t, err)
+	assert.Equal(t, st.Identity, request.Subject.CommonName)
+	assert.Equal(t, []string{ByohCSROrg}, request.Subject.Organization)
+}
+
+func TestByohCSR_EnsureCSR_Resume(t *testing.T) {
+	t.Parallel()
+
+	approved := certv1.CertificateSigningRequestCondition{Type: certv1.CertificateApproved, Status: corev1.ConditionTrue}
+	denied := certv1.CertificateSigningRequestCondition{Type: certv1.CertificateDenied, Status: corev1.ConditionTrue}
+	failed := certv1.CertificateSigningRequestCondition{Type: certv1.CertificateFailed, Status: corev1.ConditionTrue}
+
+	testCases := []struct {
+		name string
+		// existing is the CSR the state names; nil means it does not exist.
+		existing *certv1.CertificateSigningRequest
+		// stateUID is the CSR UID recorded in the state.
+		stateUID  string
+		wantReuse bool
+	}{
+		{
+			name: "issued CSR is reused",
+			existing: &certv1.CertificateSigningRequest{
+				Status: certv1.CertificateSigningRequestStatus{
+					Conditions:  []certv1.CertificateSigningRequestCondition{approved},
+					Certificate: []byte("certificate"),
+				},
+			},
+			stateUID:  existingCSRUID,
+			wantReuse: true,
+		},
+		{
+			name:      "pending CSR is reused",
+			existing:  &certv1.CertificateSigningRequest{},
+			stateUID:  existingCSRUID,
+			wantReuse: true,
+		},
+		{
+			name:      "CSR created but UID not yet recorded is reused",
+			existing:  &certv1.CertificateSigningRequest{},
+			stateUID:  "",
+			wantReuse: true,
+		},
+		{
+			name:      "CSR not found gets a new CSR",
+			existing:  nil,
+			stateUID:  existingCSRUID,
+			wantReuse: false,
+		},
+		{
+			name: "denied CSR gets a new CSR",
+			existing: &certv1.CertificateSigningRequest{
+				Status: certv1.CertificateSigningRequestStatus{
+					Conditions: []certv1.CertificateSigningRequestCondition{denied},
+				},
+			},
+			stateUID:  existingCSRUID,
+			wantReuse: false,
+		},
+		{
+			name: "failed CSR gets a new CSR",
+			existing: &certv1.CertificateSigningRequest{
+				Status: certv1.CertificateSigningRequestStatus{
+					Conditions: []certv1.CertificateSigningRequestCondition{failed},
+				},
+			},
+			stateUID:  existingCSRUID,
+			wantReuse: false,
+		},
+		{
+			name:      "CSR with a different UID gets a new CSR",
+			existing:  &certv1.CertificateSigningRequest{},
+			stateUID:  "some-other-uid",
+			wantReuse: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			var objects []runtime.Object
+			if tc.existing != nil {
+				tc.existing.Name = oldCSRName
+				tc.existing.UID = existingCSRUID
+				objects = append(objects, tc.existing)
+			}
+			bcsr, client := newTestByohCSR(t, dir, objects...)
+
+			seeded := &state{
+				Version:          stateVersion,
+				Phase:            phasePending,
+				BootstrapTokenID: testTokenID,
+				Identity:         oldIdentity,
+				CSRName:          oldCSRName,
+				CSRUID:           tc.stateUID,
+			}
+			require.NoError(t, seeded.save(dir))
+			keyData, _, err := keyutil.LoadOrGenerateKeyFile(filepath.Join(dir, PrivateKeyFileName))
+			require.NoError(t, err)
+			privateKey, err := keyutil.ParsePrivateKeyPEM(keyData)
+			require.NoError(t, err)
+
+			st, keyOnResume, resumed, err := bcsr.loadOrCreateState(dir, testTenant, testHostName, testTokenID, "")
+			require.NoError(t, err)
+			require.True(t, resumed)
+			assert.Equal(t, keyData, keyOnResume)
+
+			name, uid, err := bcsr.ensureCSR(t.Context(), dir, st, testTenant, testHostName, privateKey, resumed, false)
+			require.NoError(t, err)
+
+			list, err := client.CertificatesV1().CertificateSigningRequests().List(t.Context(), metav1.ListOptions{})
+			require.NoError(t, err)
+			saved := readState(t, dir)
+
+			// The identity and the key are kept either way.
+			assert.Equal(t, seeded.Identity, saved.Identity)
+			assert.Equal(t, name, saved.CSRName)
+			assert.Equal(t, string(uid), saved.CSRUID)
+
+			if tc.wantReuse {
+				assert.Equal(t, oldCSRName, name)
+				assert.Equal(t, existingCSRUID, string(uid))
+				assert.Len(t, list.Items, 1)
+				return
+			}
+
+			assert.NotEqual(t, oldCSRName, name)
+			assert.True(t, strings.HasPrefix(name, "byoh-csr-"+testTenant+"-"+testHostName+"-"), name)
+			assert.Equal(t, createdCSRUID, string(uid))
+			created, err := client.CertificatesV1().CertificateSigningRequests().Get(t.Context(), name, metav1.GetOptions{})
+			require.NoError(t, err)
+			assert.Equal(t, createdCSRUID, string(created.UID))
+		})
+	}
+}
+
+func TestByohCSR_NewOnboardingGetsNewIdentity(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	first, _ := newTestByohCSR(t, dir)
+	firstState, _, _, err := first.loadOrCreateState(dir, testTenant, testHostName, testTokenID, "")
+	require.NoError(t, err)
+
+	// The same host onboards again with a new bootstrap token.
+	secondState, _, resumed, err := first.loadOrCreateState(dir, testTenant, testHostName, "uvwxyz", "")
+	require.NoError(t, err)
+
+	assert.False(t, resumed)
+	assert.NotEqual(t, firstState.Identity, secondState.Identity)
+	assert.NotEqual(t, firstState.CSRName, secondState.CSRName)
+	assert.Equal(t, "uvwxyz", readState(t, dir).BootstrapTokenID)
+}
+
+func TestByohCSR_LoadOrCreateState_ExistingIdentity(t *testing.T) {
+	t.Parallel()
+
+	const existing = "byoh:host:" + testTenant + ":" + testHostName + "-kept2"
+
+	t.Run("fresh state uses the existing identity", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		bcsr, _ := newTestByohCSR(t, dir)
+
+		st, _, resumed, err := bcsr.loadOrCreateState(dir, testTenant, testHostName, testTokenID, existing)
+		require.NoError(t, err)
+
+		assert.False(t, resumed)
+		assert.Equal(t, existing, st.Identity)
+		assert.Equal(t, existing, readState(t, dir).Identity)
 	})
-	Context("When GetBYOHConfigPath is called", func() {
-		homePath := os.Getenv("HOME")
-		BeforeEach(func() {
-			registration.ConfigPath = ""
-		})
-		AfterEach(func() {
-			os.Setenv("HOME", homePath)
-		})
-		It("should return ConfigPath if set", func() {
-			registration.ConfigPath = "/tmp/config"
-			actualPath := registration.GetBYOHConfigPath()
-			Expect(actualPath).To(Equal(registration.ConfigPath))
-		})
-		It("should return default path if homedir is not set", func() {
-			os.Setenv("HOME", "")
-			actualPath := registration.GetBYOHConfigPath()
-			Expect(actualPath).To(Equal(".byoh/config"))
-		})
-		It("should return path under user home dir if ConfigPath is not set", func() {
-			homeDir, err := os.UserHomeDir()
-			Expect(err).ShouldNot(HaveOccurred())
-			expectedPath := filepath.Join(homeDir, registration.DefaultConfigPath)
-			actualPath := registration.GetBYOHConfigPath()
-			Expect(actualPath).To(Equal(expectedPath))
-		})
+
+	t.Run("resumed state keeps its own identity", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		bcsr, _ := newTestByohCSR(t, dir)
+		seeded := &state{Version: stateVersion, Phase: phasePending, BootstrapTokenID: testTokenID, Identity: oldIdentity, CSRName: oldCSRName}
+		require.NoError(t, seeded.save(dir))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, PrivateKeyFileName), []byte("old-key"), 0o600))
+
+		st, _, resumed, err := bcsr.loadOrCreateState(dir, testTenant, testHostName, testTokenID, existing)
+		require.NoError(t, err)
+
+		assert.True(t, resumed)
+		assert.Equal(t, oldIdentity, st.Identity)
 	})
-})
+}
+
+func TestByohCSR_ReusableCSR_NoCSRName(t *testing.T) {
+	t.Parallel()
+
+	bcsr, client := newTestByohCSR(t, t.TempDir())
+
+	uid, reusable, err := bcsr.reusableCSR(t.Context(), &state{Identity: oldIdentity})
+	require.NoError(t, err)
+
+	assert.False(t, reusable)
+	assert.Empty(t, uid)
+	assert.Empty(t, client.Actions(), "a state without a CSR name makes no API call")
+}
+
+func TestByohCSR_EnsureCSR_RenewsAfterIssued(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	// The old CSR still exists and looks reusable, so only the issued phase
+	// makes the agent skip it.
+	oldCSR := &certv1.CertificateSigningRequest{
+		ObjectMeta: metav1.ObjectMeta{Name: oldCSRName, UID: existingCSRUID},
+	}
+	bcsr, client := newTestByohCSR(t, dir, oldCSR)
+
+	seeded := &state{
+		Version:          stateVersion,
+		Phase:            phaseIssued,
+		BootstrapTokenID: testTokenID,
+		Identity:         oldIdentity,
+		CSRName:          oldCSRName,
+		CSRUID:           existingCSRUID,
+	}
+	require.NoError(t, seeded.save(dir))
+	keyData, _, err := keyutil.LoadOrGenerateKeyFile(filepath.Join(dir, PrivateKeyFileName))
+	require.NoError(t, err)
+	privateKey, err := keyutil.ParsePrivateKeyPEM(keyData)
+	require.NoError(t, err)
+
+	st, _, resumed, err := bcsr.loadOrCreateState(dir, testTenant, testHostName, testTokenID, "")
+	require.NoError(t, err)
+	require.True(t, resumed)
+	require.Equal(t, phaseIssued, st.Phase)
+
+	name, uid, err := bcsr.ensureCSR(t.Context(), dir, st, testTenant, testHostName, privateKey, resumed, false)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, oldCSRName, name)
+	assert.True(t, strings.HasPrefix(name, "byoh-csr-"+testTenant+"-"+testHostName+"-"), name)
+	assert.Equal(t, createdCSRUID, string(uid))
+
+	saved := readState(t, dir)
+	assert.Equal(t, phasePending, saved.Phase)
+	assert.Equal(t, name, saved.CSRName)
+	assert.Equal(t, createdCSRUID, saved.CSRUID)
+	assert.Equal(t, oldIdentity, saved.Identity)
+
+	list, err := client.CertificatesV1().CertificateSigningRequests().List(t.Context(), metav1.ListOptions{})
+	require.NoError(t, err)
+	assert.Len(t, list.Items, 2, "the old CSR is left alone and a new one is created")
+}
+
+func TestByohCSR_EnsureCSR_Renewal(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name      string
+		phase     phase
+		renewal   bool
+		wantReuse bool
+	}{
+		{
+			name:      "renewal with a pending state gets a new CSR",
+			phase:     phasePending,
+			renewal:   true,
+			wantReuse: false,
+		},
+		{
+			name:      "first onboarding with a pending state reuses the CSR",
+			phase:     phasePending,
+			renewal:   false,
+			wantReuse: true,
+		},
+		{
+			name:      "renewal with an issued state gets a new CSR",
+			phase:     phaseIssued,
+			renewal:   true,
+			wantReuse: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			// The old CSR exists and looks reusable, so only the renewal or the
+			// issued phase makes the agent skip it.
+			oldCSR := &certv1.CertificateSigningRequest{
+				ObjectMeta: metav1.ObjectMeta{Name: oldCSRName, UID: existingCSRUID},
+			}
+			bcsr, client := newTestByohCSR(t, dir, oldCSR)
+
+			seeded := &state{
+				Version:          stateVersion,
+				Phase:            tc.phase,
+				BootstrapTokenID: testTokenID,
+				Identity:         oldIdentity,
+				CSRName:          oldCSRName,
+				CSRUID:           existingCSRUID,
+			}
+			require.NoError(t, seeded.save(dir))
+			keyData, _, err := keyutil.LoadOrGenerateKeyFile(filepath.Join(dir, PrivateKeyFileName))
+			require.NoError(t, err)
+			privateKey, err := keyutil.ParsePrivateKeyPEM(keyData)
+			require.NoError(t, err)
+
+			st, _, resumed, err := bcsr.loadOrCreateState(dir, testTenant, testHostName, testTokenID, "")
+			require.NoError(t, err)
+			require.True(t, resumed)
+
+			name, uid, err := bcsr.ensureCSR(t.Context(), dir, st, testTenant, testHostName, privateKey, resumed, tc.renewal)
+			require.NoError(t, err)
+
+			saved := readState(t, dir)
+			list, err := client.CertificatesV1().CertificateSigningRequests().List(t.Context(), metav1.ListOptions{})
+			require.NoError(t, err)
+			assert.Equal(t, oldIdentity, saved.Identity)
+			assert.Equal(t, name, saved.CSRName)
+			assert.Equal(t, string(uid), saved.CSRUID)
+			assert.Equal(t, phasePending, saved.Phase)
+
+			if tc.wantReuse {
+				assert.Equal(t, oldCSRName, name)
+				assert.Equal(t, existingCSRUID, string(uid))
+				assert.Len(t, list.Items, 1)
+				return
+			}
+
+			assert.NotEqual(t, oldCSRName, name)
+			assert.True(t, strings.HasPrefix(name, "byoh-csr-"+testTenant+"-"+testHostName+"-"), name)
+			assert.Equal(t, createdCSRUID, string(uid))
+			assert.Len(t, list.Items, 2, "the old CSR is left alone and a new one is created")
+		})
+	}
+}
