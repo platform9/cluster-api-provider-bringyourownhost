@@ -29,9 +29,9 @@ import (
 const (
 	testByoHostKind  = "ByoHost"
 	testAPIVersion   = "infrastructure.cluster.x-k8s.io/v1beta1"
-	defaultHostName  = "host1"
-	byohHostOneUser  = "byoh:host:host1:x7k2p"
-	byohHostTwoUser  = "byoh:host:host2:x7k2p"
+	defaultHostName  = "host1-x7k2p"
+	byohHostOneUser  = "byoh:host:default:host1-x7k2p"
+	byohHostTwoUser  = "byoh:host:default:host2-x7k2p"
 	unauthorizedUser = "unauthorized-user"
 )
 
@@ -172,7 +172,7 @@ func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 	// request broke.
 	notAnIdentityMsg := func(userName string) string {
 		return fmt.Sprintf("%s is not a valid agent username: identity %q does not start with %q",
-			userName, userName, hostIdentityPrefix)
+			userName, userName, HostIdentityPrefix)
 	}
 
 	testCases := []struct {
@@ -181,6 +181,7 @@ func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 		userName  string
 		hostName  string
 		identity  string
+		namespace string // namespace of the admission request, testNamespace when empty
 		wantAllow bool
 		wantMsg   string
 	}{
@@ -330,14 +331,81 @@ func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 			wantMsg:   byohHostTwoUser + " cannot create/update resource " + defaultHostName,
 		},
 		{
-			// Host names are compared whole, so "host12" is not "host1".
-			name:      "host name that only contains the encoded host is denied",
+			// Names are compared whole, so "host1-x7k2p0" is not "host1-x7k2p".
+			name:      "name that only starts with the encoded name is denied",
 			operation: admissionv1.Create,
 			userName:  byohHostOneUser,
-			hostName:  "host12",
+			hostName:  "host1-x7k2p0",
 			identity:  byohHostOneUser,
 			wantAllow: false,
-			wantMsg:   byohHostOneUser + " cannot create/update resource host12",
+			wantMsg:   byohHostOneUser + " cannot create/update resource host1-x7k2p0",
+		},
+		{
+			name:      "name lacking the suffix is denied",
+			operation: admissionv1.Create,
+			userName:  byohHostOneUser,
+			hostName:  "host1",
+			identity:  byohHostOneUser,
+			wantAllow: false,
+			wantMsg:   byohHostOneUser + " cannot create/update resource host1",
+		},
+		{
+			name:      "worker-1 certificate acting on worker-10 is denied",
+			operation: admissionv1.Update,
+			userName:  "byoh:host:default:worker-1-abcde",
+			hostName:  "worker-10-abcde",
+			wantAllow: false,
+			wantMsg:   "byoh:host:default:worker-1-abcde cannot create/update resource worker-10-abcde",
+		},
+		{
+			name:      "worker-1 certificate acting on worker-1-zzzzz is denied",
+			operation: admissionv1.Update,
+			userName:  "byoh:host:default:worker-1-abcde",
+			hostName:  "worker-1-zzzzz",
+			wantAllow: false,
+			wantMsg:   "byoh:host:default:worker-1-abcde cannot create/update resource worker-1-zzzzz",
+		},
+		{
+			name:      "hostname that ends like a suffix is split from the right and allowed",
+			operation: admissionv1.Update,
+			userName:  "byoh:host:default:web-abcde-xyzwq",
+			hostName:  "web-abcde-xyzwq",
+			wantAllow: true,
+		},
+		{
+			name:      "tenant with hyphens is allowed in its own namespace",
+			operation: admissionv1.Update,
+			userName:  "byoh:host:a-b-c:host1-x7k2p",
+			hostName:  defaultHostName,
+			namespace: "a-b-c",
+			wantAllow: true,
+		},
+		{
+			// The tenant is compared with the namespace of the request, not
+			// the namespace in the object body.
+			name:      "same host name in a different tenant is denied",
+			operation: admissionv1.Update,
+			userName:  "byoh:host:other:host1-x7k2p",
+			hostName:  defaultHostName,
+			wantAllow: false,
+			wantMsg:   "byoh:host:other:host1-x7k2p cannot create/update resource " + defaultHostName,
+		},
+		{
+			name:      "legacy host identity without a tenant is denied",
+			operation: admissionv1.Update,
+			userName:  "byoh:host:host1:x7k2p",
+			hostName:  defaultHostName,
+			wantAllow: false,
+			wantMsg:   "byoh:host:host1:x7k2p is not a valid agent username: identity \"byoh:host:host1:x7k2p\" has a name \"x7k2p\" too short to end in -<suffix>",
+		},
+		{
+			// A host certificate must never reach the email bypass.
+			name:      "host identity with an email-looking tail is not allowed through the email bypass",
+			operation: admissionv1.Update,
+			userName:  "byoh:host:user@example.com",
+			hostName:  defaultHostName,
+			wantAllow: false,
+			wantMsg:   "byoh:host:user@example.com is not a valid agent username: identity \"byoh:host:user@example.com\" is not of the form byoh:host:<tenant>:<hostName>-<suffix>",
 		},
 	}
 
@@ -347,6 +415,11 @@ func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 
 			v := newFakeByoHostValidator(t, nil)
 
+			namespace := tc.namespace
+			if namespace == "" {
+				namespace = testNamespace
+			}
+
 			byoHost := &ByoHost{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       testByoHostKind,
@@ -354,7 +427,7 @@ func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      tc.hostName,
-					Namespace: testNamespace,
+					Namespace: namespace,
 				},
 				Spec: ByoHostSpec{
 					Identity: tc.identity,
@@ -366,6 +439,7 @@ func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 			req := admission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Operation: tc.operation,
+					Namespace: namespace,
 					UserInfo:  v1.UserInfo{Username: tc.userName},
 					Object: runtime.RawExtension{
 						Raw:    byoHostRaw,
@@ -454,7 +528,7 @@ func TestByoHostIdentityStamper_Handle(t *testing.T) {
 			wantOp:        "remove",
 		},
 		{
-			name:          "create from a four-segment host identity is stamped",
+			name:          "create from a host identity is stamped",
 			operation:     admissionv1.Create,
 			userName:      byohHostOneUser,
 			existingIdent: "",
@@ -463,21 +537,20 @@ func TestByoHostIdentityStamper_Handle(t *testing.T) {
 			wantOp:        "add",
 		},
 		{
-			name:          "create from a three-segment host identity is stamped",
+			name:          "create from a legacy host identity without a tenant is not stamped",
 			operation:     admissionv1.Create,
 			userName:      "byoh:host:host1",
 			existingIdent: "",
 			wantAllow:     true,
-			wantIdentity:  "byoh:host:host1",
-			wantOp:        "add",
+			wantNoPatches: true,
 		},
 		{
 			name:          "create replaces the old suffix of the same host with the requester's new suffix",
 			operation:     admissionv1.Create,
-			userName:      "byoh:host:host1:new02",
-			existingIdent: "byoh:host:host1:old01",
+			userName:      "byoh:host:default:host1-new02",
+			existingIdent: "byoh:host:default:host1-old01",
 			wantAllow:     true,
-			wantIdentity:  "byoh:host:host1:new02",
+			wantIdentity:  "byoh:host:default:host1-new02",
 			wantOp:        "replace",
 		},
 	}
@@ -531,77 +604,108 @@ func TestByoHostIdentityStamper_Handle(t *testing.T) {
 	}
 }
 
-func TestHostNameFromIdentity(t *testing.T) {
+func TestByoHostValidator_handleDelete_hostCertificate(t *testing.T) {
 	testCases := []struct {
-		name     string
-		identity string
-		want     string
-		wantErr  string
+		name      string
+		userName  string
+		namespace string
+		objName   string
+		wantAllow bool
+		wantMsg   string
 	}{
 		{
-			name:     "valid identity",
-			identity: "byoh:host:example-worker-1:x7k2p",
-			want:     "example-worker-1",
+			name:      "certificate deleting its own host is allowed",
+			userName:  byohHostOneUser,
+			namespace: testNamespace,
+			objName:   defaultHostName,
+			wantAllow: true,
 		},
 		{
-			name:     "identity without the prefix is rejected",
-			identity: "someone@example.com",
-			wantErr:  "does not start with",
+			name:      "certificate for another host is denied",
+			userName:  byohHostTwoUser,
+			namespace: testNamespace,
+			objName:   defaultHostName,
+			wantAllow: false,
+			wantMsg:   byohHostTwoUser + " cannot delete resource " + defaultHostName,
 		},
 		{
-			name:     "identity without suffix is allowed",
-			identity: "byoh:host:example-worker-1",
-			want:     "example-worker-1",
+			name:      "certificate for another tenant is denied",
+			userName:  "byoh:host:other:host1-x7k2p",
+			namespace: testNamespace,
+			objName:   defaultHostName,
+			wantAllow: false,
+			wantMsg:   "byoh:host:other:host1-x7k2p cannot delete resource " + defaultHostName,
 		},
 		{
-			name:     "identity with extra segments is rejected",
-			identity: "byoh:host:example-worker-1:x7k2p:extra",
-			wantErr:  "is not of the form",
+			name:      "worker-1 certificate deleting worker-10 is denied",
+			userName:  "byoh:host:default:worker-1-abcde",
+			namespace: testNamespace,
+			objName:   "worker-10-abcde",
+			wantAllow: false,
+			wantMsg:   "byoh:host:default:worker-1-abcde cannot delete resource worker-10-abcde",
 		},
 		{
-			name:     "empty host name is rejected",
-			identity: "byoh:host::x7k2p",
-			wantErr:  "empty host name",
+			name:      "worker-1 certificate deleting worker-1-zzzzz is denied",
+			userName:  "byoh:host:default:worker-1-abcde",
+			namespace: testNamespace,
+			objName:   "worker-1-zzzzz",
+			wantAllow: false,
+			wantMsg:   "byoh:host:default:worker-1-abcde cannot delete resource worker-1-zzzzz",
 		},
 		{
-			name:     "empty host name without suffix is rejected",
-			identity: "byoh:host:",
-			wantErr:  "empty host name",
+			name:      "malformed host certificate is denied",
+			userName:  "byoh:host:default:host1",
+			namespace: testNamespace,
+			objName:   defaultHostName,
+			wantAllow: false,
+			wantMsg:   "byoh:host:default:host1 is not a valid agent username: identity \"byoh:host:default:host1\" has a name \"host1\" too short to end in -<suffix>",
 		},
 		{
-			name:     "identity with only two segments is rejected",
-			identity: "byoh:host",
-			wantErr:  "does not start with",
+			name:      "caller that is not a host certificate is unchanged",
+			userName:  "random-user",
+			namespace: testNamespace,
+			objName:   defaultHostName,
+			wantAllow: true,
 		},
 		{
-			name:     "identity with six segments is rejected",
-			identity: "byoh:host:example-worker-1:x7k2p:extra:more",
-			wantErr:  "is not of the form",
-		},
-		{
-			name:     "empty suffix is rejected",
-			identity: "byoh:host:example-worker-1:",
-			wantErr:  "empty suffix",
-		},
-		{
-			name:     "hostname has another host as substring (worker-1 vs worker-12)",
-			identity: "byoh:host:example-worker-12:x7k2p",
-			want:     "example-worker-12",
+			name:      "manager service account is unchanged",
+			userName:  byohSystemManagerServiceAccount,
+			namespace: testNamespace,
+			objName:   defaultHostName,
+			wantAllow: true,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := HostNameFromIdentity(tc.identity)
+			v := newFakeByoHostValidator(t, nil)
 
-			if tc.wantErr != "" {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tc.wantErr)
-				return
+			byoHost := &ByoHost{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       testByoHostKind,
+					APIVersion: testAPIVersion,
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      tc.objName,
+					Namespace: tc.namespace,
+				},
+			}
+			byoHostRaw, err := json.Marshal(byoHost)
+			require.NoError(t, err)
+
+			req := admission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Operation: admissionv1.Delete,
+					Namespace: tc.namespace,
+					UserInfo:  v1.UserInfo{Username: tc.userName},
+					OldObject: runtime.RawExtension{Raw: byoHostRaw},
+				},
 			}
 
-			require.NoError(t, err)
-			assert.Equal(t, tc.want, got)
+			resp := v.Handle(t.Context(), req)
+
+			assert.Equal(t, tc.wantAllow, resp.Allowed)
+			assert.Equal(t, tc.wantMsg, resp.Result.Message)
 		})
 	}
 }

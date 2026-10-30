@@ -144,11 +144,12 @@ spec:
                 identity:
                   description: |-
                     Identity is the certificate identity of this host, in the form
-                    byoh:host:<hostName>:<suffix>. The admission webhook sets it from the
-                    authenticated requester when the host is created, never from the request
-                    body. It does not change for the life of the host. Renewal is authorized
-                    against it, so a certificate with any other identity cannot renew even
-                    while it is still cryptographically valid.
+                    byoh:host:<tenant>:<hostName>-<suffix>. The tenant is the ByoHost's
+                    namespace. The admission webhook sets the identity from the authenticated
+                    requester when the host is created, never from the request body. It does
+                    not change for the life of the host. Renewal is authorized against it, so
+                    a certificate with any other identity cannot renew even while it is still
+                    cryptographically valid.
                   type: string
                 installationSecret:
                   description: |-
@@ -242,6 +243,9 @@ spec:
                   type: object
                   x-kubernetes-map-type: atomic
               type: object
+              x-kubernetes-validations:
+                - message: identity is immutable
+                  rule: has(self.identity) == has(oldSelf.identity) && (!has(self.identity) || self.identity == oldSelf.identity)
             status:
               description: ByoHostStatus defines the observed state of ByoHost
               properties:
@@ -307,6 +311,11 @@ spec:
                   properties:
                     architecture:
                       description: The Architecture reported by the host.
+                      type: string
+                    hostName:
+                      description: |-
+                        HostName is the normalized host name, written by the agent. The
+                        Kubernetes Node is named this.
                       type: string
                     osimage:
                       description: OS Image reported by the host.
