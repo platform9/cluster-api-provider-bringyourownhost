@@ -36,6 +36,7 @@ spec:
             cgroup-driver: systemd
             eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
             resolv-conf: /etc/kubernetes/resolv.conf
+          name: '{{ .HostName }}'
       preKubeadmCommands:
       - |
         cat <<'EOF' > /etc/kubernetes/resolv.conf
@@ -178,6 +179,7 @@ spec:
           cgroup-driver: systemd
           eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
           resolv-conf: /etc/kubernetes/resolv.conf
+        name: '{{ .HostName }}'
     joinConfiguration:
       nodeRegistration:
         criSocket: /var/run/containerd/containerd.sock
@@ -190,6 +192,7 @@ spec:
           cgroup-driver: systemd
           eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
           resolv-conf: /etc/kubernetes/resolv.conf
+        name: '{{ .HostName }}'
     postKubeadmCommands:
     - '[[ -s /etc/kubernetes/super-admin.conf ]] || { rm -f /etc/kubernetes/super-admin.conf
       && kubeadm init phase kubeconfig super-admin; }'
