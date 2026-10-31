@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
 )
 
 const (
@@ -186,15 +186,16 @@ func (s *State) markIssued(dir string) error {
 	return s.save(dir)
 }
 
-// matches reports whether the identity in st is for this tenant and host
-// name, so a changed --namespace or hostname never reuses an old identity.
-func (s *State) matches(tenant, hostName string) error {
-	stTenant, stHostName, _, err := infrastructurev1beta1.ParseHostIdentity(s.Identity)
+// matches reports whether the identity in st is for this tenant namespace and
+// normalized host name, so a changed --namespace or hostname never reuses an
+// old identity.
+func (s *State) matches(tenantNamespace, normalizedHostName string) error {
+	stateIdentity, err := identity.Parse(s.Identity)
 	if err != nil {
 		return fmt.Errorf("state has an unusable identity: %w", err)
 	}
-	if stTenant != tenant || stHostName != hostName {
-		return fmt.Errorf("state belongs to tenant %q and host %q, not %q and %q", stTenant, stHostName, tenant, hostName)
+	if stateIdentity.TenantNamespace != tenantNamespace || stateIdentity.NormalizedHostName != normalizedHostName {
+		return fmt.Errorf("state belongs to tenant %q and host %q, not %q and %q", stateIdentity.TenantNamespace, stateIdentity.NormalizedHostName, tenantNamespace, normalizedHostName)
 	}
 	return nil
 }

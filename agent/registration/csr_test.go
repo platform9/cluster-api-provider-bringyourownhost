@@ -27,18 +27,28 @@ import (
 	clienttesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/util/keyutil"
 
-	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
 )
 
 const (
-	testTenant     = "example-tenant"
-	testHostName   = "example-worker-1"
-	testTokenID    = "abcdef"
-	testToken      = testTokenID + ".0123456789abcdef"
-	createdCSRUID  = "created-uid"
-	existingCSRUID = "existing-uid"
-	oldIdentity    = "byoh:host:" + testTenant + ":" + testHostName + "-old00"
-	oldCSRName     = "byoh-csr-" + testTenant + "-" + testHostName + "-old00"
+	testTenantNamespace    = "example-tenant"
+	testNormalizedHostName = "example-worker-1"
+	testTokenID            = "abcdef"
+	testToken              = testTokenID + ".0123456789abcdef"
+	createdCSRUID          = "created-uid"
+	existingCSRUID         = "existing-uid"
+	oldCSRName             = "byoh-csr-" + testTenantNamespace + "-" + testNormalizedHostName + "-old00"
+)
+
+var (
+	// oldHostIdentity is the identity of the onboarding that the seeded state
+	// files belong to.
+	oldHostIdentity = identity.HostIdentity{
+		TenantNamespace:    testTenantNamespace,
+		NormalizedHostName: testNormalizedHostName,
+		Suffix:             "old00",
+	}
+	oldIdentity = oldHostIdentity.String()
 )
 
 // newTestByohCSR returns a ByohCSR that keeps its state in dir and talks to a
@@ -118,64 +128,68 @@ func TestNewCSRName(t *testing.T) {
 	t.Parallel()
 
 	longHostName := strings.Repeat("a", 63)
-	wantPrefix := "byoh-csr-" + testTenant + "-" + testHostName + "-"
+	wantPrefix := "byoh-csr-" + testTenantNamespace + "-" + testNormalizedHostName + "-"
 
-	first := newCSRName(testTenant, testHostName)
-	second := newCSRName(testTenant, testHostName)
+	first := newCSRName(testTenantNamespace, testNormalizedHostName)
+	second := newCSRName(testTenantNamespace, testNormalizedHostName)
 	assert.NotEqual(t, first, second, "every CSR gets a new random part")
 	assert.True(t, strings.HasPrefix(first, wantPrefix), first)
 	assert.Len(t, strings.TrimPrefix(first, wantPrefix), csrNameSuffixLength)
 
-	longName := newCSRName(testTenant, longHostName)
-	assert.True(t, strings.HasPrefix(longName, "byoh-csr-"+testTenant+"-"+longHostName+"-"), longName)
+	longName := newCSRName(testTenantNamespace, longHostName)
+	assert.True(t, strings.HasPrefix(longName, "byoh-csr-"+testTenantNamespace+"-"+longHostName+"-"), longName)
 	assert.Empty(t, validation.IsDNS1123Subdomain(longName))
 }
 
 func TestNewIdentity(t *testing.T) {
 	t.Parallel()
 
-	identity := newIdentity(testTenant, testHostName)
+	got := newIdentity(testTenantNamespace, testNormalizedHostName)
 
-	tenant, hostName, suffix, err := infrastructurev1beta1.ParseHostIdentity(identity)
+	parsed, err := identity.Parse(got)
 	require.NoError(t, err)
-	assert.Equal(t, testTenant, tenant)
-	assert.Equal(t, testHostName, hostName)
-	assert.Len(t, suffix, IdentitySuffixLength)
-	assert.Regexp(t, "^[bcdfghjklmnpqrstvwxz2456789]{5}$", suffix)
+	want := identity.HostIdentity{
+		TenantNamespace:    testTenantNamespace,
+		NormalizedHostName: testNormalizedHostName,
+		Suffix:             parsed.Suffix,
+	}
+	assert.Equal(t, want, parsed)
+	assert.Len(t, parsed.Suffix, identity.SuffixLength)
+	assert.Regexp(t, "^[bcdfghjklmnpqrstvwxz2456789]{5}$", parsed.Suffix)
 
-	assert.NotEqual(t, identity, newIdentity(testTenant, testHostName), "every onboarding gets a new suffix")
+	assert.NotEqual(t, got, newIdentity(testTenantNamespace, testNormalizedHostName), "every onboarding gets a new suffix")
 }
 
 func TestByohCSR_BootstrapKubeconfig_InvalidArguments(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
-		name      string
-		tenant    string
-		hostName  string
-		token     string
-		wantError string
+		name               string
+		tenantNamespace    string
+		normalizedHostName string
+		token              string
+		wantError          string
 	}{
 		{
-			name:      "empty host name",
-			tenant:    testTenant,
-			hostName:  "",
-			token:     testToken,
-			wantError: "hostname is not valid",
+			name:               "empty host name",
+			tenantNamespace:    testTenantNamespace,
+			normalizedHostName: "",
+			token:              testToken,
+			wantError:          "hostname is not valid",
 		},
 		{
-			name:      "empty tenant",
-			tenant:    "",
-			hostName:  testHostName,
-			token:     testToken,
-			wantError: "tenant is not valid",
+			name:               "empty tenant",
+			tenantNamespace:    "",
+			normalizedHostName: testNormalizedHostName,
+			token:              testToken,
+			wantError:          "tenant is not valid",
 		},
 		{
-			name:      "bootstrap kubeconfig without bearer token",
-			tenant:    testTenant,
-			hostName:  testHostName,
-			token:     "",
-			wantError: "bootstrap kubeconfig has no bearer token",
+			name:               "bootstrap kubeconfig without bearer token",
+			tenantNamespace:    testTenantNamespace,
+			normalizedHostName: testNormalizedHostName,
+			token:              "",
+			wantError:          "bootstrap kubeconfig has no bearer token",
 		},
 	}
 
@@ -186,7 +200,7 @@ func TestByohCSR_BootstrapKubeconfig_InvalidArguments(t *testing.T) {
 			bcsr, _ := newTestByohCSR(t, t.TempDir())
 			bcsr.bootstrapClientConfig = &restclient.Config{BearerToken: tc.token}
 
-			err := bcsr.BootstrapKubeconfig(t.Context(), tc.tenant, tc.hostName, "")
+			err := bcsr.BootstrapKubeconfig(t.Context(), tc.tenantNamespace, tc.normalizedHostName, "")
 
 			assert.EqualError(t, err, tc.wantError)
 		})
@@ -261,7 +275,9 @@ func TestByohCSR_LoadOrCreateState(t *testing.T) {
 			seed: func(t *testing.T, dir string) {
 				t.Helper()
 				other := oldState(testTokenID)
-				other.Identity = "byoh:host:other-tenant:" + testHostName + "-old00"
+				otherIdentity := oldHostIdentity
+				otherIdentity.TenantNamespace = "other-tenant"
+				other.Identity = otherIdentity.String()
 				require.NoError(t, other.save(dir))
 				require.NoError(t, os.WriteFile(filepath.Join(dir, PrivateKeyFileName), []byte(oldKey), 0o600))
 			},
@@ -272,7 +288,9 @@ func TestByohCSR_LoadOrCreateState(t *testing.T) {
 			seed: func(t *testing.T, dir string) {
 				t.Helper()
 				other := oldState(testTokenID)
-				other.Identity = "byoh:host:" + testTenant + ":other-host-old00"
+				otherIdentity := oldHostIdentity
+				otherIdentity.NormalizedHostName = "other-host"
+				other.Identity = otherIdentity.String()
 				require.NoError(t, other.save(dir))
 				require.NoError(t, os.WriteFile(filepath.Join(dir, PrivateKeyFileName), []byte(oldKey), 0o600))
 			},
@@ -305,7 +323,7 @@ func TestByohCSR_LoadOrCreateState(t *testing.T) {
 			tc.seed(t, dir)
 			bcsr, _ := newTestByohCSR(t, dir)
 
-			st, keyData, resumed, err := bcsr.loadOrCreateState(dir, testTenant, testHostName, testTokenID, "")
+			st, keyData, resumed, err := bcsr.loadOrCreateState(dir, testTenantNamespace, testNormalizedHostName, testTokenID, "")
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantResumed, resumed)
 			assert.Equal(t, testTokenID, st.BootstrapTokenID)
@@ -339,10 +357,14 @@ func TestByohCSR_LoadOrCreateState(t *testing.T) {
 			_, err = keyutil.ParsePrivateKeyPEM(keyData)
 			assert.NoError(t, err)
 
-			tenant, hostName, _, err := infrastructurev1beta1.ParseHostIdentity(st.Identity)
+			parsed, err := identity.Parse(st.Identity)
 			require.NoError(t, err)
-			assert.Equal(t, testTenant, tenant)
-			assert.Equal(t, testHostName, hostName)
+			want := identity.HostIdentity{
+				TenantNamespace:    testTenantNamespace,
+				NormalizedHostName: testNormalizedHostName,
+				Suffix:             parsed.Suffix,
+			}
+			assert.Equal(t, want, parsed)
 		})
 	}
 }
@@ -353,13 +375,13 @@ func TestByohCSR_EnsureCSR_Fresh(t *testing.T) {
 	dir := t.TempDir()
 	bcsr, client := newTestByohCSR(t, dir)
 
-	st, keyData, resumed, err := bcsr.loadOrCreateState(dir, testTenant, testHostName, testTokenID, "")
+	st, keyData, resumed, err := bcsr.loadOrCreateState(dir, testTenantNamespace, testNormalizedHostName, testTokenID, "")
 	require.NoError(t, err)
 	require.False(t, resumed)
 	privateKey, err := keyutil.ParsePrivateKeyPEM(keyData)
 	require.NoError(t, err)
 
-	name, uid, err := bcsr.ensureCSR(t.Context(), dir, st, testTenant, testHostName, privateKey, resumed, false)
+	name, uid, err := bcsr.ensureCSR(t.Context(), dir, st, testTenantNamespace, testNormalizedHostName, privateKey, resumed, false)
 	require.NoError(t, err)
 
 	assert.Equal(t, st.CSRName, name)
@@ -477,12 +499,12 @@ func TestByohCSR_EnsureCSR_Resume(t *testing.T) {
 			privateKey, err := keyutil.ParsePrivateKeyPEM(keyData)
 			require.NoError(t, err)
 
-			st, keyOnResume, resumed, err := bcsr.loadOrCreateState(dir, testTenant, testHostName, testTokenID, "")
+			st, keyOnResume, resumed, err := bcsr.loadOrCreateState(dir, testTenantNamespace, testNormalizedHostName, testTokenID, "")
 			require.NoError(t, err)
 			require.True(t, resumed)
 			assert.Equal(t, keyData, keyOnResume)
 
-			name, uid, err := bcsr.ensureCSR(t.Context(), dir, st, testTenant, testHostName, privateKey, resumed, false)
+			name, uid, err := bcsr.ensureCSR(t.Context(), dir, st, testTenantNamespace, testNormalizedHostName, privateKey, resumed, false)
 			require.NoError(t, err)
 
 			list, err := client.CertificatesV1().CertificateSigningRequests().List(t.Context(), metav1.ListOptions{})
@@ -502,7 +524,7 @@ func TestByohCSR_EnsureCSR_Resume(t *testing.T) {
 			}
 
 			assert.NotEqual(t, oldCSRName, name)
-			assert.True(t, strings.HasPrefix(name, "byoh-csr-"+testTenant+"-"+testHostName+"-"), name)
+			assert.True(t, strings.HasPrefix(name, "byoh-csr-"+testTenantNamespace+"-"+testNormalizedHostName+"-"), name)
 			assert.Equal(t, createdCSRUID, string(uid))
 			created, err := client.CertificatesV1().CertificateSigningRequests().Get(t.Context(), name, metav1.GetOptions{})
 			require.NoError(t, err)
@@ -516,11 +538,11 @@ func TestByohCSR_NewOnboardingGetsNewIdentity(t *testing.T) {
 
 	dir := t.TempDir()
 	first, _ := newTestByohCSR(t, dir)
-	firstState, _, _, err := first.loadOrCreateState(dir, testTenant, testHostName, testTokenID, "")
+	firstState, _, _, err := first.loadOrCreateState(dir, testTenantNamespace, testNormalizedHostName, testTokenID, "")
 	require.NoError(t, err)
 
 	// The same host onboards again with a new bootstrap token.
-	secondState, _, resumed, err := first.loadOrCreateState(dir, testTenant, testHostName, "uvwxyz", "")
+	secondState, _, resumed, err := first.loadOrCreateState(dir, testTenantNamespace, testNormalizedHostName, "uvwxyz", "")
 	require.NoError(t, err)
 
 	assert.False(t, resumed)
@@ -532,7 +554,11 @@ func TestByohCSR_NewOnboardingGetsNewIdentity(t *testing.T) {
 func TestByohCSR_LoadOrCreateState_ExistingIdentity(t *testing.T) {
 	t.Parallel()
 
-	const existing = "byoh:host:" + testTenant + ":" + testHostName + "-kept2"
+	existing := identity.HostIdentity{
+		TenantNamespace:    testTenantNamespace,
+		NormalizedHostName: testNormalizedHostName,
+		Suffix:             "kept2",
+	}.String()
 
 	t.Run("fresh state uses the existing identity", func(t *testing.T) {
 		t.Parallel()
@@ -540,7 +566,7 @@ func TestByohCSR_LoadOrCreateState_ExistingIdentity(t *testing.T) {
 		dir := t.TempDir()
 		bcsr, _ := newTestByohCSR(t, dir)
 
-		st, _, resumed, err := bcsr.loadOrCreateState(dir, testTenant, testHostName, testTokenID, existing)
+		st, _, resumed, err := bcsr.loadOrCreateState(dir, testTenantNamespace, testNormalizedHostName, testTokenID, existing)
 		require.NoError(t, err)
 
 		assert.False(t, resumed)
@@ -557,7 +583,7 @@ func TestByohCSR_LoadOrCreateState_ExistingIdentity(t *testing.T) {
 		require.NoError(t, seeded.save(dir))
 		require.NoError(t, os.WriteFile(filepath.Join(dir, PrivateKeyFileName), []byte("old-key"), 0o600))
 
-		st, _, resumed, err := bcsr.loadOrCreateState(dir, testTenant, testHostName, testTokenID, existing)
+		st, _, resumed, err := bcsr.loadOrCreateState(dir, testTenantNamespace, testNormalizedHostName, testTokenID, existing)
 		require.NoError(t, err)
 
 		assert.True(t, resumed)
@@ -603,16 +629,16 @@ func TestByohCSR_EnsureCSR_RenewsAfterIssued(t *testing.T) {
 	privateKey, err := keyutil.ParsePrivateKeyPEM(keyData)
 	require.NoError(t, err)
 
-	st, _, resumed, err := bcsr.loadOrCreateState(dir, testTenant, testHostName, testTokenID, "")
+	st, _, resumed, err := bcsr.loadOrCreateState(dir, testTenantNamespace, testNormalizedHostName, testTokenID, "")
 	require.NoError(t, err)
 	require.True(t, resumed)
 	require.Equal(t, PhaseIssued, st.Phase)
 
-	name, uid, err := bcsr.ensureCSR(t.Context(), dir, st, testTenant, testHostName, privateKey, resumed, false)
+	name, uid, err := bcsr.ensureCSR(t.Context(), dir, st, testTenantNamespace, testNormalizedHostName, privateKey, resumed, false)
 	require.NoError(t, err)
 
 	assert.NotEqual(t, oldCSRName, name)
-	assert.True(t, strings.HasPrefix(name, "byoh-csr-"+testTenant+"-"+testHostName+"-"), name)
+	assert.True(t, strings.HasPrefix(name, "byoh-csr-"+testTenantNamespace+"-"+testNormalizedHostName+"-"), name)
 	assert.Equal(t, createdCSRUID, string(uid))
 
 	saved := readState(t, dir)
@@ -681,11 +707,11 @@ func TestByohCSR_EnsureCSR_Renewal(t *testing.T) {
 			privateKey, err := keyutil.ParsePrivateKeyPEM(keyData)
 			require.NoError(t, err)
 
-			st, _, resumed, err := bcsr.loadOrCreateState(dir, testTenant, testHostName, testTokenID, "")
+			st, _, resumed, err := bcsr.loadOrCreateState(dir, testTenantNamespace, testNormalizedHostName, testTokenID, "")
 			require.NoError(t, err)
 			require.True(t, resumed)
 
-			name, uid, err := bcsr.ensureCSR(t.Context(), dir, st, testTenant, testHostName, privateKey, resumed, tc.renewal)
+			name, uid, err := bcsr.ensureCSR(t.Context(), dir, st, testTenantNamespace, testNormalizedHostName, privateKey, resumed, tc.renewal)
 			require.NoError(t, err)
 
 			saved := readState(t, dir)
@@ -704,7 +730,7 @@ func TestByohCSR_EnsureCSR_Renewal(t *testing.T) {
 			}
 
 			assert.NotEqual(t, oldCSRName, name)
-			assert.True(t, strings.HasPrefix(name, "byoh-csr-"+testTenant+"-"+testHostName+"-"), name)
+			assert.True(t, strings.HasPrefix(name, "byoh-csr-"+testTenantNamespace+"-"+testNormalizedHostName+"-"), name)
 			assert.Equal(t, createdCSRUID, string(uid))
 			assert.Len(t, list.Items, 2, "the old CSR is left alone and a new one is created")
 		})

@@ -15,6 +15,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
 )
 
 func TestState_SaveAndLoad(t *testing.T) {
@@ -268,6 +270,16 @@ func TestState_SaveIsAtomicUnderConcurrency(t *testing.T) {
 func TestState_Matches(t *testing.T) {
 	t.Parallel()
 
+	thisHost := identity.HostIdentity{
+		TenantNamespace:    testTenantNamespace,
+		NormalizedHostName: testNormalizedHostName,
+		Suffix:             "abc12",
+	}
+	anotherTenant := thisHost
+	anotherTenant.TenantNamespace = "other-tenant"
+	anotherHost := thisHost
+	anotherHost.NormalizedHostName = "other-host"
+
 	testCases := []struct {
 		name     string
 		identity string
@@ -275,17 +287,17 @@ func TestState_Matches(t *testing.T) {
 	}{
 		{
 			name:     "identity of this tenant and host",
-			identity: "byoh:host:" + testTenant + ":" + testHostName + "-abc12",
+			identity: thisHost.String(),
 			wantErr:  false,
 		},
 		{
 			name:     "identity of another tenant",
-			identity: "byoh:host:other-tenant:" + testHostName + "-abc12",
+			identity: anotherTenant.String(),
 			wantErr:  true,
 		},
 		{
 			name:     "identity of another host",
-			identity: "byoh:host:" + testTenant + ":other-host-abc12",
+			identity: anotherHost.String(),
 			wantErr:  true,
 		},
 		{
@@ -301,7 +313,7 @@ func TestState_Matches(t *testing.T) {
 
 			st := &State{Identity: tc.identity}
 
-			err := st.matches(testTenant, testHostName)
+			err := st.matches(testTenantNamespace, testNormalizedHostName)
 
 			if tc.wantErr {
 				assert.Error(t, err)

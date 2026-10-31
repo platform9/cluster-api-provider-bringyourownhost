@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
 	certv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -41,15 +41,12 @@ const (
 	// which is currently set to 1 year aligned with kubeadm defaults.
 	ExpirationSeconds = 86400 * 365
 	ByohCSROrg        = "byoh:hosts"
-	// ByohCSRNameFormat takes the tenant, the host name and a random part that
-	// is new for every CSR. The byoh-csr- prefix is what the approver filters on.
+	// ByohCSRNameFormat takes the tenant namespace, the normalized host name
+	// and a random part that is new for every CSR. The byoh-csr- prefix is what
+	// the approver filters on.
 	ByohCSRNameFormat = "byoh-csr-%s-%s-%s"
 	DefaultConfigPath = ".byoh/config"
 
-	// IdentitySuffixLength is the length of the random suffix at the end of a
-	// host identity. It must equal the suffix length that
-	// infrastructurev1beta1.ParseHostIdentity accepts.
-	IdentitySuffixLength = 5
 	// csrNameSuffixLength is the length of the random suffix at the end of a
 	// CSR name.
 	csrNameSuffixLength = 5
@@ -91,14 +88,14 @@ func NewByohCSR(bootstrapClientConfig *restclient.Config, logger logr.Logger, ex
 // and create a kubeconfig which will be used then by the host reconciler.
 // Progress is recorded next to the kubeconfig, so an interrupted onboarding
 // resumes instead of starting over. The identity in the certificate names the
-// tenant and the normalized hostName. A non-empty existingIdentity is used when
-// there is no state to resume, so renewing a certificate keeps the identity of
-// the host.
-func (bcsr *ByohCSR) BootstrapKubeconfig(ctx context.Context, tenant, hostName, existingIdentity string) error {
-	if hostName == "" {
+// tenant namespace and the normalized host name. A non-empty existingIdentity
+// is used when there is no state to resume, so renewing a certificate keeps
+// the identity of the host.
+func (bcsr *ByohCSR) BootstrapKubeconfig(ctx context.Context, tenantNamespace, normalizedHostName, existingIdentity string) error {
+	if normalizedHostName == "" {
 		return errors.New("hostname is not valid")
 	}
-	if tenant == "" {
+	if tenantNamespace == "" {
 		return errors.New("tenant is not valid")
 	}
 	tokenID, err := bootstrapTokenID(bcsr.bootstrapClientConfig)
@@ -106,7 +103,7 @@ func (bcsr *ByohCSR) BootstrapKubeconfig(ctx context.Context, tenant, hostName, 
 		return err
 	}
 	dir := filepath.Dir(bcsr.configPath)
-	st, keyData, resumed, err := bcsr.loadOrCreateState(dir, tenant, hostName, tokenID, existingIdentity)
+	st, keyData, resumed, err := bcsr.loadOrCreateState(dir, tenantNamespace, normalizedHostName, tokenID, existingIdentity)
 	if err != nil {
 		return err
 	}
@@ -120,7 +117,7 @@ func (bcsr *ByohCSR) BootstrapKubeconfig(ctx context.Context, tenant, hostName, 
 	// caller passes the identity from that certificate. First onboarding never
 	// has one.
 	renewal := existingIdentity != ""
-	reqName, reqUID, err := bcsr.ensureCSR(ctx, dir, st, tenant, hostName, privateKey, resumed, renewal)
+	reqName, reqUID, err := bcsr.ensureCSR(ctx, dir, st, tenantNamespace, normalizedHostName, privateKey, resumed, renewal)
 	if err != nil {
 		return err
 	}
@@ -156,15 +153,19 @@ func bootstrapTokenID(config *restclient.Config) (string, error) {
 }
 
 // newCSRName returns a CSR name that has not been used before.
-func newCSRName(tenant, hostName string) string {
-	return fmt.Sprintf(ByohCSRNameFormat, tenant, hostName, utilrand.String(csrNameSuffixLength))
+func newCSRName(tenantNamespace, normalizedHostName string) string {
+	return fmt.Sprintf(ByohCSRNameFormat, tenantNamespace, normalizedHostName, utilrand.String(csrNameSuffixLength))
 }
 
 // newIdentity returns the certificate common name for one onboarding. The
 // suffix is new for every onboarding, so every onboarding of a host gets its
 // own identity and its own ByoHost name.
-func newIdentity(tenant, hostName string) string {
-	return infrastructurev1beta1.FormatHostIdentity(tenant, hostName, utilrand.String(IdentitySuffixLength))
+func newIdentity(tenantNamespace, normalizedHostName string) string {
+	return identity.HostIdentity{
+		TenantNamespace:    tenantNamespace,
+		NormalizedHostName: normalizedHostName,
+		Suffix:             utilrand.String(identity.SuffixLength),
+	}.String()
 }
 
 // loadOrCreateState returns the state of the current onboarding and its
@@ -172,7 +173,7 @@ func newIdentity(tenant, hostName string) string {
 // trusted, is deleted together with its key and replaced by a fresh one that
 // uses existingIdentity, or a new identity when that is empty.
 // resumed is true when existing state was reused.
-func (bcsr *ByohCSR) loadOrCreateState(dir, tenant, hostName, tokenID, existingIdentity string) (_ *State, _ []byte, resumed bool, _ error) {
+func (bcsr *ByohCSR) loadOrCreateState(dir, tenantNamespace, normalizedHostName, tokenID, existingIdentity string) (_ *State, _ []byte, resumed bool, _ error) {
 	keyPath := filepath.Join(dir, PrivateKeyFileName)
 	var keyData []byte
 
@@ -181,7 +182,7 @@ func (bcsr *ByohCSR) loadOrCreateState(dir, tenant, hostName, tokenID, existingI
 		loadErr = fmt.Errorf("state belongs to bootstrap token %q, not %q", st.BootstrapTokenID, tokenID)
 	}
 	if loadErr == nil {
-		loadErr = st.matches(tenant, hostName)
+		loadErr = st.matches(tenantNamespace, normalizedHostName)
 	}
 	if loadErr == nil {
 		keyData, loadErr = os.ReadFile(keyPath)
@@ -201,16 +202,16 @@ func (bcsr *ByohCSR) loadOrCreateState(dir, tenant, hostName, tokenID, existingI
 	if err != nil {
 		return nil, nil, false, fmt.Errorf("generate private key %q: %w", keyPath, err)
 	}
-	identity := existingIdentity
-	if identity == "" {
-		identity = newIdentity(tenant, hostName)
+	hostIdentity := existingIdentity
+	if hostIdentity == "" {
+		hostIdentity = newIdentity(tenantNamespace, normalizedHostName)
 	}
 	st = &State{
 		Version:          stateVersion,
 		BootstrapTokenID: tokenID,
-		Identity:         identity,
+		Identity:         hostIdentity,
 		Phase:            PhasePending,
-		CSRName:          newCSRName(tenant, hostName),
+		CSRName:          newCSRName(tenantNamespace, normalizedHostName),
 	}
 	if err := st.save(dir); err != nil {
 		return nil, nil, false, err
@@ -226,7 +227,7 @@ func (bcsr *ByohCSR) loadOrCreateState(dir, tenant, hostName, tokenID, existingI
 // phase pending, and reusing that CSR would return the old certificate. The
 // state is saved before a CSR is created, so a crash never leaves a CSR the
 // state does not name.
-func (bcsr *ByohCSR) ensureCSR(ctx context.Context, dir string, st *State, tenant, hostName string, privateKey any, resumed, renewal bool) (string, types.UID, error) {
+func (bcsr *ByohCSR) ensureCSR(ctx context.Context, dir string, st *State, tenantNamespace, normalizedHostName string, privateKey any, resumed, renewal bool) (string, types.UID, error) {
 	if resumed {
 		reusable := false
 		var uid types.UID
@@ -246,7 +247,7 @@ func (bcsr *ByohCSR) ensureCSR(ctx context.Context, dir string, st *State, tenan
 			}
 			return st.CSRName, uid, nil
 		}
-		st.CSRName = newCSRName(tenant, hostName)
+		st.CSRName = newCSRName(tenantNamespace, normalizedHostName)
 		st.Phase = PhasePending
 		st.CSRUID = ""
 		if err := st.save(dir); err != nil {

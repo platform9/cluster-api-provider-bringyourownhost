@@ -26,6 +26,7 @@ import (
 	"github.com/platform9/cluster-api-provider-bringyourownhost/agent/version"
 	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/common/hostname"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/test/builder"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/test/e2e"
 	certv1 "k8s.io/api/certificates/v1"
@@ -809,7 +810,7 @@ users:
 			var config *restclient.Config
 			config, err = registration.LoadRESTClientConfig(bootstrapKubeConfig)
 			Expect(err).NotTo(HaveOccurred())
-			err = certRotation(ctx, klogr.New(), "test-tenant", "test-host", "", config) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
+			err = certRotation(ctx, klogr.New(), rotationIdentity, config) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
 		})
 		It("should return if certificate needs rotation", func(ctx SpecContext) {
@@ -840,20 +841,27 @@ users:
 			var config *restclient.Config
 			config, err = registration.LoadRESTClientConfig(bootstrapKubeConfig)
 			Expect(err).NotTo(HaveOccurred())
-			err = certRotation(ctx, klogr.New(), "test-tenant", "test-host", "", config) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
+			err = certRotation(ctx, klogr.New(), rotationIdentity, config) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
 		})
 	})
 })
 
-// findByohCSR returns the CSR an agent in tenant created for hostName. The CSR
-// name ends in a random part, so it is found by its prefix.
-func findByohCSR(ctx context.Context, tenant, hostName string) (*certv1.CertificateSigningRequest, error) {
+// rotationIdentity is the identity the certRotation specs renew.
+var rotationIdentity = identity.HostIdentity{
+	TenantNamespace:    "test-tenant",
+	NormalizedHostName: "test-host",
+	Suffix:             "abc12",
+}
+
+// findByohCSR returns the CSR an agent in tenantNamespace created for hostName.
+// The CSR name ends in a random part, so it is found by its prefix.
+func findByohCSR(ctx context.Context, tenantNamespace, hostName string) (*certv1.CertificateSigningRequest, error) {
 	normalized, err := hostname.Normalize(hostName)
 	if err != nil {
 		return nil, err
 	}
-	prefix := fmt.Sprintf(registration.ByohCSRNameFormat, tenant, normalized, "")
+	prefix := fmt.Sprintf(registration.ByohCSRNameFormat, tenantNamespace, normalized, "")
 
 	list, err := clientSet.CertificatesV1().CertificateSigningRequests().List(ctx, metav1.ListOptions{})
 	if err != nil {

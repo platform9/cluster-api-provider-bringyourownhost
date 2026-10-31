@@ -24,6 +24,7 @@ import (
 	"github.com/platform9/cluster-api-provider-bringyourownhost/agent/version"
 	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/common/hostname"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/feature"
 	pflag "github.com/spf13/pflag"
 	certv1 "k8s.io/api/certificates/v1"
@@ -236,10 +237,10 @@ func setupHostReconciler(ctx context.Context, mgr ctrl.Manager, k8sClient client
 	return nil
 }
 
-// handleBootstrapFlow requests a client certificate for the host in tenant. A
-// non-empty existingIdentity keeps the identity of a host that renews its
-// certificate.
-func handleBootstrapFlow(ctx context.Context, logger logr.Logger, tenant, hostName, existingIdentity string) error {
+// handleBootstrapFlow requests a client certificate for the host in
+// tenantNamespace. A non-empty existingIdentity keeps the identity of a host
+// that renews its certificate.
+func handleBootstrapFlow(ctx context.Context, logger logr.Logger, tenantNamespace, normalizedHostName, existingIdentity string) error {
 	logger.Info("initiated bootstrap kubeconfig flow")
 	bootstrapClientConfig, err := registration.LoadRESTClientConfig(bootstrapKubeConfig)
 	if err != nil {
@@ -249,17 +250,17 @@ func handleBootstrapFlow(ctx context.Context, logger logr.Logger, tenant, hostNa
 	if err != nil {
 		return fmt.Errorf("ByohCSR intialization failed: %v", err)
 	}
-	err = byohCSR.BootstrapKubeconfig(ctx, tenant, hostName, existingIdentity)
+	err = byohCSR.BootstrapKubeconfig(ctx, tenantNamespace, normalizedHostName, existingIdentity)
 	if err != nil {
 		return fmt.Errorf("kubeconfig generation failed: %v", err)
 	}
 	return nil
 }
 
-func certificateRotation(ctx context.Context, logger logr.Logger, tenant, hostName, identity string, config *rest.Config) error {
+func certificateRotation(ctx context.Context, logger logr.Logger, hostIdentity identity.HostIdentity, config *rest.Config) error {
 	var pollDuration = 5 * time.Second
 	for {
-		if err := certRotation(ctx, logger, tenant, hostName, identity, config); err != nil {
+		if err := certRotation(ctx, logger, hostIdentity, config); err != nil {
 			return err
 		}
 		// Poll after every few seconds
@@ -267,7 +268,7 @@ func certificateRotation(ctx context.Context, logger logr.Logger, tenant, hostNa
 	}
 }
 
-func certRotation(ctx context.Context, logger logr.Logger, tenant, hostName, identity string, config *rest.Config) error {
+func certRotation(ctx context.Context, logger logr.Logger, hostIdentity identity.HostIdentity, config *rest.Config) error {
 	block, _ := pem.Decode(config.CertData)
 	if block == nil || block.Type != "CERTIFICATE" {
 		logger.Info("failed to decode PEM block containing certificate")
@@ -286,7 +287,7 @@ func certRotation(ctx context.Context, logger logr.Logger, tenant, hostName, ide
 	// https://github.com/kubernetes-sigs/cluster-api/blob/main/docs/proposals/20210222-kubelet-authentication.md#kubelet-authenticator-flow
 	if time.Now().After(cert.NotAfter.Add(totalTimeCert / -5)) {
 		logger.Info("certificate expiration time left is less than 20%, renewing")
-		if err = handleBootstrapFlow(ctx, logger, tenant, hostName, identity); err != nil {
+		if err = handleBootstrapFlow(ctx, logger, hostIdentity.TenantNamespace, hostIdentity.NormalizedHostName, hostIdentity.String()); err != nil {
 			logger.Error(err, "bootstrap flow failed")
 		}
 	} else {
@@ -340,9 +341,9 @@ func getClient(logger logr.Logger, config *rest.Config) client.Client {
 	return k8sClient
 }
 
-// normalizedHostName returns the host name of this machine in the form used in
-// the host identity, the ByoHost name and the Node name.
-func normalizedHostName() (string, error) {
+// localNormalizedHostName returns the host name of this machine in the form used
+// in the host identity, the ByoHost name and the Node name.
+func localNormalizedHostName() (string, error) {
 	osHostName, err := os.Hostname()
 	if err != nil {
 		return "", fmt.Errorf("determine hostname: %w", err)
@@ -371,7 +372,7 @@ func main() {
 	// here for both the reconciler registration and mgr.Start.
 	ctx := ctrl.SetupSignalHandler()
 
-	hostName, err := normalizedHostName()
+	normalizedHostName, err := localNormalizedHostName()
 	if err != nil {
 		logger.Error(err, "could not use the hostname of this machine")
 		return
@@ -381,7 +382,7 @@ func main() {
 	// Enable bootstrap flow if --bootstrap-kubeconfig is provided
 	// and config doesn't already exists in ~/.byoh/
 	if bootstrapKubeConfig != "" && errors.Is(err, os.ErrNotExist) {
-		if err = handleBootstrapFlow(ctx, logger, namespace, hostName, ""); err != nil {
+		if err = handleBootstrapFlow(ctx, logger, namespace, normalizedHostName, ""); err != nil {
 			logger.Error(err, "bootstrap flow failed")
 			os.Exit(1)
 		}
@@ -405,16 +406,9 @@ func main() {
 		return
 	}
 
-	// Start certificate rotation goroutine.
-	// This is behind a feature flag for now. Set 'CERTIFICATE_ROTATION=true' to enable it.
-	if os.Getenv("CERTIFICATE_ROTATION") == "true" {
-		go func() {
-			err = certificateRotation(ctx, logger, namespace, hostName, identity, config)
-			if err != nil {
-				logger.Error(err, "certificate rotation failed")
-				return
-			}
-		}()
+	if err = startCertificateRotation(ctx, logger, hostIdentity, config); err != nil {
+		logger.Error(err, "could not start certificate rotation")
+		os.Exit(1)
 	}
 
 	opts := &agentOptions{

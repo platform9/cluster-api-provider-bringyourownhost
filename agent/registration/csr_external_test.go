@@ -36,14 +36,14 @@ const (
 // reason it gave up, so a spec can both wait for it and see what went wrong. A
 // canceled context is one of those reasons, since it means the certificate was
 // never issued.
-func simulateByoAdmissionController(ctx context.Context, tenant, hostName, cert string) <-chan error {
+func simulateByoAdmissionController(ctx context.Context, tenantNamespace, normalizedHostName, cert string) <-chan error {
 	done := make(chan error, 1)
 
 	go func() {
 		defer GinkgoRecover()
 
 		csrClient := k8sClientSet.CertificatesV1().CertificateSigningRequests()
-		csrNamePrefix := fmt.Sprintf(registration.ByohCSRNameFormat, tenant, hostName, "")
+		csrNamePrefix := fmt.Sprintf(registration.ByohCSRNameFormat, tenantNamespace, normalizedHostName, "")
 
 		ticker := time.NewTicker(time.Millisecond * 100)
 		defer ticker.Stop()
@@ -51,7 +51,7 @@ func simulateByoAdmissionController(ctx context.Context, tenant, hostName, cert 
 		for {
 			select {
 			case <-ctx.Done():
-				done <- fmt.Errorf("gave up approving the CSR for %q: %w", hostName, ctx.Err())
+				done <- fmt.Errorf("gave up approving the CSR for %q: %w", normalizedHostName, ctx.Err())
 				return
 			case <-ticker.C:
 			}
@@ -81,19 +81,19 @@ func simulateByoAdmissionController(ctx context.Context, tenant, hostName, cert 
 			})
 			_, err = csrClient.UpdateApproval(ctx, csrName, byohCSR, metav1.UpdateOptions{})
 			if err != nil {
-				done <- fmt.Errorf("approve the CSR for %q: %w", hostName, err)
+				done <- fmt.Errorf("approve the CSR for %q: %w", normalizedHostName, err)
 				return
 			}
 
 			byohCSR, err = csrClient.Get(ctx, csrName, metav1.GetOptions{})
 			if err != nil {
-				done <- fmt.Errorf("re-read the approved CSR for %q: %w", hostName, err)
+				done <- fmt.Errorf("re-read the approved CSR for %q: %w", normalizedHostName, err)
 				return
 			}
 			byohCSR.Status.Certificate = []byte(cert)
 			_, err = csrClient.UpdateStatus(ctx, byohCSR, metav1.UpdateOptions{})
 			if err != nil {
-				done <- fmt.Errorf("issue the certificate for %q: %w", hostName, err)
+				done <- fmt.Errorf("issue the certificate for %q: %w", normalizedHostName, err)
 				return
 			}
 			done <- nil
@@ -106,8 +106,8 @@ func simulateByoAdmissionController(ctx context.Context, tenant, hostName, cert 
 
 var _ = Describe("CSR Registration", func() {
 	var (
-		hostName           = "test-host"
-		tenant             = "test-tenant"
+		normalizedHostName = "test-host"
+		tenantNamespace    = "test-tenant"
 		fileDir            string
 		bootstrapCfg       *restclient.Config
 		certExpiryDuration = int64((time.Hour * 24).Seconds())
@@ -192,7 +192,7 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 		It("should return error if hostname is invalid", func() {
 			CSRRegistrar, err := registration.NewByohCSR(bootstrapCfg, logr.Discard(), certExpiryDuration)
 			Expect(err).ShouldNot(HaveOccurred())
-			err = CSRRegistrar.BootstrapKubeconfig(context.Background(), tenant, "", "")
+			err = CSRRegistrar.BootstrapKubeconfig(context.Background(), tenantNamespace, "", "")
 			Expect(err).To(MatchError("hostname is not valid"))
 		})
 		It("should return client config if bootstrap kubeconfig is valid", func() {
@@ -219,13 +219,13 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 			CSRRegistrar, err := registration.NewByohCSR(bootstrapCfg, logr.Discard(), certExpiryDuration)
 			Expect(err).ShouldNot(HaveOccurred())
 			// Nothing approves the CSR, so this times out after creating it.
-			err = CSRRegistrar.BootstrapKubeconfig(ctx, tenant, hostName, "")
+			err = CSRRegistrar.BootstrapKubeconfig(ctx, tenantNamespace, normalizedHostName, "")
 			Expect(err).Should(HaveOccurred())
 			csrList, err := k8sClientSet.CertificatesV1().CertificateSigningRequests().List(ctx, metav1.ListOptions{})
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(csrList.Items).To(HaveLen(1))
 			ByohCSR := csrList.Items[0]
-			Expect(ByohCSR.Name).To(HavePrefix(fmt.Sprintf(registration.ByohCSRNameFormat, tenant, hostName, "")))
+			Expect(ByohCSR.Name).To(HavePrefix(fmt.Sprintf(registration.ByohCSRNameFormat, tenantNamespace, normalizedHostName, "")))
 
 			stateData, err := os.ReadFile(filepath.Join(fileDir, registration.StateFileName))
 			Expect(err).ShouldNot(HaveOccurred())
@@ -241,7 +241,7 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 			Expect(pemData).ToNot(Equal(nil))
 			csr, err := x509.ParseCertificateRequest(pemData.Bytes)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(csr.Subject.CommonName).To(HavePrefix(fmt.Sprintf("byoh:host:%s:%s-", tenant, hostName)))
+			Expect(csr.Subject.CommonName).To(HavePrefix(fmt.Sprintf("byoh:host:%s:%s-", tenantNamespace, normalizedHostName)))
 			Expect(string(stateData)).To(ContainSubstring(csr.Subject.CommonName))
 			Expect(csr.Subject.Organization[0]).To(Equal("byoh:hosts"))
 
@@ -253,12 +253,12 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 			registration.CSRApprovalTimeout = time.Second * 5
 			CSRRegistrar, err := registration.NewByohCSR(bootstrapCfg, klogr.New(), certExpiryDuration) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
-			err = CSRRegistrar.BootstrapKubeconfig(ctx, tenant, hostName, "")
+			err = CSRRegistrar.BootstrapKubeconfig(ctx, tenantNamespace, normalizedHostName, "")
 			Expect(err).Should(HaveOccurred())
 			Expect(err).To(MatchError("timed out waiting for the condition"))
 		})
 		It("should return error if not able to write kubeconfig", func(ctx SpecContext) {
-			admissionDone := simulateByoAdmissionController(ctx, tenant, hostName, testCert)
+			admissionDone := simulateByoAdmissionController(ctx, tenantNamespace, normalizedHostName, testCert)
 			defer func() {
 				var admissionErr error
 				Eventually(admissionDone, time.Second*5).Should(Receive(&admissionErr))
@@ -271,12 +271,12 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 			Expect(err).ShouldNot(HaveOccurred())
 			CSRRegistrar, err := registration.NewByohCSR(bootstrapCfg, klogr.New(), certExpiryDuration) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
-			err = CSRRegistrar.BootstrapKubeconfig(ctx, tenant, hostName, "")
+			err = CSRRegistrar.BootstrapKubeconfig(ctx, tenantNamespace, normalizedHostName, "")
 			Expect(err).Should(HaveOccurred())
 			Expect(err).To(MatchError(fmt.Sprintf("open %s: is a directory", registration.ConfigPath)))
 		})
 		It("should create kubeconfig if csr is approved", func(ctx SpecContext) {
-			admissionDone := simulateByoAdmissionController(ctx, tenant, hostName, testCert)
+			admissionDone := simulateByoAdmissionController(ctx, tenantNamespace, normalizedHostName, testCert)
 			defer func() {
 				var admissionErr error
 				Eventually(admissionDone, time.Second*5).Should(Receive(&admissionErr))
@@ -284,7 +284,7 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 			}()
 			CSRRegistrar, err := registration.NewByohCSR(bootstrapCfg, klogr.New(), certExpiryDuration) //nolint: staticcheck // klogr predates the textlogger migration; see main.go
 			Expect(err).ShouldNot(HaveOccurred())
-			err = CSRRegistrar.BootstrapKubeconfig(ctx, tenant, hostName, "")
+			err = CSRRegistrar.BootstrapKubeconfig(ctx, tenantNamespace, normalizedHostName, "")
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(registration.ConfigPath).To(BeARegularFile())
 			Expect(os.Remove(registration.ConfigPath)).ShouldNot(HaveOccurred())
