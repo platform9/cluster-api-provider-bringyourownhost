@@ -124,7 +124,13 @@ func setupReconcilers() {
 		panic(err)
 	}
 
-	bootstrapKubeconfigReconciler = &controllers.BootstrapKubeconfigReconciler{Client: cl}
+	bootstrapKubeconfigReconciler = &controllers.BootstrapKubeconfigReconciler{
+		Client:                cl,
+		APIReader:             k8sManager.GetAPIReader(),
+		Scheme:                k8sManager.GetScheme(),
+		Recorder:              record.NewFakeRecorder(32),
+		APIServerHostTemplate: "vcluster-cp.k8s.{customerFqdn}",
+	}
 	if err := bootstrapKubeconfigReconciler.SetupWithManager(k8sManager); err != nil {
 		panic(err)
 	}
