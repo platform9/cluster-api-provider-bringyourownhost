@@ -126,16 +126,17 @@ func TestPerformHostOperation_ExistingByoHost(t *testing.T) {
 	}
 
 	tests := []struct {
-		name            string
-		objs            []runtime.Object
-		operation       HostOperationType
-		force           bool
-		byoHostName     string
-		wantErr         bool
-		wantErrContains string
-		wantPurgeCalls  int
-		wantHostDeleted bool
-		wantRemaining   string
+		name                   string
+		objs                   []runtime.Object
+		operation              HostOperationType
+		force                  bool
+		byoHostName            string
+		wantErr                bool
+		wantErrContains        string
+		wantPurgeCalls         int
+		wantHostDeleted        bool
+		wantRemaining          string
+		wantRemainingNamespace string
 	}{
 		{
 			name:            "deauthorise / host not attached to a machine",
@@ -156,15 +157,32 @@ func TestPerformHostOperation_ExistingByoHost(t *testing.T) {
 			wantHostDeleted: true,
 		},
 		{
-			name:            "decommission / only the bare hostname exists",
-			objs:            []runtime.Object{byoHost("worker-1")},
-			operation:       OperationDecommission,
-			force:           true,
-			byoHostName:     "worker-1-abc12",
-			wantErr:         false,
-			wantPurgeCalls:  1,
-			wantHostDeleted: false,
-			wantRemaining:   "worker-1",
+			name:                   "decommission / only the bare hostname exists",
+			objs:                   []runtime.Object{byoHost("worker-1")},
+			operation:              OperationDecommission,
+			force:                  true,
+			byoHostName:            "worker-1-abc12",
+			wantErr:                false,
+			wantPurgeCalls:         1,
+			wantHostDeleted:        false,
+			wantRemaining:          "worker-1",
+			wantRemainingNamespace: testNamespace,
+		},
+		{
+			name: "decommission / same name only in another namespace",
+			objs: []runtime.Object{
+				&infrastructurev1beta1.ByoHost{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "other-namespace", Name: "worker-1-abc12"},
+				},
+			},
+			operation:              OperationDecommission,
+			force:                  true,
+			byoHostName:            "worker-1-abc12",
+			wantErr:                false,
+			wantPurgeCalls:         1,
+			wantHostDeleted:        false,
+			wantRemaining:          "worker-1-abc12",
+			wantRemainingNamespace: "other-namespace",
 		},
 	}
 
@@ -187,7 +205,7 @@ func TestPerformHostOperation_ExistingByoHost(t *testing.T) {
 				assert.Error(t, getErr, "ByoHost should be gone")
 			}
 			if tt.wantRemaining != "" {
-				_, remainingErr := k8sClient.GetByoHostObject(testNamespace, tt.wantRemaining)
+				_, remainingErr := k8sClient.GetByoHostObject(tt.wantRemainingNamespace, tt.wantRemaining)
 				assert.NoError(t, remainingErr, "ByoHost should be untouched")
 			}
 		})
