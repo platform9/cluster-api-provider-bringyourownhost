@@ -32,7 +32,8 @@ const (
 // +kubebuilder:validation:XValidation:rule="has(self.createdBy) == has(oldSelf.createdBy) && (!has(self.createdBy) || self.createdBy == oldSelf.createdBy)",message="createdBy is immutable"
 type BootstrapKubeconfigSpec struct {
 	// APIServer is the address of the kubernetes cluster (https://hostname:port).
-	APIServer string `json:"apiserver"`
+	// +optional
+	APIServer string `json:"apiserver,omitempty"`
 
 	// InsecureSkipTLSVerify skips the validity check for the server's certificate. This will make your HTTPS connections insecure.
 	// +optional
@@ -40,7 +41,8 @@ type BootstrapKubeconfigSpec struct {
 	InsecureSkipTLSVerify bool `json:"insecure-skip-tls-verify,omitempty"`
 
 	// CertificateAuthorityData contains PEM-encoded certificate authority certificates.
-	CertificateAuthorityData string `json:"certificate-authority-data"`
+	// +optional
+	CertificateAuthorityData string `json:"certificate-authority-data,omitempty"`
 
 	// HostName is the host this object onboards. The CSR approver compares it
 	// against the host name part of the certificate identity, so one object
