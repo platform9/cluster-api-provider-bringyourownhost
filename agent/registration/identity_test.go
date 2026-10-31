@@ -118,14 +118,14 @@ func TestResolveIdentity(t *testing.T) {
 
 	testCases := []struct {
 		name      string
-		stateFile *state
+		stateFile *State
 		config    *restclient.Config
 		want      string
 		wantErr   error
 	}{
 		{
 			name:      "state file wins over the client certificate",
-			stateFile: &state{Version: stateVersion, Phase: phasePending, Identity: stateIdentity},
+			stateFile: &State{Version: stateVersion, Phase: PhasePending, Identity: stateIdentity},
 			config:    certConfig,
 			want:      stateIdentity,
 		},
@@ -136,7 +136,7 @@ func TestResolveIdentity(t *testing.T) {
 		},
 		{
 			name:      "client certificate is used when the state has no identity",
-			stateFile: &state{Version: stateVersion, Phase: phasePending},
+			stateFile: &State{Version: stateVersion, Phase: PhasePending},
 			config:    certConfig,
 			want:      certIdentity,
 		},
