@@ -304,6 +304,11 @@ func TestBootstrapKubeconfigReconciler_EndpointFailure(t *testing.T) {
 			wantMessage: `no configmap "kaapi-config" found for namespace "dg-d-default-service"`,
 		},
 		{
+			name:        "kaapi-config only in the object's own namespace",
+			objects:     []client.Object{newBKKaapiConfig(bkTestNamespace, "tenant.example.com"), newBKRootCA()},
+			wantMessage: `no configmap "kaapi-config" found for namespace "dg-d-default-service"`,
+		},
+		{
 			name: "kaapi-config without customerFqdn",
 			objects: []client.Object{
 				newBKConfigMap("dg-d", "kaapi-config", map[string]string{"other": "value"}),

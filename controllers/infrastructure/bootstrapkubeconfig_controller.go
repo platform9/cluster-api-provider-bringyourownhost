@@ -276,11 +276,12 @@ func (r *BootstrapKubeconfigReconciler) resolveEndpoint(ctx context.Context, boo
 }
 
 // deriveAPIServerURL builds the apiserver URL from the customer FQDN. The
-// customer namespace is the longest prefix of the namespace, cut at dashes,
-// that holds a kaapi-config ConfigMap.
+// customer namespace is the longest proper prefix of the namespace, cut at
+// dashes, that holds a kaapi-config ConfigMap. The namespace itself is never a
+// candidate, so a tenant cannot choose the URL with a ConfigMap of its own.
 func (r *BootstrapKubeconfigReconciler) deriveAPIServerURL(ctx context.Context, namespace string) (string, error) {
 	segments := strings.Split(namespace, "-")
-	for n := len(segments); n >= 1; n-- {
+	for n := len(segments) - 1; n >= 1; n-- {
 		customerNamespace := strings.Join(segments[:n], "-")
 		config := &corev1.ConfigMap{}
 		err := r.APIReader.Get(ctx, types.NamespacedName{Namespace: customerNamespace, Name: kaapiConfigName}, config)
