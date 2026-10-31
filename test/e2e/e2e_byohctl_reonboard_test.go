@@ -130,7 +130,7 @@ var _ = Describe("When a host re-onboards via byohctl after a decommission [Byoh
 		Expect(err.Error()).To(ContainSubstring("identity is immutable"))
 
 		By("Decommissioning the host")
-		runByohctlDecommission(ctx, dockerClient, byohostContainer.ID, logFile)
+		runByohctl(ctx, dockerClient, byohostContainer.ID, logFile, nil, byohctlContainerPath, "decommission")
 		firstHostKey := k8stypes.NamespacedName{Name: patchBase.Name, Namespace: patchBase.Namespace}
 		Eventually(func() bool {
 			getErr := mgmtClient.Get(ctx, firstHostKey, &infrastructurev1beta1.ByoHost{})
@@ -212,47 +212,44 @@ var _ = Describe("When a host re-onboards via byohctl after a decommission [Byoh
 func assertOnboardingState(ctx context.Context, dockerClient *dockerclient.Client, mgmtClient ctrlclient.Client, containerID, bootstrapKubeconfigData string, byoHost *infrastructurev1beta1.ByoHost) {
 	GinkgoHelper()
 
-	tokenID, tokenSecret := bootstrapTokenFromKubeconfig(bootstrapKubeconfigData)
+	config, err := clientcmd.Load([]byte(bootstrapKubeconfigData))
+	Expect(err).NotTo(HaveOccurred())
+	Expect(config.AuthInfos).NotTo(BeEmpty())
+	var tokenID, tokenSecret string
+	for _, authInfo := range config.AuthInfos {
+		var found bool
+		tokenID, tokenSecret, found = strings.Cut(authInfo.Token, ".")
+		Expect(found).To(BeTrue(), "bootstrap token is not of the form <id>.<secret>")
+		break
+	}
 
 	raw, exitCode, err := execInContainer(ctx, dockerClient, containerID, []string{"cat", agentStateFileInContainer})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(exitCode).To(BeZero(), "failed to read %s", agentStateFileInContainer)
+	Expect(strings.Contains(raw, tokenSecret)).To(BeFalse(), "state file must not hold the bootstrap token secret")
 
 	state := registration.State{}
 	Expect(json.Unmarshal([]byte(raw), &state)).To(Succeed(), "state file is not valid JSON")
-	Expect(state.Version).To(Equal(1))
-	Expect(state.Phase).To(Equal(registration.PhaseIssued), "state file should record the certificate as written")
-	Expect(state.BootstrapTokenID).To(Equal(tokenID), "state file belongs to another bootstrap token")
-	Expect(state.Identity).To(Equal(byoHost.Spec.Identity))
-	Expect(strings.Contains(raw, tokenSecret)).To(BeFalse(), "state file must not hold the bootstrap token secret")
 
 	csr := &certv1.CertificateSigningRequest{}
 	Expect(mgmtClient.Get(ctx, k8stypes.NamespacedName{Name: state.CSRName}, csr)).To(Succeed(),
 		"state file names a CSR that does not exist")
-	Expect(string(csr.UID)).To(Equal(state.CSRUID))
 	Expect(csr.Status.Certificate).NotTo(BeEmpty(), "CSR %s was not issued", state.CSRName)
+
+	expectedState := registration.State{
+		Version:          1,
+		Phase:            registration.PhaseIssued,
+		BootstrapTokenID: tokenID,
+		Identity:         byoHost.Spec.Identity,
+		CSRName:          state.CSRName,
+		CSRUID:           string(csr.UID),
+	}
+	Expect(state).To(Equal(expectedState), "state file does not describe this onboarding")
 
 	mode, exitCode, err := execInContainer(ctx, dockerClient, containerID, []string{"stat", "--format=%a", agentKeyFileInContainer})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(exitCode).To(BeZero(), "failed to stat %s", agentKeyFileInContainer)
 	Expect(strings.TrimSpace(mode)).To(Equal("600"))
-}
-
-// bootstrapTokenFromKubeconfig returns the id and secret halves of the bearer token in a
-// bootstrap kubeconfig.
-func bootstrapTokenFromKubeconfig(kubeconfigData string) (id, secret string) {
-	GinkgoHelper()
-
-	config, err := clientcmd.Load([]byte(kubeconfigData))
-	Expect(err).NotTo(HaveOccurred())
-	Expect(config.AuthInfos).NotTo(BeEmpty())
-	for _, authInfo := range config.AuthInfos {
-		var found bool
-		id, secret, found = strings.Cut(authInfo.Token, ".")
-		Expect(found).To(BeTrue(), "bootstrap token is not of the form <id>.<secret>")
-		break
-	}
-	return id, secret
 }
 
 func runByohctlOnboard(ctx context.Context, dockerClient *dockerclient.Client, containerID, namespaceName, logFile string) {
@@ -268,12 +265,6 @@ func runByohctlOnboard(ctx context.Context, dockerClient *dockerclient.Client, c
 		"--namespace", namespaceName,
 		"--region", "e2e-byohctl",
 	)
-}
-
-func runByohctlDecommission(ctx context.Context, dockerClient *dockerclient.Client, containerID, logFile string) {
-	GinkgoHelper()
-
-	runByohctl(ctx, dockerClient, containerID, logFile, nil, byohctlContainerPath, "decommission")
 }
 
 // runByohctl runs a byohctl command to completion and appends its output to logFile, so a
