@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	infraproviderv1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/test/framework"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -38,12 +39,12 @@ func (c byoHostLogCollector) CollectMachineLog(ctx context.Context, mgmtClient c
 	// The host name in the ByoHost identity is the container name (the e2e hosts have lowercase
 	// hostnames, so normalizing leaves them unchanged). With an empty cluster name,
 	// DockerLogCollector uses the Machine name as the container name as is.
-	_, containerName, _, err := infraproviderv1.ParseHostIdentity(hosts.Items[0].Spec.Identity)
+	parsed, err := identity.Parse(hosts.Items[0].Spec.Identity)
 	if err != nil {
 		return fmt.Errorf("parsing identity of ByoHost %s/%s: %w", hosts.Items[0].Namespace, hosts.Items[0].Name, err)
 	}
 	hostMachine := m.DeepCopy()
-	hostMachine.Name = containerName
+	hostMachine.Name = parsed.NormalizedHostName
 	hostMachine.Spec.ClusterName = ""
 	return c.DockerLogCollector.CollectMachineLog(ctx, mgmtClient, hostMachine, outputPath)
 }

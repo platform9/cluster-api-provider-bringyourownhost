@@ -21,7 +21,9 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/agent/registration"
 	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/service"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/common/bootstraptoken"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
 	certv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -32,7 +34,7 @@ import (
 )
 
 const (
-	agentStateDirInContainer  = "/root/.byoh"
+	agentStateDirInContainer  = "/root/" + service.ByohConfigDir
 	agentStateFileInContainer = agentStateDirInContainer + "/" + registration.StateFileName
 	agentKeyFileInContainer   = agentStateDirInContainer + "/" + registration.PrivateKeyFileName
 
@@ -117,7 +119,7 @@ var _ = Describe("When a host re-onboards via byohctl after a decommission [Byoh
 		)
 		firstHost := waitForByoHost(ctx, bootstrapClusterProxy, namespace.Name, hostName, specName)
 		firstSuffix := strings.TrimPrefix(firstHost.Name, hostName+"-")
-		Expect(firstSuffix).To(HaveLen(byoHostSuffixLength), "ByoHost %s should be named <hostname>-<suffix>", firstHost.Name)
+		Expect(firstSuffix).To(HaveLen(identity.SuffixLength), "ByoHost %s should be named <hostname>-<suffix>", firstHost.Name)
 		Expect(firstHost.Spec.Identity).To(Equal("byoh:host:" + namespace.Name + ":" + hostName + "-" + firstSuffix))
 
 		By("Checking the state the agent left on the host")
@@ -173,7 +175,7 @@ var _ = Describe("When a host re-onboards via byohctl after a decommission [Byoh
 		)
 		secondHost := waitForByoHost(ctx, bootstrapClusterProxy, namespace.Name, hostName, specName)
 		secondSuffix := strings.TrimPrefix(secondHost.Name, hostName+"-")
-		Expect(secondSuffix).To(HaveLen(byoHostSuffixLength), "ByoHost %s should be named <hostname>-<suffix>", secondHost.Name)
+		Expect(secondSuffix).To(HaveLen(identity.SuffixLength), "ByoHost %s should be named <hostname>-<suffix>", secondHost.Name)
 		Expect(secondSuffix).NotTo(Equal(firstSuffix), "the second onboarding should get a new suffix")
 		Expect(secondHost.UID).NotTo(Equal(firstHost.UID))
 		Expect(secondHost.Spec.Identity).To(Equal("byoh:host:" + namespace.Name + ":" + hostName + "-" + secondSuffix))
