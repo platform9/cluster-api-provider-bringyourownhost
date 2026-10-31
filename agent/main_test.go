@@ -258,12 +258,12 @@ func TestLabelFlagsString(t *testing.T) {
 // rather than producing a parser that substitutes empty strings.
 func TestSetupTemplateParser(t *testing.T) {
 	testCases := []struct {
-		name          string
-		interfaceName string
-		hostName      string
-		template      string
-		wantParser    bool
-		want          string
+		name               string
+		interfaceName      string
+		normalizedHostName string
+		template           string
+		wantParser         bool
+		want               string
 	}{
 		{
 			name:       "no interface and no host name",
@@ -277,19 +277,19 @@ func TestSetupTemplateParser(t *testing.T) {
 			want:          "iface=eth0 host=",
 		},
 		{
-			name:       "host name only",
-			hostName:   "example-worker-1",
-			template:   "iface={{ .DefaultNetworkInterfaceName }} host={{ .HostName }}",
-			wantParser: true,
-			want:       "iface= host=example-worker-1",
+			name:               "host name only",
+			normalizedHostName: "example-worker-1",
+			template:           "iface={{ .DefaultNetworkInterfaceName }} host={{ .HostName }}",
+			wantParser:         true,
+			want:               "iface= host=example-worker-1",
 		},
 		{
-			name:          "interface and host name",
-			interfaceName: "eth0",
-			hostName:      "example-worker-1",
-			template:      "iface={{ .DefaultNetworkInterfaceName }} host={{ .HostName }}",
-			wantParser:    true,
-			want:          "iface=eth0 host=example-worker-1",
+			name:               "interface and host name",
+			interfaceName:      "eth0",
+			normalizedHostName: "example-worker-1",
+			template:           "iface={{ .DefaultNetworkInterfaceName }} host={{ .HostName }}",
+			wantParser:         true,
+			want:               "iface=eth0 host=example-worker-1",
 		},
 	}
 
@@ -301,7 +301,7 @@ func TestSetupTemplateParser(t *testing.T) {
 			registration.LocalHostRegistrar = &registration.HostRegistrar{
 				ByoHostInfo: registration.HostInfo{
 					DefaultNetworkInterfaceName: tc.interfaceName,
-					HostName:                    tc.hostName,
+					HostName:                    tc.normalizedHostName,
 				},
 			}
 

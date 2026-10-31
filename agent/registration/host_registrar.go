@@ -184,7 +184,7 @@ func (hr *HostRegistrar) getHostInfo() (infrastructurev1beta1.HostInfo, error) {
 
 	hostInfo.Architecture = runtime.GOARCH
 	hostInfo.OSName = runtime.GOOS
-	hostInfo.HostName = hr.ByoHostInfo.HostName
+	hostInfo.NormalizedHostName = hr.ByoHostInfo.HostName
 
 	if distribution, err := getOperatingSystem(os.ReadFile); err != nil {
 		return hostInfo, pkgerrors.Wrap(err, "failed to get host operating system image")

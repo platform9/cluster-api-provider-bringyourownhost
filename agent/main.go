@@ -420,8 +420,8 @@ func main() {
 	}
 	registration.LocalHostRegistrar = &registration.HostRegistrar{
 		K8sClient:   k8sClient,
-		Identity:    identity,
-		ByoHostInfo: registration.HostInfo{HostName: hostName},
+		Identity:    hostIdentity,
+		ByoHostInfo: registration.HostInfo{HostName: normalizedHostName},
 	}
 	err = registration.LocalHostRegistrar.Register(ctx, byoHostName, namespace, labels)
 	if err != nil {
