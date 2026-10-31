@@ -20,6 +20,9 @@ const (
 	// the client private key.
 	PrivateKeyFileName = "client.key"
 
+	stateFieldVersion = "version"
+	stateFieldPhase   = "phase"
+
 	stateVersion  = 1
 	stateFileMode = 0o600
 	stateDirMode  = 0o700
@@ -116,10 +119,10 @@ func loadState(dir string) (*State, error) {
 
 	var problems []*StateFieldError
 	if s.Version != stateVersion {
-		problems = append(problems, &StateFieldError{Field: "version", Reason: fmt.Sprintf("unknown version %d", s.Version)})
+		problems = append(problems, &StateFieldError{Field: stateFieldVersion, Reason: fmt.Sprintf("unknown version %d", s.Version)})
 	}
 	if s.Phase != PhasePending && s.Phase != PhaseIssued {
-		problems = append(problems, &StateFieldError{Field: "phase", Reason: fmt.Sprintf("unknown phase %q", s.Phase)})
+		problems = append(problems, &StateFieldError{Field: stateFieldPhase, Reason: fmt.Sprintf("unknown phase %q", s.Phase)})
 	}
 	if len(problems) > 0 {
 		return nil, &InvalidStateError{Path: path, Problems: problems}

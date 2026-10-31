@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -190,58 +191,47 @@ func TestState_SaveIsAtomicUnderConcurrency(t *testing.T) {
 	t.Parallel()
 
 	const (
-		writers         = 8
-		savesPerWriter  = 50
-		readers         = 4
-		writerNameWidth = 2000
+		writers        = 8
+		savesPerWriter = 50
+		readers        = 4
+		// A long identity makes a non-atomic write span several write calls.
+		identityPadding = 2000
 	)
 
 	dir := t.TempDir()
-	// Long values make a non-atomic write span several write calls.
-	padding := make([]byte, writerNameWidth)
-	for i := range padding {
-		padding[i] = 'x'
-	}
 	newState := func(writer int) *State {
 		return &State{
 			Version:          stateVersion,
 			Phase:            PhasePending,
 			BootstrapTokenID: "abcdef",
-			Identity:         fmt.Sprintf("writer-%d-%s", writer, padding),
+			Identity:         fmt.Sprintf("writer-%d-%s", writer, strings.Repeat("x", identityPadding)),
 		}
 	}
-
-	valid := make(map[string]bool, writers)
+	saved := make(map[string]bool, writers)
 	for writer := range writers {
-		valid[newState(writer).Identity] = true
+		saved[newState(writer).Identity] = true
 	}
 
 	// The file exists before any reader starts, so a missing file is a failure.
 	err := newState(0).save(dir)
 	require.NoError(t, err)
 
-	done := make(chan struct{})
 	var writerGroup, readerGroup sync.WaitGroup
-	saveErrs := make(chan error, writers*savesPerWriter)
-	readErrs := make(chan error, 64)
+	done := make(chan struct{})
+	problems := make(chan error, writers*savesPerWriter)
 
 	for writer := range writers {
-		writerGroup.Add(1)
-		go func() {
-			defer writerGroup.Done()
+		writerGroup.Go(func() {
 			st := newState(writer)
 			for range savesPerWriter {
-				if err := st.save(dir); err != nil {
-					saveErrs <- err
+				if saveErr := st.save(dir); saveErr != nil {
+					problems <- saveErr
 				}
 			}
-		}()
+		})
 	}
-
 	for range readers {
-		readerGroup.Add(1)
-		go func() {
-			defer readerGroup.Done()
+		readerGroup.Go(func() {
 			for {
 				select {
 				case <-done:
@@ -249,35 +239,24 @@ func TestState_SaveIsAtomicUnderConcurrency(t *testing.T) {
 				default:
 				}
 
-				got, err := loadState(dir)
-				if err != nil {
-					select {
-					case readErrs <- err:
-					default:
-					}
-					continue
-				}
-				if !valid[got.Identity] {
-					select {
-					case readErrs <- fmt.Errorf("reader saw a state no writer saved: %q", got.Identity):
-					default:
-					}
+				got, loadErr := loadState(dir)
+				switch {
+				case loadErr != nil:
+					problems <- loadErr
+				case !saved[got.Identity]:
+					problems <- fmt.Errorf("reader saw a state no writer saved: %q", got.Identity)
 				}
 			}
-		}()
+		})
 	}
 
 	writerGroup.Wait()
 	close(done)
 	readerGroup.Wait()
-	close(saveErrs)
-	close(readErrs)
+	close(problems)
 
-	for err := range saveErrs {
-		assert.NoError(t, err)
-	}
-	for err := range readErrs {
-		assert.NoError(t, err)
+	for problem := range problems {
+		assert.NoError(t, problem)
 	}
 
 	entries, err := os.ReadDir(dir)
