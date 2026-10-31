@@ -333,10 +333,13 @@ func TestLocalNormalizedHostName(t *testing.T) {
 }
 
 func TestResolveByoHostName(t *testing.T) {
-	const (
-		hostName = "example-worker-1"
-		identity = "byoh:host:example-tenant:example-worker-1-abc12"
-	)
+	const normalizedHostName = "example-worker-1"
+
+	hostIdentity := identity.HostIdentity{
+		TenantNamespace:    "example-tenant",
+		NormalizedHostName: normalizedHostName,
+		Suffix:             "abc12",
+	}
 
 	certConfig := func(t *testing.T, commonName string) *rest.Config {
 		t.Helper()
@@ -368,23 +371,23 @@ func TestResolveByoHostName(t *testing.T) {
 	}{
 		{
 			name:         "host identity in client certificate",
-			config:       certConfig(t, identity),
-			wantIdentity: identity,
-			wantName:     "example-worker-1-abc12",
+			config:       certConfig(t, hostIdentity.String()),
+			wantIdentity: hostIdentity.String(),
+			wantName:     hostIdentity.ByoHostName(),
 			wantErr:      false,
 		},
 		{
 			name:         "host identity in state file",
-			stateDir:     stateDir(t, identity),
+			stateDir:     stateDir(t, hostIdentity.String()),
 			config:       &rest.Config{},
-			wantIdentity: identity,
-			wantName:     "example-worker-1-abc12",
+			wantIdentity: hostIdentity.String(),
+			wantName:     hostIdentity.ByoHostName(),
 			wantErr:      false,
 		},
 		{
 			name:     "no identity",
 			config:   &rest.Config{},
-			wantName: hostName,
+			wantName: normalizedHostName,
 			wantErr:  false,
 		},
 		{
@@ -418,7 +421,7 @@ func TestResolveByoHostName(t *testing.T) {
 				dir = t.TempDir()
 			}
 
-			gotIdentity, gotName, err := resolveByoHostName(dir, tc.config, hostName)
+			gotIdentity, gotName, err := resolveByoHostName(dir, tc.config, normalizedHostName)
 
 			if tc.wantErr {
 				require.Error(t, err)

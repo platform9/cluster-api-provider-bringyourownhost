@@ -54,7 +54,7 @@ var _ = Describe("Agent", func() {
 			ns = builder.Namespace("testns").Build()
 			Expect(k8sClient.Create(ctx, ns)).NotTo(HaveOccurred(), "failed to create test namespace")
 
-			hostName = infrastructurev1beta1.ByoHostName(testHostName, hostNameSuffix)
+			hostName = testHostIdentity.ByoHostName()
 			runner = setupTestInfra(suiteCtx, hostName, getKubeConfig().Name(), ns)
 
 			byoHostContainer, err = runner.SetupByoDockerHost()
@@ -116,7 +116,7 @@ var _ = Describe("Agent", func() {
 			ns = builder.Namespace("testns").Build()
 			Expect(k8sClient.Create(ctx, ns)).NotTo(HaveOccurred(), "failed to create test namespace")
 			var err error
-			hostName = infrastructurev1beta1.ByoHostName(testHostName, hostNameSuffix)
+			hostName = testHostIdentity.ByoHostName()
 
 			runner = setupTestInfra(suiteCtx, hostName, getKubeConfig().Name(), ns)
 			runner.CommandArgs["--label"] = "site=apac"
@@ -448,7 +448,7 @@ var _ = Describe("Agent", func() {
 			ns = builder.Namespace("testns").Build()
 			Expect(k8sClient.Create(ctx, ns)).NotTo(HaveOccurred(), "failed to create test namespace")
 
-			hostName = infrastructurev1beta1.ByoHostName(testHostName, hostNameSuffix)
+			hostName = testHostIdentity.ByoHostName()
 			runner = setupTestInfra(suiteCtx, hostName, getKubeConfig().Name(), ns)
 
 			byoHostContainer, err = runner.SetupByoDockerHost()
@@ -495,7 +495,7 @@ var _ = Describe("Agent", func() {
 			Expect(k8sClient.Create(ctx, ns)).NotTo(HaveOccurred(), "failed to create test namespace")
 
 			var err error
-			hostName = infrastructurev1beta1.ByoHostName(testHostName, hostNameSuffix)
+			hostName = testHostIdentity.ByoHostName()
 
 			runner = setupTestInfra(suiteCtx, hostName, getKubeConfig().Name(), ns)
 			runner.CommandArgs["--bootstrap-kubeconfig"] = "/root/config"

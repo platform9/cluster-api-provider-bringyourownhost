@@ -17,14 +17,28 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
 )
 
 const (
-	registrarHostName    = "example-worker-1"
-	registrarByoHostName = "example-worker-1-abc12"
-	registrarNamespace   = "default"
-	identityOne          = "byoh:host:default:example-worker-1-abc12"
-	identityTwo          = "byoh:host:default:example-worker-1-xyz89"
+	registrarNormalizedHostName = "example-worker-1"
+	registrarNamespace          = "default"
+)
+
+var (
+	registrarHostIdentityOne = identity.HostIdentity{
+		TenantNamespace:    registrarNamespace,
+		NormalizedHostName: registrarNormalizedHostName,
+		Suffix:             "abc12",
+	}
+	registrarHostIdentityTwo = identity.HostIdentity{
+		TenantNamespace:    registrarNamespace,
+		NormalizedHostName: registrarNormalizedHostName,
+		Suffix:             "xyz89",
+	}
+	registrarByoHostName = registrarHostIdentityOne.ByoHostName()
+	identityOne          = registrarHostIdentityOne.String()
+	identityTwo          = registrarHostIdentityTwo.String()
 )
 
 func newRegistrarByoHost(specIdentity string) *infrastructurev1beta1.ByoHost {

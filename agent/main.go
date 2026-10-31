@@ -302,24 +302,24 @@ func certRotation(ctx context.Context, logger logr.Logger, hostIdentity identity
 // empty identity. Any other identity must be a host identity, and the ByoHost
 // name is derived from it. An identity that is not a host identity, in the
 // state file or in the client certificate, is an error.
-func resolveByoHostName(stateDir string, config *rest.Config, hostName string) (identity, byoHostName string, err error) {
-	identity, err = registration.ResolveIdentity(stateDir, config)
+func resolveByoHostName(stateDir string, config *rest.Config, normalizedHostName string) (hostIdentity, byoHostName string, err error) {
+	hostIdentity, err = registration.ResolveIdentity(stateDir, config)
 	if errors.Is(err, registration.ErrNoIdentity) {
-		return "", hostName, nil
+		return "", normalizedHostName, nil
 	}
 	if err != nil {
 		return "", "", err
 	}
-	if !strings.HasPrefix(identity, infrastructurev1beta1.HostIdentityPrefix) {
-		return "", "", fmt.Errorf("the state file or client certificate holds an identity that is not a host identity (want prefix %q)", infrastructurev1beta1.HostIdentityPrefix)
+	if !identity.HasPrefix(hostIdentity) {
+		return "", "", fmt.Errorf("the state file or client certificate holds an identity that is not a host identity (want prefix %q)", identity.Prefix)
 	}
 
-	byoHostName, err = registration.ByoHostNameFromIdentity(identity)
+	parsed, err := identity.Parse(hostIdentity)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("parse agent identity: %w", err)
 	}
 
-	return identity, byoHostName, nil
+	return hostIdentity, parsed.ByoHostName(), nil
 }
 
 // startCertificateRotation starts the certificate rotation goroutine.
@@ -413,7 +413,7 @@ func main() {
 	// Handle restart flow or if the ~/.byoh/config already exists
 	config := getConfig(logger)
 	k8sClient := getClient(logger, config)
-	identity, byoHostName, err := resolveByoHostName(filepath.Dir(registration.GetBYOHConfigPath()), config, hostName)
+	hostIdentity, byoHostName, err := resolveByoHostName(filepath.Dir(registration.GetBYOHConfigPath()), config, normalizedHostName)
 	if err != nil {
 		logger.Error(err, "could not determine the ByoHost name")
 		os.Exit(1)
