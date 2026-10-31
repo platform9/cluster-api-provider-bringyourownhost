@@ -38,8 +38,8 @@ var (
 // HostInfo contains information about the host.
 type HostInfo struct {
 	DefaultNetworkInterfaceName string
-	// HostName is the normalized host name. Bootstrap data can use it as
-	// {{ .HostName }}.
+	// HostName is the normalized host name. Cloud-init bootstrap data reads it
+	// as .HostName.
 	HostName string
 }
 
