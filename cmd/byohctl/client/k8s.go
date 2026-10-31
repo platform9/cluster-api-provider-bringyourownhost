@@ -44,6 +44,10 @@ const (
 	// machineRefPollInterval is how long to wait between checks for a
 	// ByoHost's machineRef being cleared.
 	machineRefPollInterval = 5 * time.Second
+	// defaultCredentialReadInterval and defaultCredentialReadTimeout bound how long
+	// GetCredentialKubeconfig waits for the credential Secret to become readable.
+	defaultCredentialReadInterval = 5 * time.Second
+	defaultCredentialReadTimeout  = 60 * time.Second
 )
 
 // ErrNoClientCertificate is returned by GetHostRefFromConfig when the kubeconfig user has no
@@ -61,8 +65,13 @@ type K8sClient struct {
 	// insecure mirrors the --insecure flag. Kept on the client because the kubeconfig
 	// SaveKubeConfig writes has to record it too, not just the requests made here.
 	insecure bool
-	// namespace is the real tenant namespace, read from the saved kubeconfig; empty until then.
+	// namespace is the real tenant namespace, read from the saved kubeconfig or by
+	// ResolveTenantNamespace; empty until then.
 	namespace string
+	// credentialReadInterval and credentialReadTimeout bound the retries of the credential
+	// Secret read in GetCredentialKubeconfig.
+	credentialReadInterval time.Duration
+	credentialReadTimeout  time.Duration
 }
 
 // Client wraps the Kubernetes clientset and dynamic client.
@@ -82,6 +91,9 @@ func NewK8sClient(fqdn, domain, tenant, token, regionName string, insecure bool)
 		bearerToken: token,
 		regionName:  regionName,
 		insecure:    insecure,
+
+		credentialReadInterval: defaultCredentialReadInterval,
+		credentialReadTimeout:  defaultCredentialReadTimeout,
 	}
 	return client
 }
@@ -173,18 +185,14 @@ func (c *K8sClient) oidcProxyKey() string {
 	return sanitizeName(c.domain) + "-" + sanitizeName(c.tenant)
 }
 
-// GetSecret retrieves a secret from the tenant namespace.
-func (c *K8sClient) GetSecret(secretName string) (*types.Secret, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
-	defer cancel()
+// getFromTenant GETs resourcePath, relative to the tenant namespace, through the oidc-proxy and
+// returns the body of a 200 answer. The namespace in the path may not exist (e.g. an ID-named
+// tenant); oidc-proxy replaces it.
+func (c *K8sClient) getFromTenant(ctx context.Context, resourcePath string) ([]byte, error) {
+	endpoint := fmt.Sprintf("https://%s/oidc-proxy/%s/%s/api/v1/namespaces/%s/%s",
+		c.fqdn, c.oidcProxyKey(), c.regionName, c.getNamespace(), resourcePath)
 
-	utils.LogInfo("Fetching secret '%s'", secretName)
-
-	// The namespace in the path may not exist (e.g. an ID-named tenant); oidc-proxy replaces it.
-	secretEndpoint := fmt.Sprintf("https://%s/oidc-proxy/%s/%s/api/v1/namespaces/%s/secrets/%s",
-		c.fqdn, c.oidcProxyKey(), c.regionName, c.getNamespace(), secretName)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", secretEndpoint, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, http.NoBody)
 	if err != nil {
 		return nil, utils.LogErrorf("error creating request: %v", err)
 	}
@@ -203,7 +211,21 @@ func (c *K8sClient) GetSecret(secretName string) (*types.Secret, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, utils.LogErrorf("error getting secret (status %d): %s", resp.StatusCode, string(body))
+		return nil, utils.LogErrorf("error getting %s (status %d): %s", resourcePath, resp.StatusCode, string(body))
+	}
+	return body, nil
+}
+
+// GetSecret retrieves a secret from the tenant namespace.
+func (c *K8sClient) GetSecret(secretName string) (*types.Secret, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
+	defer cancel()
+
+	utils.LogInfo("Fetching secret '%s'", secretName)
+
+	body, err := c.getFromTenant(ctx, "secrets/"+secretName)
+	if err != nil {
+		return nil, err
 	}
 
 	var secret types.Secret
@@ -544,12 +566,18 @@ func (c *K8sClient) CheckRegionAvailability(ctx context.Context, regionName stri
 	if !ok {
 		return false, nil, fmt.Errorf("region configmap does not have regions key")
 	}
+	found, knownRegions = matchRegion(regionsStr, regionName)
+	return found, knownRegions, nil
+}
+
+// matchRegion reports whether regionName is one of the newline-separated regions. When it is
+// not, it also returns the list of known regions.
+func matchRegion(regionsStr, regionName string) (found bool, knownRegions []string) {
 	regions := strings.Split(regionsStr, "\n")
 	for _, region := range regions {
 		if strings.TrimSpace(region) == regionName {
-			return true, nil, nil
+			return true, nil
 		}
 	}
-
-	return false, regions, nil
+	return false, regions
 }
