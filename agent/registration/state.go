@@ -24,22 +24,22 @@ const (
 	stateDirMode  = 0o700
 )
 
-// phase says how far an onboarding got.
-type phase string
+// Phase says how far an onboarding got.
+type Phase string
 
 const (
-	// phasePending means a CSR was created, or is about to be, and the
+	// PhasePending means a CSR was created, or is about to be, and the
 	// certificate is not yet written to the kubeconfig.
-	phasePending phase = "pending"
-	// phaseIssued means the certificate is written and the kubeconfig is complete.
-	phaseIssued phase = "issued"
+	PhasePending Phase = "pending"
+	// PhaseIssued means the certificate is written and the kubeconfig is complete.
+	PhaseIssued Phase = "issued"
 )
 
-// state is what the agent needs to resume an interrupted onboarding.
-type state struct {
+// State is what the agent needs to resume an interrupted onboarding.
+type State struct {
 	Version int `json:"version"`
 	// Phase is how far the onboarding got. It is never empty in a valid state.
-	Phase phase `json:"phase"`
+	Phase Phase `json:"phase"`
 	// BootstrapTokenID is the id half of the bootstrap token. It ties the
 	// state to one onboarding. The token secret is never stored.
 	BootstrapTokenID string `json:"bootstrapTokenID"`
@@ -56,21 +56,21 @@ type state struct {
 
 // loadState reads the state file in dir. It fails when the file is missing,
 // unreadable, not valid JSON, of an unknown version or in an unknown phase.
-func loadState(dir string) (*state, error) {
+func loadState(dir string) (*State, error) {
 	path := filepath.Join(dir, StateFileName)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read state file %q: %w", path, err)
 	}
 
-	s := &state{}
+	s := &State{}
 	if err = json.Unmarshal(data, s); err != nil {
 		return nil, fmt.Errorf("parse state file %q: %w", path, err)
 	}
 	if s.Version != stateVersion {
 		return nil, fmt.Errorf("state file %q has unknown version %d", path, s.Version)
 	}
-	if s.Phase != phasePending && s.Phase != phaseIssued {
+	if s.Phase != PhasePending && s.Phase != PhaseIssued {
 		return nil, fmt.Errorf("state file %q has unknown phase %q", path, s.Phase)
 	}
 
@@ -79,7 +79,7 @@ func loadState(dir string) (*state, error) {
 
 // save writes the state file in dir atomically, so a crash leaves either the
 // old file or the new one, never a partial file.
-func (s *state) save(dir string) (err error) {
+func (s *State) save(dir string) (err error) {
 	if err = os.MkdirAll(dir, stateDirMode); err != nil {
 		return fmt.Errorf("create state directory %q: %w", dir, err)
 	}
@@ -125,8 +125,8 @@ func (s *state) save(dir string) (err error) {
 
 // markIssued records that the certificate was written to the kubeconfig. The
 // CSR the agent created stays named in the state.
-func (s *state) markIssued(dir string) error {
-	s.Phase = phaseIssued
+func (s *State) markIssued(dir string) error {
+	s.Phase = PhaseIssued
 	return s.save(dir)
 }
 

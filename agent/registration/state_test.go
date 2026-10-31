@@ -17,9 +17,9 @@ func TestState_SaveAndLoad(t *testing.T) {
 	t.Parallel()
 
 	dir := filepath.Join(t.TempDir(), "nested", ".byoh")
-	want := &state{
+	want := &State{
 		Version:          stateVersion,
-		Phase:            phaseIssued,
+		Phase:            PhaseIssued,
 		BootstrapTokenID: "abcdef",
 		Identity:         "byoh:host:example-worker-1:q4m9z",
 		CSRName:          "byoh-csr-example-worker-1-k3v8d",
@@ -51,8 +51,8 @@ func TestState_SaveReplacesExistingFile(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	first := &state{Version: stateVersion, Phase: phasePending, BootstrapTokenID: "abcdef", Identity: "first"}
-	second := &state{Version: stateVersion, Phase: phasePending, BootstrapTokenID: "abcdef", Identity: "second"}
+	first := &State{Version: stateVersion, Phase: PhasePending, BootstrapTokenID: "abcdef", Identity: "first"}
+	second := &State{Version: stateVersion, Phase: PhasePending, BootstrapTokenID: "abcdef", Identity: "second"}
 
 	require.NoError(t, first.save(dir))
 	require.NoError(t, second.save(dir))
@@ -130,12 +130,12 @@ func TestRemoveOnboardingFiles(t *testing.T) {
 func TestLoadState_Phase(t *testing.T) {
 	t.Parallel()
 
-	for _, phase := range []phase{phasePending, phaseIssued} {
+	for _, phase := range []Phase{PhasePending, PhaseIssued} {
 		t.Run(string(phase)+" is accepted", func(t *testing.T) {
 			t.Parallel()
 
 			dir := t.TempDir()
-			want := &state{Version: stateVersion, Phase: phase, BootstrapTokenID: "abcdef"}
+			want := &State{Version: stateVersion, Phase: phase, BootstrapTokenID: "abcdef"}
 			require.NoError(t, want.save(dir))
 
 			got, err := loadState(dir)
@@ -177,9 +177,9 @@ func TestState_MarkIssued(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	st := &state{
+	st := &State{
 		Version:          stateVersion,
-		Phase:            phasePending,
+		Phase:            PhasePending,
 		BootstrapTokenID: "abcdef",
 		Identity:         "byoh:host:example-worker-1:q4m9z",
 		CSRName:          "byoh-csr-example-worker-1-k3v8d",
@@ -190,9 +190,9 @@ func TestState_MarkIssued(t *testing.T) {
 	require.NoError(t, err)
 
 	// The CSR the agent created stays named, even though it may be gone from the cluster.
-	want := &state{
+	want := &State{
 		Version:          stateVersion,
-		Phase:            phaseIssued,
+		Phase:            PhaseIssued,
 		BootstrapTokenID: "abcdef",
 		Identity:         "byoh:host:example-worker-1:q4m9z",
 		CSRName:          "byoh-csr-example-worker-1-k3v8d",
