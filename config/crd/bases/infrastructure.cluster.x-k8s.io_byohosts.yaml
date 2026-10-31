@@ -144,12 +144,12 @@ spec:
                 identity:
                   description: |-
                     Identity is the certificate identity of this host, in the form
-                    byoh:host:<tenant>:<hostName>-<suffix>. The tenant is the ByoHost's
-                    namespace. The admission webhook sets the identity from the authenticated
-                    requester when the host is created, never from the request body. It does
-                    not change for the life of the host. Renewal is authorized against it, so
-                    a certificate with any other identity cannot renew even while it is still
-                    cryptographically valid.
+                    byoh:host:<tenantNamespace>:<normalizedHostName>-<suffix>. The tenant
+                    namespace is the ByoHost's namespace. The admission webhook sets the
+                    identity from the authenticated requester when the host is created, never
+                    from the request body. It does not change for the life of the host.
+                    Renewal is authorized against it, so a certificate with any other
+                    identity cannot renew even while it is still cryptographically valid.
                   type: string
                 installationSecret:
                   description: |-
@@ -312,9 +312,9 @@ spec:
                     architecture:
                       description: The Architecture reported by the host.
                       type: string
-                    hostName:
+                    normalizedHostName:
                       description: |-
-                        HostName is the normalized host name, written by the agent. The
+                        NormalizedHostName is the normalized host name, written by the agent. The
                         Kubernetes Node is named this.
                       type: string
                     osimage:

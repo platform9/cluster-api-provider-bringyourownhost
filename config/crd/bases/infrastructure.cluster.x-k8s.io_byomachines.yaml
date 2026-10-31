@@ -193,9 +193,9 @@ spec:
                     architecture:
                       description: The Architecture reported by the host.
                       type: string
-                    hostName:
+                    normalizedHostName:
                       description: |-
-                        HostName is the normalized host name, written by the agent. The
+                        NormalizedHostName is the normalized host name, written by the agent. The
                         Kubernetes Node is named this.
                       type: string
                     osimage:
