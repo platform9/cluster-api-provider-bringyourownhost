@@ -46,6 +46,12 @@ func (c *K8sClient) resolvedRef() tenantRef {
 	return tenantRef{key: c.key, namespace: c.namespace}
 }
 
+// Namespace returns the tenant namespace found by ResolveTenantNamespace, or an empty string
+// before it has run.
+func (c *K8sClient) Namespace() string {
+	return c.namespace
+}
+
 // tenantRequest sends one request through the oidc-proxy at the resolved key. The path is
 // relative to the region, for example "api/v1/namespaces/<ns>/secrets/<name>". It returns the
 // status and body of the answer.
