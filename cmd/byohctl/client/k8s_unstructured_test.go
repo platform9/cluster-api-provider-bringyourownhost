@@ -190,9 +190,24 @@ func TestGetAndDeleteByoHostObject(t *testing.T) {
 		hostName  string
 		wantErr   bool
 	}{
-		{name: "found by unique name in tenant namespace", namespace: "tenant-a", hostName: "worker-1-abc12"},
-		{name: "bare hostname does not match unique name", namespace: "tenant-a", hostName: "worker-1", wantErr: true},
-		{name: "same name in another namespace does not match", namespace: "default", hostName: "worker-1-abc12", wantErr: true},
+		{
+			name:      "found by unique name in tenant namespace",
+			namespace: "tenant-a",
+			hostName:  "worker-1-abc12",
+			wantErr:   false,
+		},
+		{
+			name:      "bare hostname does not match unique name",
+			namespace: "tenant-a",
+			hostName:  "worker-1",
+			wantErr:   true,
+		},
+		{
+			name:      "same name in another namespace does not match",
+			namespace: "default",
+			hostName:  "worker-1-abc12",
+			wantErr:   true,
+		},
 	}
 
 	for _, tt := range tests {

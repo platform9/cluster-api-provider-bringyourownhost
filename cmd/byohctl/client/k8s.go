@@ -114,11 +114,11 @@ func GetHostRefFromConfig(kubeconfigPath string) (namespace, name string, err er
 		return "", "", fmt.Errorf("error parsing client certificate: %w", err)
 	}
 
-	tenant, hostName, suffix, err := infrastructurev1beta1.ParseHostIdentity(cert.Subject.CommonName)
+	tenantNamespace, hostName, suffix, err := infrastructurev1beta1.ParseHostIdentity(cert.Subject.CommonName)
 	if err != nil {
 		return "", "", fmt.Errorf("client certificate common name is not a host identity: %w", err)
 	}
-	return tenant, infrastructurev1beta1.ByoHostName(hostName, suffix), nil
+	return tenantNamespace, infrastructurev1beta1.ByoHostName(hostName, suffix), nil
 }
 
 // getNamespace returns the namespace for the client

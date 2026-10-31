@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	capiv1beta1 "sigs.k8s.io/cluster-api/api/core/v1beta1" //nolint:staticcheck // tracked for follow-up migration off the deprecated API
@@ -113,6 +114,82 @@ func TestPerformHostOperation(t *testing.T) {
 			}
 			assert.Equal(t, tt.wantPurgeCalls, io.purgeN, "purge calls mismatch")
 			assert.Equal(t, tt.wantAskCalls, io.confirmN, "confirm calls mismatch")
+		})
+	}
+}
+
+func TestPerformHostOperation_ExistingByoHost(t *testing.T) {
+	byoHost := func(name string) *infrastructurev1beta1.ByoHost {
+		return &infrastructurev1beta1.ByoHost{
+			ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: name},
+		}
+	}
+
+	tests := []struct {
+		name            string
+		objs            []runtime.Object
+		operation       HostOperationType
+		force           bool
+		byoHostName     string
+		wantErr         bool
+		wantErrContains string
+		wantPurgeCalls  int
+		wantHostDeleted bool
+		wantRemaining   string
+	}{
+		{
+			name:            "deauthorise / host not attached to a machine",
+			objs:            []runtime.Object{byoHost("worker-1-abc12")},
+			operation:       OperationDeauthorise,
+			byoHostName:     "worker-1-abc12",
+			wantErr:         true,
+			wantErrContains: "machineRef is not set",
+			wantHostDeleted: false,
+		},
+		{
+			name:            "decommission / host not attached to a machine",
+			objs:            []runtime.Object{byoHost("worker-1-abc12")},
+			operation:       OperationDecommission,
+			byoHostName:     "worker-1-abc12",
+			wantErr:         false,
+			wantPurgeCalls:  1,
+			wantHostDeleted: true,
+		},
+		{
+			name:            "decommission / only the bare hostname exists",
+			objs:            []runtime.Object{byoHost("worker-1")},
+			operation:       OperationDecommission,
+			force:           true,
+			byoHostName:     "worker-1-abc12",
+			wantErr:         false,
+			wantPurgeCalls:  1,
+			wantHostDeleted: false,
+			wantRemaining:   "worker-1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			k8sClient := fakeClient(t, tt.objs...)
+			io := &stubIO{}
+
+			err := PerformHostOperation(t.Context(), k8sClient, io, tt.operation, testNamespace, tt.byoHostName, tt.force)
+
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErrContains)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tt.wantPurgeCalls, io.purgeN, "purge calls mismatch")
+			_, getErr := k8sClient.GetByoHostObject(testNamespace, tt.byoHostName)
+			if tt.wantHostDeleted {
+				assert.Error(t, getErr, "ByoHost should be gone")
+			}
+			if tt.wantRemaining != "" {
+				_, remainingErr := k8sClient.GetByoHostObject(testNamespace, tt.wantRemaining)
+				assert.NoError(t, remainingErr, "ByoHost should be untouched")
+			}
 		})
 	}
 }
