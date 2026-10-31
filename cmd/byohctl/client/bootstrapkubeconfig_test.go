@@ -38,6 +38,8 @@ const (
 type proxyReply struct {
 	status int
 	body   string
+	// drop closes the connection without answering, to simulate a transport error.
+	drop bool
 }
 
 // recordedRequest is a request the fake oidc-proxy saw.
@@ -74,6 +76,13 @@ func newFakeProxy(t *testing.T, replies map[string][]proxyReply) (*K8sClient, *f
 		reply := queue[0]
 		if len(queue) > 1 {
 			proxy.replies[key] = queue[1:]
+		}
+		if reply.drop {
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				_ = conn.Close()
+			}
+			return
 		}
 		w.WriteHeader(reply.status)
 		_, _ = w.Write([]byte(reply.body))
@@ -274,13 +283,62 @@ func TestWaitForCredentialSecretRef(t *testing.T) {
 		assert.Contains(t, err.Error(), "host-abcde")
 	})
 
-	t.Run("error status stops the wait", func(t *testing.T) {
-		client, _ := resolvedClient(t, map[string][]proxyReply{getKey: one(403, "no")})
+	t.Run("transient failures are retried", func(t *testing.T) {
+		testCases := []struct {
+			name  string
+			first proxyReply
+		}{
+			{name: "503 then success", first: proxyReply{status: 503, body: "unavailable"}},
+			{name: "404 then success", first: proxyReply{status: 404, body: "not found"}},
+			{name: "429 then success", first: proxyReply{status: 429, body: "slow down"}},
+			{name: "transport error then success", first: proxyReply{drop: true}},
+		}
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				client, _ := resolvedClient(t, map[string][]proxyReply{
+					getKey: {tc.first, {status: 200, body: set}},
+				})
 
-		_, err := client.WaitForCredentialSecretRef(context.Background(), "host-abcde", time.Millisecond, 5*time.Second)
-		var statusErr *StatusError
-		require.ErrorAs(t, err, &statusErr)
-		assert.Equal(t, 403, statusErr.StatusCode)
+				got, err := client.WaitForCredentialSecretRef(context.Background(), "host-abcde", time.Millisecond, 5*time.Second)
+				require.NoError(t, err)
+				assert.Equal(t, "host-abcde-cred", got)
+			})
+		}
+	})
+
+	t.Run("client errors fail at once", func(t *testing.T) {
+		testCases := []struct {
+			name   string
+			status int
+		}{
+			{name: "400", status: 400},
+			{name: "401", status: 401},
+			{name: "403", status: 403},
+		}
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				client, proxy := resolvedClient(t, map[string][]proxyReply{getKey: one(tc.status, "no")})
+
+				_, err := client.WaitForCredentialSecretRef(context.Background(), "host-abcde", time.Millisecond, 5*time.Second)
+				var statusErr *StatusError
+				require.ErrorAs(t, err, &statusErr)
+				assert.Equal(t, tc.status, statusErr.StatusCode)
+
+				gets := proxy.seen()[1:]
+				assert.Len(t, gets, 1, "a client error must not be retried")
+			})
+		}
+	})
+
+	t.Run("timeout reports the last error", func(t *testing.T) {
+		client, _ := resolvedClient(t, map[string][]proxyReply{getKey: one(503, "still down")})
+
+		_, err := client.WaitForCredentialSecretRef(context.Background(), "host-abcde", time.Millisecond, 50*time.Millisecond)
+		require.Error(t, err)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.Contains(t, err.Error(), "host-abcde")
+		assert.Contains(t, err.Error(), "status 503")
+		assert.Contains(t, err.Error(), "still down")
 	})
 }
 

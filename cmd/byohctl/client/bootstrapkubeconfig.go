@@ -139,8 +139,16 @@ func (c *K8sClient) CreateBootstrapKubeconfig(ctx context.Context, name, hostNam
 	return nil
 }
 
+// isRetryableStatus reports whether a failed read of the BootstrapKubeconfig can succeed later.
+// Other client errors, such as 400, 401 and 403, will not change by waiting.
+func isRetryableStatus(status int) bool {
+	return status == http.StatusNotFound || status == http.StatusTooManyRequests || status >= http.StatusInternalServerError
+}
+
 // WaitForCredentialSecretRef reads the named BootstrapKubeconfig every interval until its status
-// names the credential Secret, and returns that name. It gives up after timeout.
+// names the credential Secret, and returns that name. Transport errors, 404, 429 and 5xx answers
+// are retried until timeout. Other error statuses end the wait at once. A timeout error names the
+// object and the last error seen.
 func (c *K8sClient) WaitForCredentialSecretRef(ctx context.Context, name string, interval, timeout time.Duration) (string, error) {
 	if c.key == "" {
 		return "", errNamespaceNotResolved
@@ -149,35 +157,46 @@ func (c *K8sClient) WaitForCredentialSecretRef(ctx context.Context, name string,
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	timedOut := func(lastErr error) error {
+		if lastErr == nil {
+			return fmt.Errorf("BootstrapKubeconfig %s has no credential Secret after %s: %w", name, timeout, ctx.Err())
+		}
+		return fmt.Errorf("BootstrapKubeconfig %s has no credential Secret after %s, last error: %v: %w", name, timeout, lastErr, ctx.Err())
+	}
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	var lastErr error
 	for {
 		status, body, err := c.tenantRequest(ctx, http.MethodGet, c.bootstrapKubeconfigPath()+"/"+name, nil)
-		if err != nil {
-			if ctx.Err() != nil {
-				return "", fmt.Errorf("BootstrapKubeconfig %s has no credential Secret after %s: %w", name, timeout, ctx.Err())
+		switch {
+		case ctx.Err() != nil:
+			return "", timedOut(lastErr)
+		case err != nil:
+			lastErr = err
+		case status == http.StatusOK:
+			var object struct {
+				Status struct {
+					CredentialSecretRef string `json:"credentialSecretRef"`
+				} `json:"status"`
 			}
-			return "", err
-		}
-		if status != http.StatusOK {
-			return "", &StatusError{Action: "get BootstrapKubeconfig " + name, StatusCode: status, Body: string(body)}
-		}
-
-		var object struct {
-			Status struct {
-				CredentialSecretRef string `json:"credentialSecretRef"`
-			} `json:"status"`
-		}
-		if err = json.Unmarshal(body, &object); err != nil {
-			return "", fmt.Errorf("parse BootstrapKubeconfig %s: %w", name, err)
-		}
-		if object.Status.CredentialSecretRef != "" {
-			return object.Status.CredentialSecretRef, nil
+			if err = json.Unmarshal(body, &object); err != nil {
+				return "", fmt.Errorf("parse BootstrapKubeconfig %s: %w", name, err)
+			}
+			if object.Status.CredentialSecretRef != "" {
+				return object.Status.CredentialSecretRef, nil
+			}
+		default:
+			statusErr := &StatusError{Action: "get BootstrapKubeconfig " + name, StatusCode: status, Body: string(body)}
+			if !isRetryableStatus(status) {
+				return "", statusErr
+			}
+			lastErr = statusErr
 		}
 
 		select {
 		case <-ctx.Done():
-			return "", fmt.Errorf("BootstrapKubeconfig %s has no credential Secret after %s: %w", name, timeout, ctx.Err())
+			return "", timedOut(lastErr)
 		case <-ticker.C:
 		}
 	}
