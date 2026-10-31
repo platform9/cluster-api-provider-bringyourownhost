@@ -1741,6 +1741,8 @@ spec:
             - --metrics-addr=127.0.0.1:8080
             - --enable-leader-election
             - --byohostagent-heartbeat-timeout={{ .Values.byohostAgentHeartbeatTimeout | default "120s" }}
+            - --bootstrap-apiserver-url={{ .Values.bootstrapAPIServerURL | default "" }}
+            - --bootstrap-apiserver-host-template={{ .Values.bootstrapAPIServerHostTemplate | default "vcluster-cp.k8s.{customerFqdn}" }}
           command:
             - /manager
           env:
@@ -1790,6 +1792,12 @@ metadata:
     cluster.x-k8s.io/provider: infrastructure-byoh
   name: byoh-manager-role
 rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
   - apiGroups:
       - ""
     resources:

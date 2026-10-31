@@ -170,9 +170,10 @@ spec:
 EOF
 ```
 
-Once the BootstrapKubeconfig CR is created, fetch the object to copy the bootstrap kubeconfig file details from the Status field
+Once the BootstrapKubeconfig CR is created, read the Secret named in its status to get the bootstrap kubeconfig file
 ```shell
-kubectl get bootstrapkubeconfig bootstrap-kubeconfig -n default -o=jsonpath='{.status.bootstrapKubeconfigData}' > ~/bootstrap-kubeconfig.conf
+CREDENTIAL_SECRET=$(kubectl get bootstrapkubeconfig bootstrap-kubeconfig -n default -o=jsonpath='{.status.credentialSecretRef}')
+kubectl get secret "$CREDENTIAL_SECRET" -n default -o=jsonpath='{.data.kubeconfig}' | base64 -d > ~/bootstrap-kubeconfig.conf
 ```
 
 We need one bootstrap-kubeconfig per host. Create as many bootstrap-kubeconfig files as there are number of hosts (2 for this guide)
