@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 
-	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	restclient "k8s.io/client-go/rest"
 )
 
@@ -66,15 +65,4 @@ func ResolveIdentity(stateDir string, config *restclient.Config) (string, error)
 	}
 
 	return identity, nil
-}
-
-// ByoHostNameFromIdentity returns the name of the ByoHost that belongs to a
-// host certificate identity.
-func ByoHostNameFromIdentity(identity string) (string, error) {
-	_, hostName, suffix, err := infrastructurev1beta1.ParseHostIdentity(identity)
-	if err != nil {
-		return "", fmt.Errorf("parse agent identity: %w", err)
-	}
-
-	return infrastructurev1beta1.ByoHostName(hostName, suffix), nil
 }

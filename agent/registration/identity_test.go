@@ -21,9 +21,19 @@ import (
 	"github.com/stretchr/testify/require"
 
 	restclient "k8s.io/client-go/rest"
+
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
 )
 
-const testIdentity = "byoh:host:example-tenant:example-worker-1-abc12"
+// testHostIdentity is the identity that the tests put in certificates and state
+// files.
+var testHostIdentity = identity.HostIdentity{
+	TenantNamespace:    "example-tenant",
+	NormalizedHostName: "example-worker-1",
+	Suffix:             "abc12",
+}
+
+var testIdentity = testHostIdentity.String()
 
 func newCertPEM(t *testing.T, commonName string) []byte {
 	t.Helper()
@@ -110,8 +120,12 @@ func TestIdentityFromRESTConfig(t *testing.T) {
 func TestResolveIdentity(t *testing.T) {
 	t.Parallel()
 
-	stateIdentity := "byoh:host:example-tenant:example-worker-1-stat2"
-	certIdentity := "byoh:host:example-tenant:example-worker-1-cert2"
+	stateHostIdentity := testHostIdentity
+	stateHostIdentity.Suffix = "stat2"
+	stateIdentity := stateHostIdentity.String()
+	certHostIdentity := testHostIdentity
+	certHostIdentity.Suffix = "cert2"
+	certIdentity := certHostIdentity.String()
 	certConfig := &restclient.Config{
 		TLSClientConfig: restclient.TLSClientConfig{CertData: newCertPEM(t, certIdentity)},
 	}
@@ -161,48 +175,6 @@ func TestResolveIdentity(t *testing.T) {
 
 			if tc.wantErr != nil {
 				require.ErrorIs(t, err, tc.wantErr)
-				return
-			}
-			require.NoError(t, err)
-			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
-func TestByoHostNameFromIdentity(t *testing.T) {
-	t.Parallel()
-
-	testCases := []struct {
-		name     string
-		identity string
-		want     string
-		wantErr  bool
-	}{
-		{
-			name:     "name is host name and suffix",
-			identity: testIdentity,
-			want:     "example-worker-1-abc12",
-		},
-		{
-			name:     "identity without the suffix is an error",
-			identity: "byoh:host:example-tenant:x",
-			wantErr:  true,
-		},
-		{
-			name:     "identity of another kind is an error",
-			identity: "system:node:example",
-			wantErr:  true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			got, err := ByoHostNameFromIdentity(tc.identity)
-
-			if tc.wantErr {
-				require.Error(t, err)
 				return
 			}
 			require.NoError(t, err)
