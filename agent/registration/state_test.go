@@ -265,6 +265,53 @@ func TestState_SaveIsAtomicUnderConcurrency(t *testing.T) {
 	assert.Equal(t, StateFileName, entries[0].Name())
 }
 
+func TestState_Matches(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name     string
+		identity string
+		wantErr  bool
+	}{
+		{
+			name:     "identity of this tenant and host",
+			identity: "byoh:host:" + testTenant + ":" + testHostName + "-abc12",
+			wantErr:  false,
+		},
+		{
+			name:     "identity of another tenant",
+			identity: "byoh:host:other-tenant:" + testHostName + "-abc12",
+			wantErr:  true,
+		},
+		{
+			name:     "identity of another host",
+			identity: "byoh:host:" + testTenant + ":other-host-abc12",
+			wantErr:  true,
+		},
+		{
+			name:     "unparsable identity",
+			identity: "not-an-identity",
+			wantErr:  true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			st := &State{Identity: tc.identity}
+
+			err := st.matches(testTenant, testHostName)
+
+			if tc.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
+}
+
 func TestRemoveOnboardingFiles(t *testing.T) {
 	t.Parallel()
 

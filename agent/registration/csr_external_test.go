@@ -195,18 +195,6 @@ kovW9X7Ook/tTW0HyX6D6HRciA==
 			err = CSRRegistrar.BootstrapKubeconfig(context.Background(), tenant, "", "")
 			Expect(err).To(MatchError("hostname is not valid"))
 		})
-		It("should return error if tenant is invalid", func() {
-			CSRRegistrar, err := registration.NewByohCSR(bootstrapCfg, logr.Discard(), certExpiryDuration)
-			Expect(err).ShouldNot(HaveOccurred())
-			err = CSRRegistrar.BootstrapKubeconfig(context.Background(), "", hostName, "")
-			Expect(err).To(MatchError("tenant is not valid"))
-		})
-		It("should return error if the bootstrap kubeconfig has no bearer token", func() {
-			CSRRegistrar, err := registration.NewByohCSR(cfg, logr.Discard(), certExpiryDuration)
-			Expect(err).ShouldNot(HaveOccurred())
-			err = CSRRegistrar.BootstrapKubeconfig(context.Background(), tenant, hostName, "")
-			Expect(err).To(MatchError("bootstrap kubeconfig has no bearer token"))
-		})
 		It("should return client config if bootstrap kubeconfig is valid", func() {
 			fileboot, err := os.CreateTemp(fileDir, "bootstrapkubeconfig")
 			Expect(err).ShouldNot(HaveOccurred())

@@ -124,7 +124,7 @@ func TestNewCSRName(t *testing.T) {
 	second := newCSRName(testTenant, testHostName)
 	assert.NotEqual(t, first, second, "every CSR gets a new random part")
 	assert.True(t, strings.HasPrefix(first, wantPrefix), first)
-	assert.Len(t, strings.TrimPrefix(first, wantPrefix), randomPartLength)
+	assert.Len(t, strings.TrimPrefix(first, wantPrefix), csrNameSuffixLength)
 
 	longName := newCSRName(testTenant, longHostName)
 	assert.True(t, strings.HasPrefix(longName, "byoh-csr-"+testTenant+"-"+longHostName+"-"), longName)
@@ -140,38 +140,42 @@ func TestNewIdentity(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, testTenant, tenant)
 	assert.Equal(t, testHostName, hostName)
-	assert.Len(t, suffix, 5)
+	assert.Len(t, suffix, IdentitySuffixLength)
 	assert.Regexp(t, "^[bcdfghjklmnpqrstvwxz2456789]{5}$", suffix)
 
 	assert.NotEqual(t, identity, newIdentity(testTenant, testHostName), "every onboarding gets a new suffix")
 }
 
-func TestState_Matches(t *testing.T) {
+func TestByohCSR_BootstrapKubeconfig_InvalidArguments(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
-		name     string
-		identity string
-		wantErr  bool
+		name      string
+		tenant    string
+		hostName  string
+		token     string
+		wantError string
 	}{
 		{
-			name:     "same tenant and host name",
-			identity: "byoh:host:" + testTenant + ":" + testHostName + "-abc12",
+			name:      "empty host name",
+			tenant:    testTenant,
+			hostName:  "",
+			token:     testToken,
+			wantError: "hostname is not valid",
 		},
 		{
-			name:     "different tenant",
-			identity: "byoh:host:other-tenant:" + testHostName + "-abc12",
-			wantErr:  true,
+			name:      "empty tenant",
+			tenant:    "",
+			hostName:  testHostName,
+			token:     testToken,
+			wantError: "tenant is not valid",
 		},
 		{
-			name:     "different host name",
-			identity: "byoh:host:" + testTenant + ":other-host-abc12",
-			wantErr:  true,
-		},
-		{
-			name:     "identity that does not parse",
-			identity: "not-an-identity",
-			wantErr:  true,
+			name:      "bootstrap kubeconfig without bearer token",
+			tenant:    testTenant,
+			hostName:  testHostName,
+			token:     "",
+			wantError: "bootstrap kubeconfig has no bearer token",
 		},
 	}
 
@@ -179,15 +183,12 @@ func TestState_Matches(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			st := &State{Identity: tc.identity}
+			bcsr, _ := newTestByohCSR(t, t.TempDir())
+			bcsr.bootstrapClientConfig = &restclient.Config{BearerToken: tc.token}
 
-			err := st.matches(testTenant, testHostName)
+			err := bcsr.BootstrapKubeconfig(t.Context(), tc.tenant, tc.hostName, "")
 
-			if tc.wantErr {
-				assert.Error(t, err)
-				return
-			}
-			assert.NoError(t, err)
+			assert.EqualError(t, err, tc.wantError)
 		})
 	}
 }

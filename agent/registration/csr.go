@@ -46,7 +46,13 @@ const (
 	ByohCSRNameFormat = "byoh-csr-%s-%s-%s"
 	DefaultConfigPath = ".byoh/config"
 
-	randomPartLength = 5
+	// IdentitySuffixLength is the length of the random suffix at the end of a
+	// host identity. It must equal the suffix length that
+	// infrastructurev1beta1.ParseHostIdentity accepts.
+	IdentitySuffixLength = 5
+	// csrNameSuffixLength is the length of the random suffix at the end of a
+	// CSR name.
+	csrNameSuffixLength = 5
 )
 
 var (
@@ -151,27 +157,14 @@ func bootstrapTokenID(config *restclient.Config) (string, error) {
 
 // newCSRName returns a CSR name that has not been used before.
 func newCSRName(tenant, hostName string) string {
-	return fmt.Sprintf(ByohCSRNameFormat, tenant, hostName, utilrand.String(randomPartLength))
+	return fmt.Sprintf(ByohCSRNameFormat, tenant, hostName, utilrand.String(csrNameSuffixLength))
 }
 
 // newIdentity returns the certificate common name for one onboarding. The
 // suffix is new for every onboarding, so every onboarding of a host gets its
 // own identity and its own ByoHost name.
 func newIdentity(tenant, hostName string) string {
-	return infrastructurev1beta1.FormatHostIdentity(tenant, hostName, utilrand.String(randomPartLength))
-}
-
-// matches reports whether the identity in st is for this tenant and host
-// name, so a changed --namespace or hostname never reuses an old identity.
-func (st *State) matches(tenant, hostName string) error {
-	stTenant, stHostName, _, err := infrastructurev1beta1.ParseHostIdentity(st.Identity)
-	if err != nil {
-		return fmt.Errorf("state has an unusable identity: %w", err)
-	}
-	if stTenant != tenant || stHostName != hostName {
-		return fmt.Errorf("state belongs to tenant %q and host %q, not %q and %q", stTenant, stHostName, tenant, hostName)
-	}
-	return nil
+	return infrastructurev1beta1.FormatHostIdentity(tenant, hostName, utilrand.String(IdentitySuffixLength))
 }
 
 // loadOrCreateState returns the state of the current onboarding and its
