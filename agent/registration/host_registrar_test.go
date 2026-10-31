@@ -74,11 +74,15 @@ func TestHostRegistrar_Register(t *testing.T) {
 		name          string
 		agentIdentity string
 		existing      *infrastructurev1beta1.ByoHost
+		labels        map[string]string
+		wantLabels    map[string]string
 		wantConflict  bool
 	}{
 		{
-			name:          "missing ByoHost is created and patched",
+			name:          "missing ByoHost is created with the given labels and patched",
 			agentIdentity: identityOne,
+			labels:        map[string]string{"example": "label"},
+			wantLabels:    map[string]string{"example": "label"},
 		},
 		{
 			name:          "same identity is a restart and is patched",
@@ -119,7 +123,7 @@ func TestHostRegistrar_Register(t *testing.T) {
 				ByoHostInfo: HostInfo{HostName: registrarNormalizedHostName},
 			}
 
-			err := hr.Register(t.Context(), registrarByoHostName, registrarNamespace, map[string]string{"example": "label"})
+			err := hr.Register(t.Context(), registrarByoHostName, registrarNamespace, tc.labels)
 
 			stored := &infrastructurev1beta1.ByoHost{}
 			getErr := k8sClient.Get(t.Context(), key, stored)
@@ -139,24 +143,7 @@ func TestHostRegistrar_Register(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, registrarNormalizedHostName, stored.Status.HostDetails.NormalizedHostName)
 			assert.Contains(t, stored.Labels, infrastructurev1beta1.HostArchitectureLabel)
+			assert.Subset(t, stored.Labels, tc.wantLabels)
 		})
 	}
-}
-
-func TestHostRegistrar_Register_CreatesByoHostWithGivenName(t *testing.T) {
-	t.Parallel()
-
-	k8sClient := newRegistrarClient(t)
-	hr := &HostRegistrar{K8sClient: k8sClient, Identity: identityOne}
-
-	err := hr.Register(t.Context(), registrarByoHostName, registrarNamespace, map[string]string{"example": "label"})
-	require.NoError(t, err)
-
-	list := &infrastructurev1beta1.ByoHostList{}
-	err = k8sClient.List(t.Context(), list)
-	require.NoError(t, err)
-	require.Len(t, list.Items, 1)
-	assert.Equal(t, registrarByoHostName, list.Items[0].Name)
-	assert.Equal(t, registrarNamespace, list.Items[0].Namespace)
-	assert.Equal(t, "label", list.Items[0].Labels["example"])
 }
