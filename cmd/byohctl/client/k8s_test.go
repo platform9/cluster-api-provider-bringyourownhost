@@ -26,8 +26,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/types"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
 )
 
 // Test client initialization with options
@@ -368,28 +368,32 @@ func newCertPEM(t *testing.T, commonName string) []byte {
 }
 
 func TestGetHostRefFromConfig(t *testing.T) {
-	validCert := newCertPEM(t, infrastructurev1beta1.FormatHostIdentity("tenant-a", "worker-1", "abc12"))
+	validCert := newCertPEM(t, identity.HostIdentity{
+		TenantNamespace:    "tenant-a",
+		NormalizedHostName: "worker-1",
+		Suffix:             "abc12",
+	}.String())
 
 	tests := []struct {
-		name          string
-		certPEM       []byte
-		inline        bool
-		wantNamespace string
-		wantName      string
-		wantErr       string
+		name                string
+		certPEM             []byte
+		inline              bool
+		wantTenantNamespace string
+		wantName            string
+		wantErr             string
 	}{
 		{
-			name:          "inline certificate data",
-			certPEM:       validCert,
-			inline:        true,
-			wantNamespace: "tenant-a",
-			wantName:      "worker-1-abc12",
+			name:                "inline certificate data",
+			certPEM:             validCert,
+			inline:              true,
+			wantTenantNamespace: "tenant-a",
+			wantName:            "worker-1-abc12",
 		},
 		{
-			name:          "certificate file path",
-			certPEM:       validCert,
-			wantNamespace: "tenant-a",
-			wantName:      "worker-1-abc12",
+			name:                "certificate file path",
+			certPEM:             validCert,
+			wantTenantNamespace: "tenant-a",
+			wantName:            "worker-1-abc12",
 		},
 		{
 			name:    "no certificate",
@@ -427,7 +431,7 @@ func TestGetHostRefFromConfig(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
-			assert.Equal(t, tt.wantNamespace, namespace)
+			assert.Equal(t, tt.wantTenantNamespace, namespace)
 			assert.Equal(t, tt.wantName, name)
 		})
 	}

@@ -22,6 +22,7 @@ import (
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/service"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/types"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -114,11 +115,11 @@ func GetHostRefFromConfig(kubeconfigPath string) (namespace, name string, err er
 		return "", "", fmt.Errorf("error parsing client certificate: %w", err)
 	}
 
-	tenantNamespace, hostName, suffix, err := infrastructurev1beta1.ParseHostIdentity(cert.Subject.CommonName)
+	hostIdentity, err := identity.Parse(cert.Subject.CommonName)
 	if err != nil {
 		return "", "", fmt.Errorf("client certificate common name is not a host identity: %w", err)
 	}
-	return tenantNamespace, infrastructurev1beta1.ByoHostName(hostName, suffix), nil
+	return hostIdentity.TenantNamespace, hostIdentity.ByoHostName(), nil
 }
 
 // getNamespace returns the namespace for the client
