@@ -57,8 +57,10 @@ type K8sClient struct {
 	insecure bool
 	// projectID is the tenant's Keystone project ID, empty if it couldn't be looked up.
 	projectID string
-	// namespace is the tenant namespace GetSecret found the secret in; empty until then.
+	// namespace is the tenant namespace GetSecret or ResolveTenantNamespace found; empty until then.
 	namespace string
+	// key is the oidc-proxy key that served the request that set namespace; empty until then.
+	key string
 }
 
 // maxLenProjectID matches barista generateTenantNameByID.
@@ -187,6 +189,47 @@ func (c *K8sClient) tenantRefs() []tenantRef {
 	return append(refs, tenantRef{key: legacy, namespace: legacy})
 }
 
+// getFromTenant GETs resourcePath, relative to the tenant namespace, through the oidc-proxy. It
+// tries each tenantRef in order, moves on after a non-200 answer except on the last ref, and
+// returns the body with the ref that answered.
+func (c *K8sClient) getFromTenant(ctx context.Context, resourcePath string) (body []byte, ref tenantRef, err error) {
+	refs := c.tenantRefs()
+	for i, ref := range refs {
+		endpoint := fmt.Sprintf("https://%s/oidc-proxy/%s/%s/api/v1/namespaces/%s/%s",
+			c.fqdn, ref.key, c.regionName, ref.namespace, resourcePath)
+
+		req, err := http.NewRequestWithContext(ctx, "GET", endpoint, http.NoBody)
+		if err != nil {
+			return nil, tenantRef{}, utils.LogErrorf("error creating request: %v", err)
+		}
+
+		req.Header.Add("Authorization", "Bearer "+c.bearerToken)
+
+		resp, err := c.client.Do(req)
+		if err != nil {
+			return nil, tenantRef{}, utils.LogErrorf("error making request: %v", err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, tenantRef{}, utils.LogErrorf("error reading response: %v", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			// 403/404 means wrong namespace, so try the next one.
+			if i < len(refs)-1 {
+				utils.LogDebug("%s not found in namespace %s (status %d), trying next",
+					resourcePath, ref.namespace, resp.StatusCode)
+				continue
+			}
+			return nil, tenantRef{}, utils.LogErrorf("error getting %s (status %d): %s", resourcePath, resp.StatusCode, string(body))
+		}
+		return body, ref, nil
+	}
+	// Unreachable: tenantRefs always returns at least the legacy namespace.
+	return nil, tenantRef{}, utils.LogErrorf("no tenant namespace to fetch %s from", resourcePath)
+}
+
 // GetSecret retrieves a secret, trying each tenantRef and remembering the one that worked.
 func (c *K8sClient) GetSecret(secretName string) (*types.Secret, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
@@ -194,51 +237,22 @@ func (c *K8sClient) GetSecret(secretName string) (*types.Secret, error) {
 
 	utils.LogInfo("Fetching secret '%s'", secretName)
 
-	refs := c.tenantRefs()
-	for i, ref := range refs {
-		secretEndpoint := fmt.Sprintf("https://%s/oidc-proxy/%s/%s/api/v1/namespaces/%s/secrets/%s",
-			c.fqdn, ref.key, c.regionName, ref.namespace, secretName)
-
-		req, err := http.NewRequestWithContext(ctx, "GET", secretEndpoint, http.NoBody)
-		if err != nil {
-			return nil, utils.LogErrorf("error creating request: %v", err)
-		}
-
-		req.Header.Add("Authorization", "Bearer "+c.bearerToken)
-
-		resp, err := c.client.Do(req)
-		if err != nil {
-			return nil, utils.LogErrorf("error making request: %v", err)
-		}
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			return nil, utils.LogErrorf("error reading response: %v", err)
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			// 403/404 means wrong namespace, so try the next one.
-			if i < len(refs)-1 {
-				utils.LogDebug("Secret not found in namespace %s (status %d), trying next",
-					ref.namespace, resp.StatusCode)
-				continue
-			}
-			return nil, utils.LogErrorf("error getting secret (status %d): %s", resp.StatusCode, string(body))
-		}
-
-		var secret types.Secret
-		err = json.Unmarshal(body, &secret)
-		if err != nil {
-			return nil, utils.LogErrorf("error parsing secret: %v", err)
-		}
-
-		c.namespace = ref.namespace
-		utils.LogDebug("Using tenant namespace %s", ref.namespace)
-		utils.LogSuccess("Successfully retrieved secret")
-		return &secret, nil
+	body, ref, err := c.getFromTenant(ctx, "secrets/"+secretName)
+	if err != nil {
+		return nil, err
 	}
-	// Unreachable: tenantRefs always returns at least the legacy namespace.
-	return nil, utils.LogErrorf("no tenant namespace to fetch secret %s from", secretName)
+
+	var secret types.Secret
+	err = json.Unmarshal(body, &secret)
+	if err != nil {
+		return nil, utils.LogErrorf("error parsing secret: %v", err)
+	}
+
+	c.key = ref.key
+	c.namespace = ref.namespace
+	utils.LogDebug("Using tenant namespace %s", ref.namespace)
+	utils.LogSuccess("Successfully retrieved secret")
+	return &secret, nil
 }
 
 // SaveKubeConfig saves the kubeconfig from the secret to the user's BYOH directory
@@ -546,12 +560,18 @@ func (c *K8sClient) CheckRegionAvailability(ctx context.Context, regionName stri
 	if !ok {
 		return false, nil, fmt.Errorf("region configmap does not have regions key")
 	}
+	found, knownRegions = matchRegion(regionsStr, regionName)
+	return found, knownRegions, nil
+}
+
+// matchRegion reports whether regionName is one of the newline-separated regions. When it is
+// not, it also returns the list of known regions.
+func matchRegion(regionsStr, regionName string) (found bool, knownRegions []string) {
 	regions := strings.Split(regionsStr, "\n")
 	for _, region := range regions {
 		if strings.TrimSpace(region) == regionName {
-			return true, nil, nil
+			return true, nil
 		}
 	}
-
-	return false, regions, nil
+	return false, regions
 }
