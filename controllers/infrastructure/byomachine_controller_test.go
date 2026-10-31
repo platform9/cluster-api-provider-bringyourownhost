@@ -30,14 +30,14 @@ func TestByoMachineReconciler_setNodeProviderID(t *testing.T) {
 		hostIDRegex = ProviderIDPrefix + hostName + "/.+"
 	)
 
-	newHost := func(name, reportedHostName string) *infrav1.ByoHost {
+	newHost := func(name, normalizedHostName string) *infrav1.ByoHost {
 		return &infrav1.ByoHost{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
 				Namespace: namespace,
 			},
 			Status: infrav1.ByoHostStatus{
-				HostDetails: infrav1.HostInfo{HostName: reportedHostName},
+				HostDetails: infrav1.HostInfo{NormalizedHostName: normalizedHostName},
 			},
 		}
 	}

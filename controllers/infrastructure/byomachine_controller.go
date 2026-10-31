@@ -407,7 +407,7 @@ func (r *ByoMachineReconciler) setNodeProviderID(ctx context.Context, remoteClie
 	// kubeadm names the Node after the host's normalized hostname, which the
 	// agent reports in status. Hosts that never reported it (token based or
 	// older agents) are registered under their hostname.
-	nodeName := host.Status.HostDetails.HostName
+	nodeName := host.Status.HostDetails.NormalizedHostName
 	if nodeName == "" {
 		nodeName = host.Name
 	}
