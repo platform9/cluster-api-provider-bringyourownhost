@@ -15,6 +15,7 @@ import (
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/client"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/service"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/hostname"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v2"
@@ -53,10 +54,16 @@ This command will:
 2. Get required configuration
 3. Setup the host for management
 
+By default the command reads the shared bootstrap secret of the tenant.
+Use --cert-auth to give the host its own certificate instead. The command asks
+Platform9 for a short-lived bootstrap credential and the host agent exchanges it
+for its own certificate.
+
 You can provide input values via CLI flags or a YAML config file using --config/-f, or a combination of both..
 CLI flags take precedence over config file values.`,
-	Example: `  byohctl onboard -u your-fqdn.platform9.com -e admin@platform9.com -c client-token
-  byohctl onboard -u your-fqdn.platform9.com -e admin@platform9.com -c client-token -d custom-domain -t custom-tenant
+	Example: `  byohctl onboard -u your-fqdn.platform9.com -e admin@platform9.com -c client-token -r region-name
+  byohctl onboard -u your-fqdn.platform9.com -e admin@platform9.com -c client-token -r region-name --cert-auth
+  byohctl onboard -u your-fqdn.platform9.com -e admin@platform9.com -c client-token -r region-name -d custom-domain -t custom-tenant
   byohctl onboard --config onboard-config.yaml
   byohctl onboard --config onboard-config.yaml --username overrideuser`,
 	Run: runOnboard,
@@ -92,6 +99,8 @@ func AddOnboardFlags(cmd *cobra.Command,
 	cmd.Flags().StringVarP(configFile, "config", "f", "", "Path to onboarding config YAML file")
 	cmd.Flags().StringVar(bootstrapKubeconfigPath, "bootstrap-kubeconfig", "", "Path to a bootstrap kubeconfig")
 	cmd.Flags().StringVar(hostNamespace, "namespace", "default", "Namespace to register this host in (only used with --bootstrap-kubeconfig)")
+	cmd.Flags().BoolVar(&certAuth, "cert-auth", false, "Give the host its own certificate instead of the shared bootstrap secret")
+	cmd.MarkFlagsMutuallyExclusive("cert-auth", "bootstrap-kubeconfig")
 	cmd.MarkFlagsMutuallyExclusive("bootstrap-kubeconfig", "username")
 	cmd.MarkFlagsMutuallyExclusive("bootstrap-kubeconfig", "client-token")
 	cmd.MarkFlagsMutuallyExclusive("bootstrap-kubeconfig", "url")
@@ -334,7 +343,14 @@ func runOnboard(cmd *cobra.Command, args []string) {
 		mergeConfigWithFlags(cfg)
 	}
 
-	usingBootstrapKubeconfig := bootstrapKubeconfigPath != ""
+	flow := selectOnboardFlow(certAuth, bootstrapKubeconfigPath)
+	usingBootstrapKubeconfig := flow == flowBootstrapKubeconfig
+	if flow == flowCertificate {
+		if err := checkCertFlowFlags(cmd); err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
+		}
+	}
 
 	missing := []string{}
 	if !usingBootstrapKubeconfig {
@@ -439,6 +455,46 @@ func runOnboard(cmd *cobra.Command, args []string) {
 		utils.LogDebug("Using bootstrap kubeconfig %s, namespace %s", bootstrapKubeconfigPath, hostNamespace)
 		utils.LogInfo("Handing bootstrap credential to the agent")
 		if err = writeBootstrapCredential(byohDir, bootstrapAgentConfDir, bootstrapKubeconfigPath, hostNamespace); err != nil {
+			utils.LogError("Failed to write bootstrap credential: %v", err)
+			os.Exit(1)
+		}
+	} else if flow == flowCertificate {
+		utils.LogDebug("Using FQDN: %s, Domain: %s, Tenant: %s", fqdn, domain, tenant)
+
+		var rawHostName, hostName string
+		rawHostName, err = os.Hostname()
+		if err != nil {
+			utils.LogError("Failed to read the host name: %v", err)
+			os.Exit(1)
+		}
+		hostName, err = hostname.Normalize(rawHostName)
+		if err != nil {
+			utils.LogError("Failed to normalize the host name %q: %v", rawHostName, err)
+			os.Exit(1)
+		}
+
+		utils.LogInfo("Requesting a certificate-based identity for this host")
+		var kubeconfig []byte
+		var namespace string
+		kubeconfig, namespace, err = runCertOnboarding(cmd.Context(), &certOnboardParams{
+			fqdn:         fqdn,
+			username:     username,
+			password:     password,
+			clientToken:  clientToken,
+			domain:       domain,
+			tenant:       tenant,
+			region:       regionName,
+			hostName:     hostName,
+			insecure:     insecure,
+			pollInterval: credentialPollInterval,
+			pollTimeout:  credentialPollTimeout,
+		})
+		if err != nil {
+			utils.LogError("Failed to get a bootstrap credential: %v", err)
+			os.Exit(1)
+		}
+		utils.LogInfo("Handing bootstrap credential to the agent")
+		if err = writeBootstrapCredentialBytes(byohDir, bootstrapAgentConfDir, kubeconfig, namespace); err != nil {
 			utils.LogError("Failed to write bootstrap credential: %v", err)
 			os.Exit(1)
 		}
