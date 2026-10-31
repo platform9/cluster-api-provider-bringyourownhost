@@ -16,21 +16,18 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
-	"sigs.k8s.io/cluster-api/util/patch"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 var _ = Describe("Controllers/BoottrapKubeconfigController", func() {
 	var (
-		k8sClientUncached               client.Client
-		bootstrapKubeconfigLookupKey    types.NamespacedName
-		bootstrapKubeConfig             *infrav1.BootstrapKubeconfig
-		ctx                             = context.Background()
-		testServer                      = "123.123.123.123:1234"
-		testCAData                      = "test-ca-data"
-		existingBootstrapKubeconfigData = "i am already present"
+		k8sClientUncached            client.Client
+		bootstrapKubeconfigLookupKey types.NamespacedName
+		bootstrapKubeConfig          *infrav1.BootstrapKubeconfig
+		ctx                          = context.Background()
+		testServer                   = "123.123.123.123:1234"
+		testCAData                   = "test-ca-data"
 	)
 
 	It("should ignore bootstrapkubeconfig if it is not found", func() {
@@ -60,18 +57,6 @@ var _ = Describe("Controllers/BoottrapKubeconfigController", func() {
 			WaitForObjectsToBePopulatedInCache(ctx, bootstrapKubeConfig)
 
 			bootstrapKubeconfigLookupKey = types.NamespacedName{Name: bootstrapKubeConfig.Name, Namespace: bootstrapKubeConfig.Namespace}
-		})
-
-		It("should return empty result if BootstrapKubeconfigData is already present", func() {
-			helper, err := patch.NewHelper(bootstrapKubeConfig, k8sClientUncached)
-			Expect(err).NotTo(HaveOccurred())
-			bootstrapKubeConfig.Status.BootstrapKubeconfigData = &existingBootstrapKubeconfigData //nolint: staticcheck // SA1019: deprecated field, readers go away with the controller changes
-			Expect(helper.Patch(ctx, bootstrapKubeConfig)).NotTo(HaveOccurred())
-
-			res, err := bootstrapKubeconfigReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: bootstrapKubeconfigLookupKey})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(res).To(Equal(ctrl.Result{}))
 		})
 
 		It("should generate the bootstrap kubeconfig data", func() {

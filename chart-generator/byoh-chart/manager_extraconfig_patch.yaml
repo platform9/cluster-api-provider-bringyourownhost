@@ -20,3 +20,5 @@ spec:
           - "--metrics-addr=127.0.0.1:8080"
           - "--enable-leader-election"
           - "--byohostagent-heartbeat-timeout={{ .Values.byohostAgentHeartbeatTimeout | default \"120s\" }}"
+          - "--bootstrap-apiserver-url={{ .Values.bootstrapAPIServerURL | default \"\" }}"
+          - "--bootstrap-apiserver-host-template={{ .Values.bootstrapAPIServerHostTemplate | default \"vcluster-cp.k8s.{customerFqdn}\" }}"
