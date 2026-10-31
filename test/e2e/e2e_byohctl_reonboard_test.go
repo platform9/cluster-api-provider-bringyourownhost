@@ -21,6 +21,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/agent/registration"
 	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/bootstraptoken"
 	certv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -217,9 +218,8 @@ func assertOnboardingState(ctx context.Context, dockerClient *dockerclient.Clien
 	Expect(config.AuthInfos).NotTo(BeEmpty())
 	var tokenID, tokenSecret string
 	for _, authInfo := range config.AuthInfos {
-		var found bool
-		tokenID, tokenSecret, found = strings.Cut(authInfo.Token, ".")
-		Expect(found).To(BeTrue(), "bootstrap token is not of the form <id>.<secret>")
+		tokenID, tokenSecret, err = bootstraptoken.GetTokenIDSecretFromBootstrapToken(authInfo.Token)
+		Expect(err).NotTo(HaveOccurred())
 		break
 	}
 
