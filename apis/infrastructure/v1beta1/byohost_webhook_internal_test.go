@@ -24,6 +24,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
 )
 
 const (
@@ -35,14 +37,46 @@ const (
 
 // Valid host identities used as the requesting user.
 var (
-	byohHostOneUser   = FormatHostIdentity("default", "host1", "x7k2p")
-	byohHostTwoUser   = FormatHostIdentity("default", "host2", "x7k2p")
-	worker1User       = FormatHostIdentity("default", "worker-1", "abcde")
-	suffixLikeUser    = FormatHostIdentity("default", "web-abcde", "xyzwq")
-	hyphenTenantUser  = FormatHostIdentity("a-b-c", "host1", "x7k2p")
-	otherTenantUser   = FormatHostIdentity("other", "host1", "x7k2p")
-	newSuffixUser     = FormatHostIdentity("default", "host1", "new02")
-	oldSuffixIdentity = FormatHostIdentity("default", "host1", "old01")
+	byohHostOneUser = identity.HostIdentity{
+		TenantNamespace:    "default",
+		NormalizedHostName: "host1",
+		Suffix:             "x7k2p",
+	}.String()
+	byohHostTwoUser = identity.HostIdentity{
+		TenantNamespace:    "default",
+		NormalizedHostName: "host2",
+		Suffix:             "x7k2p",
+	}.String()
+	worker1User = identity.HostIdentity{
+		TenantNamespace:    "default",
+		NormalizedHostName: "worker-1",
+		Suffix:             "abcde",
+	}.String()
+	suffixLikeUser = identity.HostIdentity{
+		TenantNamespace:    "default",
+		NormalizedHostName: "web-abcde",
+		Suffix:             "xyzwq",
+	}.String()
+	hyphenTenantUser = identity.HostIdentity{
+		TenantNamespace:    "a-b-c",
+		NormalizedHostName: "host1",
+		Suffix:             "x7k2p",
+	}.String()
+	otherTenantUser = identity.HostIdentity{
+		TenantNamespace:    "other",
+		NormalizedHostName: "host1",
+		Suffix:             "x7k2p",
+	}.String()
+	newSuffixUser = identity.HostIdentity{
+		TenantNamespace:    "default",
+		NormalizedHostName: "host1",
+		Suffix:             "new02",
+	}.String()
+	oldSuffixIdentity = identity.HostIdentity{
+		TenantNamespace:    "default",
+		NormalizedHostName: "host1",
+		Suffix:             "old01",
+	}.String()
 )
 
 // testNamespace defines the namespace where the objects in test are created.
@@ -182,7 +216,7 @@ func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 	// request broke.
 	notAnIdentityMsg := func(userName string) string {
 		return fmt.Sprintf("%s is not a valid agent username: identity %q is invalid: does not start with %q",
-			userName, userName, HostIdentityPrefix)
+			userName, userName, identity.Prefix)
 	}
 
 	testCases := []struct {

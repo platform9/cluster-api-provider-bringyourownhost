@@ -16,6 +16,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
 )
 
 //+kubebuilder:webhook:path=/validate-infrastructure-cluster-x-k8s-io-v1beta1-byohost,mutating=false,failurePolicy=fail,sideEffects=None,groups=infrastructure.cluster.x-k8s.io,resources=byohosts,verbs=create;update;delete,versions=v1beta1,name=vbyohost.kb.io,admissionReviewVersions={v1,v1beta1}
@@ -74,7 +76,7 @@ func (v *ByoHostValidator) handleCreateUpdate(req *admission.Request) admission.
 
 	// A host certificate never takes the paths below: its tail could look like
 	// an email address.
-	if !strings.HasPrefix(userName, HostIdentityPrefix) {
+	if !identity.HasPrefix(userName) {
 		// allow users with email-like usernames
 		if emailLikeUserRegex.MatchString(userName) {
 			return admission.Allowed("")
@@ -88,16 +90,16 @@ func (v *ByoHostValidator) handleCreateUpdate(req *admission.Request) admission.
 		}
 	}
 
-	// The tenant and host name come from the authenticated identity, not from
-	// the object that issued the certificate, which may be gone by now. The
-	// tenant is compared with the namespace of the admission request, because
-	// the object body is controlled by the requester.
-	tenant, hostName, suffix, err := ParseHostIdentity(userName)
+	// The tenant namespace and host name come from the authenticated identity,
+	// not from the object that issued the certificate, which may be gone by
+	// now. The tenant namespace is compared with the namespace of the admission
+	// request, because the object body is controlled by the requester.
+	hostIdentity, err := identity.Parse(userName)
 	if err != nil {
 		return admission.Denied(fmt.Sprintf("%s is not a valid agent username: %s", userName, err.Error()))
 	}
 
-	if tenant != req.Namespace || ByoHostName(hostName, suffix) != byoHost.Name {
+	if hostIdentity.TenantNamespace != req.Namespace || hostIdentity.ByoHostName() != byoHost.Name {
 		return admission.Denied(fmt.Sprintf("%s cannot create/update resource %s", userName, byoHost.Name))
 	}
 
@@ -133,13 +135,13 @@ func (v *ByoHostValidator) handleDelete(ctx context.Context, req *admission.Requ
 	}
 
 	// A host certificate may only delete its own ByoHost.
-	if userName := req.UserInfo.Username; strings.HasPrefix(userName, HostIdentityPrefix) {
-		tenant, hostName, suffix, parseErr := ParseHostIdentity(userName)
+	if userName := req.UserInfo.Username; identity.HasPrefix(userName) {
+		hostIdentity, parseErr := identity.Parse(userName)
 		if parseErr != nil {
 			return admission.Denied(fmt.Sprintf("%s is not a valid agent username: %s", userName, parseErr.Error()))
 		}
 
-		if tenant != req.Namespace || ByoHostName(hostName, suffix) != byoHost.Name {
+		if hostIdentity.TenantNamespace != req.Namespace || hostIdentity.ByoHostName() != byoHost.Name {
 			return admission.Denied(fmt.Sprintf("%s cannot delete resource %s", userName, byoHost.Name))
 		}
 	}
@@ -196,7 +198,7 @@ func (s *ByoHostIdentityStamper) Handle(_ context.Context, req admission.Request
 	// hosts under its own identity, which names no host and would make the
 	// record meaningless. A caller that is not a host must also not be able to
 	// plant an identity of its own, because renewal is authorized against it.
-	if _, _, _, err := ParseHostIdentity(req.UserInfo.Username); err != nil {
+	if _, err := identity.Parse(req.UserInfo.Username); err != nil {
 		if byoHost.Spec.Identity == "" {
 			return admission.Allowed("")
 		}
