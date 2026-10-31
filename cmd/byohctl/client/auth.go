@@ -4,6 +4,7 @@
 package client
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -79,4 +80,58 @@ func (c *AuthClient) GetToken(username, password string) (string, error) {
 
 	utils.LogSuccess("Successfully obtained authentication token")
 	return tokenResp.IDToken, nil
+}
+
+// defaultDomainID is Keystone's Default domain, where Dex logs users in.
+const defaultDomainID = "default"
+
+// GetProjectID returns the Keystone project ID of tenant in domain via a project-scoped login.
+func (c *AuthClient) GetProjectID(username, password, domain, tenant string) (string, error) {
+	var body types.KeystoneAuthRequest
+	body.Auth.Identity.Methods = []string{passwordKey}
+	body.Auth.Identity.Password.User.Name = username
+	body.Auth.Identity.Password.User.Domain.ID = defaultDomainID
+	body.Auth.Identity.Password.User.Password = password
+	body.Auth.Scope.Project.Name = tenant
+	// --domain defaults to "default" but the domain is named "Default", so scope by ID.
+	if strings.EqualFold(domain, defaultDomainID) {
+		body.Auth.Scope.Project.Domain.ID = defaultDomainID
+	} else {
+		body.Auth.Scope.Project.Domain.Name = domain
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("failed to build keystone request: %w", err)
+	}
+
+	tokenEndpoint := fmt.Sprintf("https://%s/keystone/v3/auth/tokens?nocatalog", c.fqdn)
+	//nolint:noctx // matches GetToken, which takes no context either
+	req, err := http.NewRequest("POST", tokenEndpoint, bytes.NewReader(payload))
+	if err != nil {
+		return "", fmt.Errorf("failed to create keystone request: %w", err)
+	}
+	req.Header.Add("Content-Type", "application/json")
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to reach keystone: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read keystone response: %w", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		return "", fmt.Errorf("keystone login to project %s/%s failed with status %d: %s",
+			domain, tenant, resp.StatusCode, string(respBody))
+	}
+
+	var tokenResp types.KeystoneTokenResponse
+	if err := json.Unmarshal(respBody, &tokenResp); err != nil {
+		return "", fmt.Errorf("failed to parse keystone response: %w", err)
+	}
+	if tokenResp.Token.Project.ID == "" {
+		return "", fmt.Errorf("keystone response has no project ID for %s/%s", domain, tenant)
+	}
+	return tokenResp.Token.Project.ID, nil
 }

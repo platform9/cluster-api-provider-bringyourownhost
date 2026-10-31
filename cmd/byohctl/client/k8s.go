@@ -55,6 +55,19 @@ type K8sClient struct {
 	// insecure mirrors the --insecure flag. Kept on the client because the kubeconfig
 	// SaveKubeConfig writes has to record it too, not just the requests made here.
 	insecure bool
+	// projectID is the tenant's Keystone project ID, empty if it couldn't be looked up.
+	projectID string
+	// namespace is the tenant namespace GetSecret found the secret in; empty until then.
+	namespace string
+}
+
+// maxLenProjectID matches barista generateTenantNameByID.
+const maxLenProjectID = 8
+
+// tenantRef is an oidc-proxy key and the tenant namespace it serves.
+type tenantRef struct {
+	key       string
+	namespace string
 }
 
 // Client wraps the Kubernetes clientset and dynamic client.
@@ -76,6 +89,23 @@ func NewK8sClient(fqdn, domain, tenant, token, regionName string, insecure bool)
 		insecure:    insecure,
 	}
 	return client
+}
+
+// GetNamespaceFromConfig returns the namespace of the current context in the kubeconfig. The
+// token-based flow reads it from the kubeconfig that holds a bearer token, which has no client
+// certificate to identify a host.
+func GetNamespaceFromConfig(kubeconfigPath string) (string, error) {
+	config, err := clientcmd.LoadFromFile(kubeconfigPath)
+	if err != nil {
+		return "", fmt.Errorf("error reading kubeconfig %s: %w", kubeconfigPath, err)
+	}
+
+	kubeContext, ok := config.Contexts[config.CurrentContext]
+	if !ok {
+		return "", fmt.Errorf("namespace not found in kubeconfig %s", kubeconfigPath)
+	}
+
+	return kubeContext.Namespace, nil
 }
 
 // GetHostRefFromConfig returns the ByoHost namespace (the tenant) and name that the client
@@ -122,54 +152,93 @@ func GetHostRefFromConfig(kubeconfigPath string) (namespace, name string, err er
 	return hostIdentity.TenantNamespace, hostIdentity.ByoHostName(), nil
 }
 
-// getNamespace returns the namespace for the client
-func (c *K8sClient) getNamespace() string {
+// SetProjectID sets the project ID used to find an ID-based tenant namespace.
+func (c *K8sClient) SetProjectID(projectID string) {
+	c.projectID = projectID
+}
+
+// legacyNamespace returns the name-based tenant namespace, "<du>-<domain>-<tenant>".
+func (c *K8sClient) legacyNamespace() string {
 	fqdnPrefix := strings.Split(c.fqdn, ".")[0]
 	tenant := strings.ReplaceAll(c.tenant, "_", "-")
 	return fmt.Sprintf("%s-%s-%s", fqdnPrefix, c.domain, tenant)
 }
 
-// GetSecret retrieves a secret from the Kubernetes API
+// getNamespace returns the namespace from the saved kubeconfig or GetSecret, else the legacy one.
+func (c *K8sClient) getNamespace() string {
+	if c.namespace != "" {
+		return c.namespace
+	}
+	return c.legacyNamespace()
+}
+
+// tenantRefs returns the ID-based "<du>-<id8>" ref (if known), then the legacy one.
+func (c *K8sClient) tenantRefs() []tenantRef {
+	legacy := c.legacyNamespace()
+	refs := []tenantRef{}
+	if c.projectID != "" {
+		shortID := c.projectID
+		if len(shortID) > maxLenProjectID {
+			shortID = shortID[:maxLenProjectID]
+		}
+		fqdnPrefix := strings.Split(c.fqdn, ".")[0]
+		refs = append(refs, tenantRef{key: c.projectID, namespace: fqdnPrefix + "-" + shortID})
+	}
+	return append(refs, tenantRef{key: legacy, namespace: legacy})
+}
+
+// GetSecret retrieves a secret, trying each tenantRef and remembering the one that worked.
 func (c *K8sClient) GetSecret(secretName string) (*types.Secret, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
 	defer cancel()
 
 	utils.LogInfo("Fetching secret '%s'", secretName)
 
-	namespace := c.getNamespace()
-	secretEndpoint := fmt.Sprintf("https://%s/oidc-proxy/%s/%s/api/v1/namespaces/%s/secrets/%s",
-		c.fqdn, namespace, c.regionName, namespace, secretName)
+	refs := c.tenantRefs()
+	for i, ref := range refs {
+		secretEndpoint := fmt.Sprintf("https://%s/oidc-proxy/%s/%s/api/v1/namespaces/%s/secrets/%s",
+			c.fqdn, ref.key, c.regionName, ref.namespace, secretName)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", secretEndpoint, http.NoBody)
-	if err != nil {
-		return nil, utils.LogErrorf("error creating request: %v", err)
+		req, err := http.NewRequestWithContext(ctx, "GET", secretEndpoint, http.NoBody)
+		if err != nil {
+			return nil, utils.LogErrorf("error creating request: %v", err)
+		}
+
+		req.Header.Add("Authorization", "Bearer "+c.bearerToken)
+
+		resp, err := c.client.Do(req)
+		if err != nil {
+			return nil, utils.LogErrorf("error making request: %v", err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, utils.LogErrorf("error reading response: %v", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			// 403/404 means wrong namespace, so try the next one.
+			if i < len(refs)-1 {
+				utils.LogDebug("Secret not found in namespace %s (status %d), trying next",
+					ref.namespace, resp.StatusCode)
+				continue
+			}
+			return nil, utils.LogErrorf("error getting secret (status %d): %s", resp.StatusCode, string(body))
+		}
+
+		var secret types.Secret
+		err = json.Unmarshal(body, &secret)
+		if err != nil {
+			return nil, utils.LogErrorf("error parsing secret: %v", err)
+		}
+
+		c.namespace = ref.namespace
+		utils.LogDebug("Using tenant namespace %s", ref.namespace)
+		utils.LogSuccess("Successfully retrieved secret")
+		return &secret, nil
 	}
-
-	req.Header.Add("Authorization", "Bearer "+c.bearerToken)
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, utils.LogErrorf("error making request: %v", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, utils.LogErrorf("error reading response: %v", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, utils.LogErrorf("error getting secret (status %d): %s", resp.StatusCode, string(body))
-	}
-
-	var secret types.Secret
-	err = json.Unmarshal(body, &secret)
-	if err != nil {
-		return nil, utils.LogErrorf("error parsing secret: %v", err)
-	}
-
-	utils.LogSuccess("Successfully retrieved secret")
-	return &secret, nil
+	// Unreachable: tenantRefs always returns at least the legacy namespace.
+	return nil, utils.LogErrorf("no tenant namespace to fetch secret %s from", secretName)
 }
 
 // SaveKubeConfig saves the kubeconfig from the secret to the user's BYOH directory
@@ -220,6 +289,12 @@ func (c *K8sClient) SaveKubeConfig(secretName string) error {
 
 	if err = os.WriteFile(kubeconfigPath, kubeconfig, service.DefaultFilePerms); err != nil {
 		return fmt.Errorf("failed to write kubeconfig: %v", err)
+	}
+
+	// The kubeconfig context holds the real tenant namespace; oidc-proxy may map the secret request
+	// to a namespace other than the one in its URL (e.g. a legacy tenant reached by project ID).
+	if ns, nsErr := GetNamespaceFromConfig(kubeconfigPath); nsErr == nil && ns != "" {
+		c.namespace = ns
 	}
 
 	// Success

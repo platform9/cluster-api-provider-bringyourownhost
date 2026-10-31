@@ -456,6 +456,17 @@ func runOnboard(cmd *cobra.Command, args []string) {
 
 		k8sClient := client.NewK8sClient(fqdn, domain, tenant, token, regionName, insecure)
 
+		// Without a project ID only the legacy name-based namespace is tried.
+		var projectID string
+		projectID, err = authClient.GetProjectID(username, password, domain, tenant)
+		if err != nil {
+			utils.LogWarn("Could not look up project ID for %s/%s, using the name-based tenant namespace: %v",
+				domain, tenant, err)
+		} else {
+			utils.LogDebug("Tenant %s/%s has project ID %s", domain, tenant, projectID)
+			k8sClient.SetProjectID(projectID)
+		}
+
 		utils.LogInfo("Saving kubeconfig from bootstrap secret")
 		if err = k8sClient.SaveKubeConfig("byoh-bootstrap-kc"); err != nil {
 			utils.LogError("Failed to save kubeconfig: %v", err)
