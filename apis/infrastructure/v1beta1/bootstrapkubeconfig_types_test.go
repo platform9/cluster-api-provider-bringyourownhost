@@ -4,58 +4,29 @@
 package v1beta1_test
 
 import (
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	apiextensionsinternal "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema"
-	structuralcel "k8s.io/apiextensions-apiserver/pkg/apiserver/schema/cel"
-	"k8s.io/apimachinery/pkg/util/validation/field"
-	celconfig "k8s.io/apiserver/pkg/apis/cel"
-	"sigs.k8s.io/yaml"
+	celtest "k8s.io/apiextensions-apiserver/pkg/test"
 )
 
 const bootstrapKubeconfigCRDPath = "../../../config/crd/bases/infrastructure.cluster.x-k8s.io_bootstrapkubeconfigs.yaml"
 
-// newBootstrapKubeconfigSpecValidator builds a CEL validator for the spec
-// schema of the generated BootstrapKubeconfig CRD, so the test evaluates the
-// rules the API server runs and fails if the generated CRD is stale.
-func newBootstrapKubeconfigSpecValidator(t *testing.T) (*structuralcel.Validator, *schema.Structural) {
+// newBootstrapKubeconfigSpecValidator returns the CEL validator for the spec schema of the
+// generated BootstrapKubeconfig CRD, so the test evaluates the rules the API server runs
+// and fails if the generated CRD is stale.
+func newBootstrapKubeconfigSpecValidator(t *testing.T) celtest.CELValidateFunc {
 	t.Helper()
 
-	data, err := os.ReadFile(bootstrapKubeconfigCRDPath)
-	require.NoError(t, err)
+	crd := celtest.MustLoadManifest[apiextensionsv1.CustomResourceDefinition](t, bootstrapKubeconfigCRDPath)
+	validatorsByVersion := celtest.FieldValidators(t, crd)
 
-	crd := &apiextensionsv1.CustomResourceDefinition{}
-	err = yaml.Unmarshal(data, crd)
-	require.NoError(t, err)
-
-	var specProps *apiextensionsv1.JSONSchemaProps
-	for _, version := range crd.Spec.Versions {
-		if version.Name != "v1beta1" {
-			continue
-		}
-		require.NotNil(t, version.Schema)
-		props, ok := version.Schema.OpenAPIV3Schema.Properties["spec"]
-		require.True(t, ok, "v1beta1 schema has no spec property")
-		specProps = &props
-	}
-	require.NotNil(t, specProps, "CRD has no v1beta1 version")
-
-	internalProps := &apiextensionsinternal.JSONSchemaProps{}
-	err = apiextensionsv1.Convert_v1_JSONSchemaProps_To_apiextensions_JSONSchemaProps(specProps, internalProps, nil)
-	require.NoError(t, err)
-
-	structural, err := schema.NewStructural(internalProps)
-	require.NoError(t, err)
-
-	validator := structuralcel.NewValidator(structural, false, celconfig.PerCallLimit)
-	require.NotNil(t, validator, "BootstrapKubeconfig spec schema has no x-kubernetes-validations rules")
-	return validator, structural
+	validator, ok := validatorsByVersion["v1beta1"]["openAPIV3Schema.properties.spec"]
+	require.True(t, ok, "BootstrapKubeconfig v1beta1 spec schema has no x-kubernetes-validations rules")
+	return validator
 }
 
 func TestBootstrapKubeconfigSpec_Immutable(t *testing.T) {
@@ -126,20 +97,13 @@ func TestBootstrapKubeconfigSpec_Immutable(t *testing.T) {
 		},
 	}
 
-	validator, structural := newBootstrapKubeconfigSpecValidator(t)
+	validate := newBootstrapKubeconfigSpecValidator(t)
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			errs, _ := validator.Validate(
-				t.Context(),
-				field.NewPath("spec"),
-				structural,
-				tc.newSpec,
-				tc.oldSpec,
-				celconfig.RuntimeCELCostBudget,
-			)
+			errs := validate(tc.newSpec, tc.oldSpec)
 
 			if tc.wantMessage == "" {
 				assert.Empty(t, errs)
