@@ -1,4 +1,5 @@
 // Copyright 2022 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package bootstraptoken
@@ -25,9 +26,12 @@ func GetTokenIDSecretFromBootstrapToken(tokenStr string) (tokenID, tokenSecret s
 	return substrs[1], substrs[2], nil
 }
 
-// GenerateSecretFromBootstrapTokenStr builds the secret object from the token string
-// It also adds default description and auth groups that can be used by the bootstrap-kubeconfig
-func GenerateSecretFromBootstrapToken(tokenStr string, ttl time.Duration) (*v1.Secret, error) {
+// GenerateSecretFromBootstrapToken builds the secret object from the token string.
+// It also adds default description and auth groups that can be used by the bootstrap-kubeconfig.
+//
+// expiresAt is absolute rather than a duration, so the token Secret and the
+// BootstrapKubeconfig status can record the same expiry.
+func GenerateSecretFromBootstrapToken(tokenStr string, expiresAt time.Time) (*v1.Secret, error) {
 	tokenID, tokenSecret, err := GetTokenIDSecretFromBootstrapToken(tokenStr)
 	if err != nil {
 		return nil, err
@@ -35,7 +39,7 @@ func GenerateSecretFromBootstrapToken(tokenStr string, ttl time.Duration) (*v1.S
 	secretData := map[string][]byte{
 		bootstrapapi.BootstrapTokenIDKey:               []byte(tokenID),
 		bootstrapapi.BootstrapTokenSecretKey:           []byte(tokenSecret),
-		bootstrapapi.BootstrapTokenExpirationKey:       []byte(time.Now().UTC().Add(ttl).Format(time.RFC3339)),
+		bootstrapapi.BootstrapTokenExpirationKey:       []byte(expiresAt.UTC().Format(time.RFC3339)),
 		bootstrapapi.BootstrapTokenUsageSigningKey:     []byte("true"),
 		bootstrapapi.BootstrapTokenUsageAuthentication: []byte("true"),
 		bootstrapapi.BootstrapTokenDescriptionKey:      []byte(infrastructurev1beta1.BootstrapTokenDescription),
