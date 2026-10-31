@@ -19,6 +19,7 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/agent/registration"
 	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	certv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -31,23 +32,12 @@ import (
 
 const (
 	agentStateDirInContainer  = "/root/.byoh"
-	agentStateFileInContainer = agentStateDirInContainer + "/state.json"
-	agentKeyFileInContainer   = agentStateDirInContainer + "/client.key"
+	agentStateFileInContainer = agentStateDirInContainer + "/" + registration.StateFileName
+	agentKeyFileInContainer   = agentStateDirInContainer + "/" + registration.PrivateKeyFileName
 
 	// byohctlExecTimeout bounds one byohctl invocation, which installs or purges the agent package.
 	byohctlExecTimeout = 10 * time.Minute
 )
-
-// onboardingState mirrors the JSON the agent writes to state.json. The agent's own type is
-// unexported, and decoding here keeps the file format part of what the spec asserts.
-type onboardingState struct {
-	Version          int    `json:"version"`
-	Phase            string `json:"phase"`
-	BootstrapTokenID string `json:"bootstrapTokenID"`
-	Identity         string `json:"identity"`
-	CSRName          string `json:"csrName"`
-	CSRUID           string `json:"csrUID"`
-}
 
 var _ = Describe("When a host re-onboards via byohctl after a decommission [Byohctl] [Reonboard]", func() {
 	var (
@@ -152,9 +142,9 @@ var _ = Describe("When a host re-onboards via byohctl after a decommission [Byoh
 		Expect(exitCode).To(BeZero(), "expected %s to be removed by decommission", agentStateDirInContainer)
 
 		By("Planting a leftover state file from an unrelated onboarding")
-		plantedState := onboardingState{
+		plantedState := registration.State{
 			Version:          1,
-			Phase:            "pending",
+			Phase:            registration.PhasePending,
 			BootstrapTokenID: "planted",
 			Identity:         "byoh:host:" + namespace.Name + ":" + hostName + "-plant",
 			CSRName:          "byoh-csr-" + hostName + "-planted",
@@ -228,10 +218,10 @@ func assertOnboardingState(ctx context.Context, dockerClient *dockerclient.Clien
 	Expect(err).NotTo(HaveOccurred())
 	Expect(exitCode).To(BeZero(), "failed to read %s", agentStateFileInContainer)
 
-	state := onboardingState{}
+	state := registration.State{}
 	Expect(json.Unmarshal([]byte(raw), &state)).To(Succeed(), "state file is not valid JSON")
 	Expect(state.Version).To(Equal(1))
-	Expect(state.Phase).To(Equal("issued"), "state file should record the certificate as written")
+	Expect(state.Phase).To(Equal(registration.PhaseIssued), "state file should record the certificate as written")
 	Expect(state.BootstrapTokenID).To(Equal(tokenID), "state file belongs to another bootstrap token")
 	Expect(state.Identity).To(Equal(byoHost.Spec.Identity))
 	Expect(strings.Contains(raw, tokenSecret)).To(BeFalse(), "state file must not hold the bootstrap token secret")
