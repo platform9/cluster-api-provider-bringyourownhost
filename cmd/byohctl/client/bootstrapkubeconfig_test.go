@@ -463,3 +463,14 @@ func TestParseRegions(t *testing.T) {
 		})
 	}
 }
+
+func TestNamespace(t *testing.T) {
+	client, _ := newFakeProxy(t, map[string][]proxyReply{
+		"GET " + idRoot + "api/v1/namespaces/" + testIDNamespace + "/configmaps/kube-root-ca.crt": one(http.StatusOK, configMapBody(testLegacyName)),
+	})
+	assert.Empty(t, client.Namespace())
+
+	err := client.ResolveTenantNamespace(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, testLegacyName, client.Namespace())
+}
