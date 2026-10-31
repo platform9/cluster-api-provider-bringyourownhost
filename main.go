@@ -187,6 +187,7 @@ func setupControllers(ctx context.Context, mgr ctrl.Manager, opts *controllerOpt
 	if opts.csrClientSet != nil {
 		if err := (&byohcontrollers.ByoAdmissionReconciler{
 			ClientSet: opts.csrClientSet,
+			Client:    mgr.GetClient(),
 		}).SetupWithManager(mgr); err != nil {
 			return fmt.Errorf("create ByoAdmission controller: %w", err)
 		}
