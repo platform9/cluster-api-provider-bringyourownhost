@@ -30,9 +30,19 @@ const (
 	testByoHostKind  = "ByoHost"
 	testAPIVersion   = "infrastructure.cluster.x-k8s.io/v1beta1"
 	defaultHostName  = "host1-x7k2p"
-	byohHostOneUser  = "byoh:host:default:host1-x7k2p"
-	byohHostTwoUser  = "byoh:host:default:host2-x7k2p"
 	unauthorizedUser = "unauthorized-user"
+)
+
+// Valid host identities used as the requesting user.
+var (
+	byohHostOneUser   = FormatHostIdentity("default", "host1", "x7k2p")
+	byohHostTwoUser   = FormatHostIdentity("default", "host2", "x7k2p")
+	worker1User       = FormatHostIdentity("default", "worker-1", "abcde")
+	suffixLikeUser    = FormatHostIdentity("default", "web-abcde", "xyzwq")
+	hyphenTenantUser  = FormatHostIdentity("a-b-c", "host1", "x7k2p")
+	otherTenantUser   = FormatHostIdentity("other", "host1", "x7k2p")
+	newSuffixUser     = FormatHostIdentity("default", "host1", "new02")
+	oldSuffixIdentity = FormatHostIdentity("default", "host1", "old01")
 )
 
 // testNamespace defines the namespace where the objects in test are created.
@@ -171,7 +181,7 @@ func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 	// identity. It names the parse failure so the message says which rule the
 	// request broke.
 	notAnIdentityMsg := func(userName string) string {
-		return fmt.Sprintf("%s is not a valid agent username: identity %q does not start with %q",
+		return fmt.Sprintf("%s is not a valid agent username: identity %q is invalid: does not start with %q",
 			userName, userName, HostIdentityPrefix)
 	}
 
@@ -352,30 +362,30 @@ func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 		{
 			name:      "worker-1 certificate acting on worker-10 is denied",
 			operation: admissionv1.Update,
-			userName:  "byoh:host:default:worker-1-abcde",
+			userName:  worker1User,
 			hostName:  "worker-10-abcde",
 			wantAllow: false,
-			wantMsg:   "byoh:host:default:worker-1-abcde cannot create/update resource worker-10-abcde",
+			wantMsg:   worker1User + " cannot create/update resource worker-10-abcde",
 		},
 		{
 			name:      "worker-1 certificate acting on worker-1-zzzzz is denied",
 			operation: admissionv1.Update,
-			userName:  "byoh:host:default:worker-1-abcde",
+			userName:  worker1User,
 			hostName:  "worker-1-zzzzz",
 			wantAllow: false,
-			wantMsg:   "byoh:host:default:worker-1-abcde cannot create/update resource worker-1-zzzzz",
+			wantMsg:   worker1User + " cannot create/update resource worker-1-zzzzz",
 		},
 		{
 			name:      "hostname that ends like a suffix is split from the right and allowed",
 			operation: admissionv1.Update,
-			userName:  "byoh:host:default:web-abcde-xyzwq",
+			userName:  suffixLikeUser,
 			hostName:  "web-abcde-xyzwq",
 			wantAllow: true,
 		},
 		{
 			name:      "tenant with hyphens is allowed in its own namespace",
 			operation: admissionv1.Update,
-			userName:  "byoh:host:a-b-c:host1-x7k2p",
+			userName:  hyphenTenantUser,
 			hostName:  defaultHostName,
 			namespace: "a-b-c",
 			wantAllow: true,
@@ -385,10 +395,10 @@ func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 			// the namespace in the object body.
 			name:      "same host name in a different tenant is denied",
 			operation: admissionv1.Update,
-			userName:  "byoh:host:other:host1-x7k2p",
+			userName:  otherTenantUser,
 			hostName:  defaultHostName,
 			wantAllow: false,
-			wantMsg:   "byoh:host:other:host1-x7k2p cannot create/update resource " + defaultHostName,
+			wantMsg:   otherTenantUser + " cannot create/update resource " + defaultHostName,
 		},
 		{
 			name:      "legacy host identity without a tenant is denied",
@@ -396,7 +406,7 @@ func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 			userName:  "byoh:host:host1:x7k2p",
 			hostName:  defaultHostName,
 			wantAllow: false,
-			wantMsg:   "byoh:host:host1:x7k2p is not a valid agent username: identity \"byoh:host:host1:x7k2p\" has a name \"x7k2p\" too short to end in -<suffix>",
+			wantMsg:   "byoh:host:host1:x7k2p is not a valid agent username: identity \"byoh:host:host1:x7k2p\" is invalid: has a name \"x7k2p\" too short to end in -<suffix>",
 		},
 		{
 			// A host certificate must never reach the email bypass.
@@ -405,7 +415,7 @@ func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 			userName:  "byoh:host:user@example.com",
 			hostName:  defaultHostName,
 			wantAllow: false,
-			wantMsg:   "byoh:host:user@example.com is not a valid agent username: identity \"byoh:host:user@example.com\" is not of the form byoh:host:<tenant>:<hostName>-<suffix>",
+			wantMsg:   "byoh:host:user@example.com is not a valid agent username: identity \"byoh:host:user@example.com\" is invalid: is not of the form byoh:host:<tenant>:<hostName>-<suffix>",
 		},
 	}
 
@@ -547,10 +557,10 @@ func TestByoHostIdentityStamper_Handle(t *testing.T) {
 		{
 			name:          "create replaces the old suffix of the same host with the requester's new suffix",
 			operation:     admissionv1.Create,
-			userName:      "byoh:host:default:host1-new02",
-			existingIdent: "byoh:host:default:host1-old01",
+			userName:      newSuffixUser,
+			existingIdent: oldSuffixIdentity,
 			wantAllow:     true,
-			wantIdentity:  "byoh:host:default:host1-new02",
+			wantIdentity:  newSuffixUser,
 			wantOp:        "replace",
 		},
 	}
@@ -630,27 +640,27 @@ func TestByoHostValidator_handleDelete_hostCertificate(t *testing.T) {
 		},
 		{
 			name:      "certificate for another tenant is denied",
-			userName:  "byoh:host:other:host1-x7k2p",
+			userName:  otherTenantUser,
 			namespace: testNamespace,
 			objName:   defaultHostName,
 			wantAllow: false,
-			wantMsg:   "byoh:host:other:host1-x7k2p cannot delete resource " + defaultHostName,
+			wantMsg:   otherTenantUser + " cannot delete resource " + defaultHostName,
 		},
 		{
 			name:      "worker-1 certificate deleting worker-10 is denied",
-			userName:  "byoh:host:default:worker-1-abcde",
+			userName:  worker1User,
 			namespace: testNamespace,
 			objName:   "worker-10-abcde",
 			wantAllow: false,
-			wantMsg:   "byoh:host:default:worker-1-abcde cannot delete resource worker-10-abcde",
+			wantMsg:   worker1User + " cannot delete resource worker-10-abcde",
 		},
 		{
 			name:      "worker-1 certificate deleting worker-1-zzzzz is denied",
-			userName:  "byoh:host:default:worker-1-abcde",
+			userName:  worker1User,
 			namespace: testNamespace,
 			objName:   "worker-1-zzzzz",
 			wantAllow: false,
-			wantMsg:   "byoh:host:default:worker-1-abcde cannot delete resource worker-1-zzzzz",
+			wantMsg:   worker1User + " cannot delete resource worker-1-zzzzz",
 		},
 		{
 			name:      "malformed host certificate is denied",
@@ -658,7 +668,7 @@ func TestByoHostValidator_handleDelete_hostCertificate(t *testing.T) {
 			namespace: testNamespace,
 			objName:   defaultHostName,
 			wantAllow: false,
-			wantMsg:   "byoh:host:default:host1 is not a valid agent username: identity \"byoh:host:default:host1\" has a name \"host1\" too short to end in -<suffix>",
+			wantMsg:   "byoh:host:default:host1 is not a valid agent username: identity \"byoh:host:default:host1\" is invalid: has a name \"host1\" too short to end in -<suffix>",
 		},
 		{
 			name:      "caller that is not a host certificate is unchanged",

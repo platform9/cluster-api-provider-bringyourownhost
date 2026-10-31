@@ -274,3 +274,48 @@ func TestParseHostIdentity_hostNameLength(t *testing.T) {
 		})
 	}
 }
+
+func TestParseHostIdentity_allProblems(t *testing.T) {
+	testCases := []struct {
+		name         string
+		identity     string
+		wantProblems []string
+		wantErr      bool
+	}{
+		{
+			name:         "invalid tenant, host name and suffix",
+			identity:     "byoh:host:Default:Host1-X7k2p",
+			wantProblems: []string{"invalid tenant", "invalid suffix", "invalid host name", "invalid name"},
+			wantErr:      true,
+		},
+		{
+			name:         "invalid tenant and short name",
+			identity:     "byoh:host:a.b:abc",
+			wantProblems: []string{"invalid tenant", "too short"},
+			wantErr:      true,
+		},
+		{
+			name:         "malformed identity stops at the first structural problem",
+			identity:     "byoh:host:host1",
+			wantProblems: []string{"is not of the form"},
+			wantErr:      true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, _, err := v1beta1.ParseHostIdentity(tc.identity)
+			require.Error(t, err)
+
+			var identityErr *v1beta1.HostIdentityError
+			require.ErrorAs(t, err, &identityErr)
+			assert.Equal(t, tc.identity, identityErr.Identity)
+			require.Len(t, identityErr.Problems, len(tc.wantProblems))
+
+			for i, want := range tc.wantProblems {
+				assert.Contains(t, identityErr.Problems[i].Error(), want)
+				assert.Contains(t, err.Error(), want)
+			}
+		})
+	}
+}

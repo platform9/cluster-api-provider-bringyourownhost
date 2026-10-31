@@ -4,6 +4,7 @@
 package v1beta1
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -36,6 +37,33 @@ func FormatHostIdentity(tenant, hostName, suffix string) string {
 	return HostIdentityPrefix + tenant + ":" + ByoHostName(hostName, suffix)
 }
 
+// HostIdentityError is returned by ParseHostIdentity for an identity that is
+// not valid. Problems holds every rule the identity broke, so a caller can
+// inspect them with errors.Is and errors.As.
+//
+// +kubebuilder:object:generate=false
+type HostIdentityError struct {
+	// Identity is the identity that failed to parse.
+	Identity string
+	// Problems are the rules the identity broke, in the order they were found.
+	Problems []error
+}
+
+// Error implements the error interface.
+func (e *HostIdentityError) Error() string {
+	messages := make([]string, 0, len(e.Problems))
+	for _, problem := range e.Problems {
+		messages = append(messages, problem.Error())
+	}
+
+	return fmt.Sprintf("identity %q is invalid: %s", e.Identity, strings.Join(messages, "; "))
+}
+
+// Unwrap returns the problems so that errors.Is and errors.As match each one.
+func (e *HostIdentityError) Unwrap() []error {
+	return e.Problems
+}
+
 // ParseHostIdentity splits a certificate identity into its tenant, host name
 // and suffix. The tenant is the namespace of the ByoHost.
 //
@@ -43,52 +71,64 @@ func FormatHostIdentity(tenant, hostName, suffix string) string {
 // the last "-" followed by five characters in [a-z0-9] is unambiguous. Segments
 // are compared whole by the callers, because a substring match would let a
 // certificate for "worker-1" act on "worker-10".
+//
+// An identity that breaks several rules returns one *HostIdentityError that
+// lists all of them. When the identity is too malformed to split into a tenant
+// and a name, only the rule that stopped the split is listed.
 func ParseHostIdentity(identity string) (tenant, hostName, suffix string, err error) {
 	if !strings.HasPrefix(identity, HostIdentityPrefix) {
-		return "", "", "", fmt.Errorf("identity %q does not start with %q", identity, HostIdentityPrefix)
+		return "", "", "", &HostIdentityError{
+			Identity: identity,
+			Problems: []error{fmt.Errorf("does not start with %q", HostIdentityPrefix)},
+		}
 	}
 
 	segments := strings.Split(identity, ":")
 	if len(segments) != hostIdentitySegments {
-		return "", "", "", fmt.Errorf("identity %q is not of the form %s<tenant>:<hostName>-<suffix>", identity, HostIdentityPrefix)
+		return "", "", "", &HostIdentityError{
+			Identity: identity,
+			Problems: []error{fmt.Errorf("is not of the form %s<tenant>:<hostName>-<suffix>", HostIdentityPrefix)},
+		}
 	}
 
+	var problems []error
+
 	tenant = segments[2]
-	if problems := validation.IsDNS1123Label(tenant); len(problems) > 0 {
-		return "", "", "", fmt.Errorf("identity %q has an invalid tenant %q: %s", identity, tenant, strings.Join(problems, "; "))
+	if tenantProblems := validation.IsDNS1123Label(tenant); len(tenantProblems) > 0 {
+		problems = append(problems, fmt.Errorf("has an invalid tenant %q: %s", tenant, strings.Join(tenantProblems, ", ")))
 	}
 
 	name := segments[3]
-	if name == "" {
-		return "", "", "", fmt.Errorf("identity %q has an empty name", identity)
+	switch {
+	case name == "":
+		problems = append(problems, errors.New("has an empty name"))
+	case len(name) < hostIdentityTailLen:
+		problems = append(problems, fmt.Errorf("has a name %q too short to end in -<suffix>", name))
+	case name[len(name)-hostIdentityTailLen] != '-':
+		problems = append(problems, fmt.Errorf("has a name %q with no hyphen before the %d character suffix", name, hostIdentitySuffixLen))
+	default:
+		hostName = name[:len(name)-hostIdentityTailLen]
+		suffix = name[len(hostName)+1:]
+
+		if !isLowerAlphanumeric(suffix) {
+			problems = append(problems, fmt.Errorf("has an invalid suffix %q: want %d characters in [a-z0-9]", suffix, hostIdentitySuffixLen))
+		}
+
+		if hostName == "" {
+			problems = append(problems, errors.New("has an empty host name"))
+		} else if hostProblems := validation.IsDNS1123Subdomain(hostName); len(hostProblems) > 0 {
+			problems = append(problems, fmt.Errorf("has an invalid host name %q: %s", hostName, strings.Join(hostProblems, ", ")))
+		}
+
+		// The object name must itself be a valid name, which bounds the host
+		// name to what leaves room for the suffix.
+		if nameProblems := validation.IsDNS1123Subdomain(name); len(nameProblems) > 0 {
+			problems = append(problems, fmt.Errorf("has an invalid name %q: %s", name, strings.Join(nameProblems, ", ")))
+		}
 	}
 
-	if len(name) < hostIdentityTailLen {
-		return "", "", "", fmt.Errorf("identity %q has a name %q too short to end in -<suffix>", identity, name)
-	}
-
-	hostName = name[:len(name)-hostIdentityTailLen]
-	if name[len(hostName)] != '-' {
-		return "", "", "", fmt.Errorf("identity %q has a name %q with no hyphen before the %d character suffix", identity, name, hostIdentitySuffixLen)
-	}
-
-	suffix = name[len(hostName)+1:]
-	if !isLowerAlphanumeric(suffix) {
-		return "", "", "", fmt.Errorf("identity %q has an invalid suffix %q: want %d characters in [a-z0-9]", identity, suffix, hostIdentitySuffixLen)
-	}
-
-	if hostName == "" {
-		return "", "", "", fmt.Errorf("identity %q has an empty host name", identity)
-	}
-
-	if problems := validation.IsDNS1123Subdomain(hostName); len(problems) > 0 {
-		return "", "", "", fmt.Errorf("identity %q has an invalid host name %q: %s", identity, hostName, strings.Join(problems, "; "))
-	}
-
-	// The object name must itself be a valid name, which bounds the host name
-	// to what leaves room for the suffix.
-	if problems := validation.IsDNS1123Subdomain(name); len(problems) > 0 {
-		return "", "", "", fmt.Errorf("identity %q has an invalid name %q: %s", identity, name, strings.Join(problems, "; "))
+	if len(problems) > 0 {
+		return "", "", "", &HostIdentityError{Identity: identity, Problems: problems}
 	}
 
 	return tenant, hostName, suffix, nil
