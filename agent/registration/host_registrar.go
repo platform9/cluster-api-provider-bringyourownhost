@@ -29,6 +29,10 @@ import (
 var (
 	// LocalHostRegistrar is a HostRegistrar that registers the local host.
 	LocalHostRegistrar *HostRegistrar
+
+	// ErrIdentityConflict means a ByoHost with the same name exists and belongs to
+	// a different identity.
+	ErrIdentityConflict = errors.New("byohost belongs to another identity")
 )
 
 // HostInfo contains information about the host.
@@ -38,10 +42,6 @@ type HostInfo struct {
 	// {{ .HostName }}.
 	HostName string
 }
-
-// ErrIdentityConflict means a ByoHost with the same name exists and belongs to
-// a different identity.
-var ErrIdentityConflict = errors.New("byohost belongs to another identity")
 
 // HostRegistrar used to register a host.
 type HostRegistrar struct {
@@ -54,7 +54,7 @@ type HostRegistrar struct {
 // Register is called on agent startup
 // This function registers the byohost as available capacity in the management cluster
 // If the CR is already present for the same identity, we consider this to be a restart / reboot of the agent process
-// If it has another identity it is never patched and ErrIdentityConflict is returned
+// If it has another identity it is never patched and ErrIdentityConflict is returned.
 func (hr *HostRegistrar) Register(ctx context.Context, byoHostName, namespace string, hostLabels map[string]string) error {
 	klog.Info("Registering ByoHost")
 	byoHost := &infrastructurev1beta1.ByoHost{}

@@ -19,6 +19,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gexec"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/agent/registration"
 	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/common/hostname"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/test/e2e"
@@ -92,7 +93,7 @@ func setKubeConfig(kubeConfig *os.File) {
 
 var _ = BeforeSuite(func() {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
-	hostNameSuffix = utilrand.String(5)
+	hostNameSuffix = utilrand.String(registration.IdentitySuffixLength)
 	osHostName, err := os.Hostname()
 	Expect(err).NotTo(HaveOccurred())
 	testHostName, err = hostname.Normalize(osHostName)
