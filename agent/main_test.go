@@ -433,9 +433,6 @@ func TestResolveByoHostName(t *testing.T) {
 	}
 }
 
-func TestCertRotation(t *testing.T) {
-	// A certificate 90% through its life is inside the 20% renewal window;
-	// one 10% through is not.
 func TestStartCertificateRotation(t *testing.T) {
 	const rotationEnabled = "true"
 
@@ -489,6 +486,9 @@ func TestStartCertificateRotation(t *testing.T) {
 	}
 }
 
+func TestCertRotation(t *testing.T) {
+	// A certificate 90% through its life is inside the 20% renewal window;
+	// one 10% through is not.
 	nearExpiry := certPEM(t, 90*time.Minute, 10*time.Minute)
 	freshCert := certPEM(t, 10*time.Minute, 90*time.Minute)
 
@@ -525,15 +525,15 @@ func TestStartCertificateRotation(t *testing.T) {
 		},
 	}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			var messages []string
 	hostIdentity := identity.HostIdentity{
 		TenantNamespace:    "test-tenant",
 		NormalizedHostName: "test-host",
 		Suffix:             "abc12",
 	}
 
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var messages []string
 			logger := recordingLogger(&messages)
 
 			err := certRotation(t.Context(), logger, hostIdentity, &rest.Config{

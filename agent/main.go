@@ -322,6 +322,29 @@ func resolveByoHostName(stateDir string, config *rest.Config, hostName string) (
 	return identity, byoHostName, nil
 }
 
+// startCertificateRotation starts the certificate rotation goroutine.
+// This is behind a feature flag for now. Set CERTIFICATE_ROTATION=true to
+// enable it. A host without an identity has no client certificate to rotate, so
+// nothing is started for it.
+func startCertificateRotation(ctx context.Context, logger logr.Logger, hostIdentity string, config *rest.Config) error {
+	if os.Getenv("CERTIFICATE_ROTATION") != "true" || hostIdentity == "" {
+		return nil
+	}
+
+	rotationIdentity, err := identity.Parse(hostIdentity)
+	if err != nil {
+		return fmt.Errorf("parse the host identity for certificate rotation: %w", err)
+	}
+
+	go func() {
+		if rotationErr := certificateRotation(ctx, logger, rotationIdentity, config); rotationErr != nil {
+			logger.Error(rotationErr, "certificate rotation failed")
+		}
+	}()
+
+	return nil
+}
+
 func getConfig(logger logr.Logger) *rest.Config {
 	config, err := registration.LoadRESTClientConfig(registration.GetBYOHConfigPath())
 	if err != nil {
