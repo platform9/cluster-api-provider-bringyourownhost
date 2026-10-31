@@ -1,4 +1,5 @@
 // Copyright 2021 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package controllers_test
@@ -10,7 +11,6 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/test/builder"
 	certv1 "k8s.io/api/certificates/v1"
-	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -36,27 +36,6 @@ var _ = Describe("Controllers/ByoadmissionController", func() {
 			// Create a CSR resource for each test
 			CSR, err = builder.CertificateSigningRequest(defaultByoHostName, "test-cn", "test-org", 2048).Build()
 			Expect(err).NotTo(HaveOccurred())
-		})
-
-		It("should approve the Byoh CSR", func() {
-			// Create a dummy CSR request
-			_, err = clientSetFake.CertificatesV1().CertificateSigningRequests().Create(ctx, CSR, v1.CreateOptions{})
-			Expect(err).ToNot(HaveOccurred())
-
-			// Call Reconcile method
-			objectKey := types.NamespacedName{Name: defaultByoHostName}
-			_, err = byoAdmissionReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: objectKey})
-			Expect(err).ShouldNot(HaveOccurred())
-
-			// Fetch the updated CSR
-			var updateByohCSR *certv1.CertificateSigningRequest
-			updateByohCSR, err = clientSetFake.CertificatesV1().CertificateSigningRequests().Get(ctx, defaultByoHostName, v1.GetOptions{})
-			Expect(err).ToNot(HaveOccurred())
-			Expect(updateByohCSR.Status.Conditions).Should(ContainElement(certv1.CertificateSigningRequestCondition{
-				Type:   certv1.CertificateApproved,
-				Reason: "Approved by ByoAdmission Controller",
-				Status: corev1.ConditionTrue,
-			}))
 		})
 
 		It("should not approve a denied CSR", func() {

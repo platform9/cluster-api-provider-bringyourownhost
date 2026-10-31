@@ -448,6 +448,7 @@ type CertificateSigningRequestBuilder struct {
 	cn          string
 	org         string
 	privKeySize int
+	username    string
 }
 
 // CertificateSigningRequest returns a CertificateSigningRequestBuilder with the given name, cn, org and privKeySize
@@ -458,6 +459,12 @@ func CertificateSigningRequest(name, cn, org string, privKeySize int) *Certifica
 		org:         org,
 		privKeySize: privKeySize,
 	}
+}
+
+// WithUsername sets the requester username the API server would record on the CSR.
+func (csrb *CertificateSigningRequestBuilder) WithUsername(username string) *CertificateSigningRequestBuilder {
+	csrb.username = username
+	return csrb
 }
 
 // Build returns a certv1.CertificateSigningRequest with the attributes added to the CertificateSigningRequestBuilder
@@ -490,6 +497,7 @@ func (csrb *CertificateSigningRequestBuilder) Build() (*certv1.CertificateSignin
 			Request:    pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrData}),
 			SignerName: certv1.KubeAPIServerClientSignerName,
 			Usages:     []certv1.KeyUsage{certv1.UsageClientAuth},
+			Username:   csrb.username,
 		},
 	}
 	return csr, nil
