@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -51,7 +52,13 @@ var (
 	enableLeaderElection         bool
 	probeAddr                    string
 	byohostAgentHeartbeatTimeout time.Duration
+	bootstrapAPIServerURL        string
+	bootstrapAPIServerHostTmpl   string
 )
+
+// defaultBootstrapAPIServerHostTemplate is the apiserver host template used
+// when --bootstrap-apiserver-host-template is not set. It is the dev value.
+const defaultBootstrapAPIServerHostTemplate = "vcluster-cp.k8s.{customerFqdn}"
 
 // controllerOptions is the flag- and environment-derived configuration
 // setupControllers needs.
@@ -64,6 +71,25 @@ type controllerOptions struct {
 	// Nil disables the ByoAdmission controller, leaving CSRs to be approved
 	// manually.
 	csrClientSet clientset.Interface
+
+	// bootstrapAPIServerURL, when set, is the apiserver URL written into every
+	// BootstrapKubeconfig that does not name one.
+	bootstrapAPIServerURL string
+
+	// bootstrapAPIServerHostTemplate is the host of the apiserver URL derived
+	// for a BootstrapKubeconfig, with {customerFqdn} standing for the customer
+	// FQDN. It holds a host only: no scheme, no port, no path.
+	bootstrapAPIServerHostTemplate string
+}
+
+// validateBootstrapAPIServerHostTemplate rejects a host template that is not a
+// bare host. The controller adds the scheme and the port itself.
+func validateBootstrapAPIServerHostTemplate(template string) error {
+	if strings.ContainsAny(template, "/:") {
+		return fmt.Errorf("bootstrap apiserver host template %q must be a host only, without a scheme, port or path", template)
+	}
+
+	return nil
 }
 
 func init() {
@@ -85,6 +111,10 @@ func setFlags() {
 		"Enable leader election for controller manager. Enabling this will ensure there is only one active controller manager.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.DurationVar(&byohostAgentHeartbeatTimeout, "byohostagent-heartbeat-timeout", DefaultHeartbeatTimeout, "The duration after which the agent is considered to be disconnected.")
+	flag.StringVar(&bootstrapAPIServerURL, "bootstrap-apiserver-url", "",
+		"The apiserver URL written into every BootstrapKubeconfig that does not name one. When empty, the URL is derived from the namespace.")
+	flag.StringVar(&bootstrapAPIServerHostTmpl, "bootstrap-apiserver-host-template", defaultBootstrapAPIServerHostTemplate,
+		"The host of the apiserver URL derived for a BootstrapKubeconfig, with {customerFqdn} standing for the customer FQDN. A host only: no scheme, port or path.")
 	flag.Parse()
 }
 
@@ -93,6 +123,10 @@ func setFlags() {
 // their watches and map functions, so one with a different lifetime leaves
 // those watches running past the manager, or dead before it.
 func setupControllers(ctx context.Context, mgr ctrl.Manager, opts controllerOptions) error {
+	if err := validateBootstrapAPIServerHostTemplate(opts.bootstrapAPIServerHostTemplate); err != nil {
+		return err
+	}
+
 	clusterCache, err := clustercache.SetupWithManager(ctx, mgr, clustercache.Options{
 		SecretClient: mgr.GetAPIReader(),
 		Client: clustercache.ClientOptions{
@@ -169,8 +203,12 @@ func setupControllers(ctx context.Context, mgr ctrl.Manager, opts controllerOpti
 	}})
 
 	if err := (&byohcontrollers.BootstrapKubeconfigReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:                mgr.GetClient(),
+		APIReader:             mgr.GetAPIReader(),
+		Scheme:                mgr.GetScheme(),
+		Recorder:              mgr.GetEventRecorderFor("bootstrapkubeconfig-controller"),
+		APIServerURL:          opts.bootstrapAPIServerURL,
+		APIServerHostTemplate: opts.bootstrapAPIServerHostTemplate,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("create BootstrapKubeconfig controller: %w", err)
 	}
@@ -209,7 +247,9 @@ func main() {
 	}
 
 	opts := controllerOptions{
-		heartbeatTimeout: byohostAgentHeartbeatTimeout,
+		heartbeatTimeout:               byohostAgentHeartbeatTimeout,
+		bootstrapAPIServerURL:          bootstrapAPIServerURL,
+		bootstrapAPIServerHostTemplate: bootstrapAPIServerHostTmpl,
 		// Set 'BYOH_SKIP_KERNEL_MODULE_CLEANUP=enable' to skip unloading overlay/br_netfilter kernel
 		// modules during uninstall. Real BYO hosts own their kernel and must unload these modules;
 		// e2e's containerized hosts share Docker's kernel, so unloading them there breaks Docker's

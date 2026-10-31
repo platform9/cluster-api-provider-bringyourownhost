@@ -182,6 +182,44 @@ func TestSetupControllers(t *testing.T) {
 	}
 }
 
+func TestValidateBootstrapAPIServerHostTemplate(t *testing.T) {
+	testCases := []struct {
+		name     string
+		template string
+		wantErr  bool
+	}{
+		{name: "dev default", template: defaultBootstrapAPIServerHostTemplate, wantErr: false},
+		{name: "plain host", template: "kube.example.com", wantErr: false},
+		{name: "scheme", template: "https://vcluster-cp.k8s.{customerFqdn}", wantErr: true},
+		{name: "port", template: "vcluster-cp.k8s.{customerFqdn}:443", wantErr: true},
+		{name: "path", template: "vcluster-cp.k8s.{customerFqdn}/api", wantErr: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateBootstrapAPIServerHostTemplate(tc.template)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.template)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+// A bad host template must stop startup before any controller is registered.
+func TestSetupControllersRejectsBadHostTemplate(t *testing.T) {
+	rec := &recordingManager{Manager: newTestManager(t)}
+
+	opts := testOptions()
+	opts.bootstrapAPIServerHostTemplate = "https://vcluster-cp.k8s.{customerFqdn}"
+	err := setupControllers(t.Context(), rec, opts)
+	require.Error(t, err)
+
+	assert.Equal(t, 0, rec.addedCount())
+}
+
 // setupControllers must hand registration failures back to main() instead of
 // exiting, so main() stays the only place that decides to terminate.
 func TestSetupControllersReturnsRegistrationError(t *testing.T) {

@@ -7,3 +7,5 @@ resources:
     cpu: 100m
     memory: 250Mi
 byohostAgentHeartbeatTimeout: 120s
+bootstrapAPIServerURL: ""
+bootstrapAPIServerHostTemplate: "vcluster-cp.k8s.{customerFqdn}"
