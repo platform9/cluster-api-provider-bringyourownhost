@@ -366,42 +366,45 @@ func TestResolveByoHostName(t *testing.T) {
 		wantErr      bool
 	}{
 		{
-			name:         "name comes from the client certificate identity",
+			name:         "host identity in client certificate",
 			config:       certConfig(t, identity),
 			wantIdentity: identity,
 			wantName:     "example-worker-1-abc12",
+			wantErr:      false,
 		},
 		{
-			name:         "name comes from the state file identity",
+			name:         "host identity in state file",
 			stateDir:     stateDir(t, identity),
 			config:       &rest.Config{},
 			wantIdentity: identity,
 			wantName:     "example-worker-1-abc12",
+			wantErr:      false,
 		},
 		{
-			name:     "no identity keeps the host name",
+			name:     "no identity",
 			config:   &rest.Config{},
 			wantName: hostName,
+			wantErr:  false,
 		},
 		{
-			name:    "client certificate that is not a host identity is an error",
+			name:    "client certificate identity is not a host identity",
 			config:  certConfig(t, "byoh-test"),
 			wantErr: true,
 		},
 		{
-			name:     "state file identity that is not a host identity is an error",
+			name:     "state file identity is not a host identity",
 			stateDir: stateDir(t, "byoh-test"),
 			config:   &rest.Config{},
 			wantErr:  true,
 		},
 		{
-			name:     "state file host identity that does not parse is an error",
+			name:     "unparsable host identity in state file",
 			stateDir: stateDir(t, "byoh:host:example-tenant"),
 			config:   &rest.Config{},
 			wantErr:  true,
 		},
 		{
-			name:    "host identity that does not parse is an error",
+			name:    "unparsable host identity in client certificate",
 			config:  certConfig(t, "byoh:host:example-tenant"),
 			wantErr: true,
 		},
