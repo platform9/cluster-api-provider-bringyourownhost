@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
@@ -54,8 +55,53 @@ type State struct {
 	CSRUID string `json:"csrUID"`
 }
 
+// StateFieldError says why one field of the state file is invalid. Callers
+// read Field to tell which field it is.
+type StateFieldError struct {
+	// Field is the JSON name of the invalid field.
+	Field string
+	// Reason says what is wrong with the value.
+	Reason string
+}
+
+// Error implements error.
+func (e *StateFieldError) Error() string {
+	return fmt.Sprintf("field %q: %s", e.Field, e.Reason)
+}
+
+// InvalidStateError is returned by loadState when the state file parses but
+// has invalid fields. It lists every invalid field, not only the first. Use
+// errors.As to reach it, or to reach a single *StateFieldError inside it.
+type InvalidStateError struct {
+	// Path is the state file that is invalid.
+	Path string
+	// Problems has one entry for every invalid field.
+	Problems []*StateFieldError
+}
+
+// Error implements error.
+func (e *InvalidStateError) Error() string {
+	reasons := make([]string, 0, len(e.Problems))
+	for _, problem := range e.Problems {
+		reasons = append(reasons, problem.Error())
+	}
+
+	return fmt.Sprintf("state file %q is invalid: %s", e.Path, strings.Join(reasons, "; "))
+}
+
+// Unwrap returns the field problems, so errors.As finds a *StateFieldError.
+func (e *InvalidStateError) Unwrap() []error {
+	problems := make([]error, 0, len(e.Problems))
+	for _, problem := range e.Problems {
+		problems = append(problems, problem)
+	}
+
+	return problems
+}
+
 // loadState reads the state file in dir. It fails when the file is missing,
-// unreadable, not valid JSON, of an unknown version or in an unknown phase.
+// unreadable or not valid JSON. When the file parses but has invalid fields,
+// the error is an *InvalidStateError that lists every invalid field.
 func loadState(dir string) (*State, error) {
 	path := filepath.Join(dir, StateFileName)
 	data, err := os.ReadFile(path)
@@ -67,11 +113,16 @@ func loadState(dir string) (*State, error) {
 	if err = json.Unmarshal(data, s); err != nil {
 		return nil, fmt.Errorf("parse state file %q: %w", path, err)
 	}
+
+	var problems []*StateFieldError
 	if s.Version != stateVersion {
-		return nil, fmt.Errorf("state file %q has unknown version %d", path, s.Version)
+		problems = append(problems, &StateFieldError{Field: "version", Reason: fmt.Sprintf("unknown version %d", s.Version)})
 	}
 	if s.Phase != PhasePending && s.Phase != PhaseIssued {
-		return nil, fmt.Errorf("state file %q has unknown phase %q", path, s.Phase)
+		problems = append(problems, &StateFieldError{Field: "phase", Reason: fmt.Sprintf("unknown phase %q", s.Phase)})
+	}
+	if len(problems) > 0 {
+		return nil, &InvalidStateError{Path: path, Problems: problems}
 	}
 
 	return s, nil

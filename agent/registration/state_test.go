@@ -5,8 +5,11 @@
 package registration
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -102,6 +105,185 @@ func TestLoadState_Errors(t *testing.T) {
 			assert.Nil(t, got)
 		})
 	}
+}
+
+func TestLoadState_InvalidFields(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name     string
+		contents string
+		want     *InvalidStateError
+		wantErr  bool
+	}{
+		{
+			name:     "wrong version and unknown phase",
+			contents: `{"version": 7, "phase": "done"}`,
+			want: &InvalidStateError{
+				Problems: []*StateFieldError{
+					{Field: "version", Reason: `unknown version 7`},
+					{Field: "phase", Reason: `unknown phase "done"`},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name:     "unknown phase only",
+			contents: `{"version": 1, "phase": ""}`,
+			want: &InvalidStateError{
+				Problems: []*StateFieldError{
+					{Field: "phase", Reason: `unknown phase ""`},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name:     "valid fields",
+			contents: `{"version": 1, "phase": "pending"}`,
+			wantErr:  false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			err := os.WriteFile(filepath.Join(dir, StateFileName), []byte(tc.contents), 0o600)
+			require.NoError(t, err)
+
+			got, err := loadState(dir)
+
+			if !tc.wantErr {
+				require.NoError(t, err)
+				assert.NotNil(t, got)
+				return
+			}
+			require.Error(t, err)
+			assert.Nil(t, got)
+
+			var invalid *InvalidStateError
+			require.ErrorAs(t, err, &invalid)
+			tc.want.Path = filepath.Join(dir, StateFileName)
+			assert.Equal(t, tc.want, invalid)
+
+			var field *StateFieldError
+			require.ErrorAs(t, err, &field)
+			assert.Equal(t, tc.want.Problems[0], field)
+		})
+	}
+
+	t.Run("read and parse failures are not invalid state", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := loadState(t.TempDir())
+		var invalid *InvalidStateError
+		assert.False(t, errors.As(err, &invalid))
+		assert.ErrorIs(t, err, os.ErrNotExist)
+	})
+}
+
+// TestState_SaveIsAtomicUnderConcurrency runs concurrent writers and readers
+// against one state file. A reader must only ever see one complete state that
+// a writer saved, never a partial or empty file.
+func TestState_SaveIsAtomicUnderConcurrency(t *testing.T) {
+	t.Parallel()
+
+	const (
+		writers         = 8
+		savesPerWriter  = 50
+		readers         = 4
+		writerNameWidth = 2000
+	)
+
+	dir := t.TempDir()
+	// Long values make a non-atomic write span several write calls.
+	padding := make([]byte, writerNameWidth)
+	for i := range padding {
+		padding[i] = 'x'
+	}
+	newState := func(writer int) *State {
+		return &State{
+			Version:          stateVersion,
+			Phase:            PhasePending,
+			BootstrapTokenID: "abcdef",
+			Identity:         fmt.Sprintf("writer-%d-%s", writer, padding),
+		}
+	}
+
+	valid := make(map[string]bool, writers)
+	for writer := range writers {
+		valid[newState(writer).Identity] = true
+	}
+
+	// The file exists before any reader starts, so a missing file is a failure.
+	err := newState(0).save(dir)
+	require.NoError(t, err)
+
+	done := make(chan struct{})
+	var writerGroup, readerGroup sync.WaitGroup
+	saveErrs := make(chan error, writers*savesPerWriter)
+	readErrs := make(chan error, 64)
+
+	for writer := range writers {
+		writerGroup.Add(1)
+		go func() {
+			defer writerGroup.Done()
+			st := newState(writer)
+			for range savesPerWriter {
+				if err := st.save(dir); err != nil {
+					saveErrs <- err
+				}
+			}
+		}()
+	}
+
+	for range readers {
+		readerGroup.Add(1)
+		go func() {
+			defer readerGroup.Done()
+			for {
+				select {
+				case <-done:
+					return
+				default:
+				}
+
+				got, err := loadState(dir)
+				if err != nil {
+					select {
+					case readErrs <- err:
+					default:
+					}
+					continue
+				}
+				if !valid[got.Identity] {
+					select {
+					case readErrs <- fmt.Errorf("reader saw a state no writer saved: %q", got.Identity):
+					default:
+					}
+				}
+			}
+		}()
+	}
+
+	writerGroup.Wait()
+	close(done)
+	readerGroup.Wait()
+	close(saveErrs)
+	close(readErrs)
+
+	for err := range saveErrs {
+		assert.NoError(t, err)
+	}
+	for err := range readErrs {
+		assert.NoError(t, err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "temporary files are cleaned up")
+	assert.Equal(t, StateFileName, entries[0].Name())
 }
 
 func TestRemoveOnboardingFiles(t *testing.T) {
