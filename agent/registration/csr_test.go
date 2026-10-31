@@ -64,7 +64,7 @@ func newTestByohCSR(t *testing.T, dir string, objects ...runtime.Object) (*ByohC
 	}, client
 }
 
-func readState(t *testing.T, dir string) *state {
+func readState(t *testing.T, dir string) *State {
 	t.Helper()
 
 	got, err := loadState(dir)
@@ -179,7 +179,7 @@ func TestState_Matches(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			st := &state{Identity: tc.identity}
+			st := &State{Identity: tc.identity}
 
 			err := st.matches(testTenant, testHostName)
 
@@ -196,10 +196,10 @@ func TestByohCSR_LoadOrCreateState(t *testing.T) {
 	t.Parallel()
 
 	const oldKey = "old-key"
-	oldState := func(tokenID string) *state {
-		return &state{
+	oldState := func(tokenID string) *State {
+		return &State{
 			Version:          stateVersion,
-			Phase:            phasePending,
+			Phase:            PhasePending,
 			BootstrapTokenID: tokenID,
 			Identity:         oldIdentity,
 			CSRName:          oldCSRName,
@@ -331,7 +331,7 @@ func TestByohCSR_LoadOrCreateState(t *testing.T) {
 
 			// A fresh start gets a new identity, a new CSR name, no CSR UID and a
 			// key that can be parsed.
-			assert.Equal(t, phasePending, st.Phase)
+			assert.Equal(t, PhasePending, st.Phase)
 			assert.NotEqual(t, oldState(testTokenID).Identity, st.Identity)
 			assert.NotEqual(t, oldState(testTokenID).CSRName, st.CSRName)
 			assert.Empty(t, st.CSRUID)
@@ -462,9 +462,9 @@ func TestByohCSR_EnsureCSR_Resume(t *testing.T) {
 			}
 			bcsr, client := newTestByohCSR(t, dir, objects...)
 
-			seeded := &state{
+			seeded := &State{
 				Version:          stateVersion,
-				Phase:            phasePending,
+				Phase:            PhasePending,
 				BootstrapTokenID: testTokenID,
 				Identity:         oldIdentity,
 				CSRName:          oldCSRName,
@@ -552,7 +552,7 @@ func TestByohCSR_LoadOrCreateState_ExistingIdentity(t *testing.T) {
 
 		dir := t.TempDir()
 		bcsr, _ := newTestByohCSR(t, dir)
-		seeded := &state{Version: stateVersion, Phase: phasePending, BootstrapTokenID: testTokenID, Identity: oldIdentity, CSRName: oldCSRName}
+		seeded := &State{Version: stateVersion, Phase: PhasePending, BootstrapTokenID: testTokenID, Identity: oldIdentity, CSRName: oldCSRName}
 		require.NoError(t, seeded.save(dir))
 		require.NoError(t, os.WriteFile(filepath.Join(dir, PrivateKeyFileName), []byte("old-key"), 0o600))
 
@@ -569,7 +569,7 @@ func TestByohCSR_ReusableCSR_NoCSRName(t *testing.T) {
 
 	bcsr, client := newTestByohCSR(t, t.TempDir())
 
-	uid, reusable, err := bcsr.reusableCSR(t.Context(), &state{Identity: oldIdentity})
+	uid, reusable, err := bcsr.reusableCSR(t.Context(), &State{Identity: oldIdentity})
 	require.NoError(t, err)
 
 	assert.False(t, reusable)
@@ -588,9 +588,9 @@ func TestByohCSR_EnsureCSR_RenewsAfterIssued(t *testing.T) {
 	}
 	bcsr, client := newTestByohCSR(t, dir, oldCSR)
 
-	seeded := &state{
+	seeded := &State{
 		Version:          stateVersion,
-		Phase:            phaseIssued,
+		Phase:            PhaseIssued,
 		BootstrapTokenID: testTokenID,
 		Identity:         oldIdentity,
 		CSRName:          oldCSRName,
@@ -605,7 +605,7 @@ func TestByohCSR_EnsureCSR_RenewsAfterIssued(t *testing.T) {
 	st, _, resumed, err := bcsr.loadOrCreateState(dir, testTenant, testHostName, testTokenID, "")
 	require.NoError(t, err)
 	require.True(t, resumed)
-	require.Equal(t, phaseIssued, st.Phase)
+	require.Equal(t, PhaseIssued, st.Phase)
 
 	name, uid, err := bcsr.ensureCSR(t.Context(), dir, st, testTenant, testHostName, privateKey, resumed, false)
 	require.NoError(t, err)
@@ -615,7 +615,7 @@ func TestByohCSR_EnsureCSR_RenewsAfterIssued(t *testing.T) {
 	assert.Equal(t, createdCSRUID, string(uid))
 
 	saved := readState(t, dir)
-	assert.Equal(t, phasePending, saved.Phase)
+	assert.Equal(t, PhasePending, saved.Phase)
 	assert.Equal(t, name, saved.CSRName)
 	assert.Equal(t, createdCSRUID, saved.CSRUID)
 	assert.Equal(t, oldIdentity, saved.Identity)
@@ -630,25 +630,25 @@ func TestByohCSR_EnsureCSR_Renewal(t *testing.T) {
 
 	testCases := []struct {
 		name      string
-		phase     phase
+		phase     Phase
 		renewal   bool
 		wantReuse bool
 	}{
 		{
 			name:      "renewal with a pending state gets a new CSR",
-			phase:     phasePending,
+			phase:     PhasePending,
 			renewal:   true,
 			wantReuse: false,
 		},
 		{
 			name:      "first onboarding with a pending state reuses the CSR",
-			phase:     phasePending,
+			phase:     PhasePending,
 			renewal:   false,
 			wantReuse: true,
 		},
 		{
 			name:      "renewal with an issued state gets a new CSR",
-			phase:     phaseIssued,
+			phase:     PhaseIssued,
 			renewal:   true,
 			wantReuse: false,
 		},
@@ -666,7 +666,7 @@ func TestByohCSR_EnsureCSR_Renewal(t *testing.T) {
 			}
 			bcsr, client := newTestByohCSR(t, dir, oldCSR)
 
-			seeded := &state{
+			seeded := &State{
 				Version:          stateVersion,
 				Phase:            tc.phase,
 				BootstrapTokenID: testTokenID,
@@ -693,7 +693,7 @@ func TestByohCSR_EnsureCSR_Renewal(t *testing.T) {
 			assert.Equal(t, oldIdentity, saved.Identity)
 			assert.Equal(t, name, saved.CSRName)
 			assert.Equal(t, string(uid), saved.CSRUID)
-			assert.Equal(t, phasePending, saved.Phase)
+			assert.Equal(t, PhasePending, saved.Phase)
 
 			if tc.wantReuse {
 				assert.Equal(t, oldCSRName, name)

@@ -163,7 +163,7 @@ func newIdentity(tenant, hostName string) string {
 
 // matches reports whether the identity in st is for this tenant and host
 // name, so a changed --namespace or hostname never reuses an old identity.
-func (st *state) matches(tenant, hostName string) error {
+func (st *State) matches(tenant, hostName string) error {
 	stTenant, stHostName, _, err := infrastructurev1beta1.ParseHostIdentity(st.Identity)
 	if err != nil {
 		return fmt.Errorf("state has an unusable identity: %w", err)
@@ -179,7 +179,7 @@ func (st *state) matches(tenant, hostName string) error {
 // trusted, is deleted together with its key and replaced by a fresh one that
 // uses existingIdentity, or a new identity when that is empty.
 // resumed is true when existing state was reused.
-func (bcsr *ByohCSR) loadOrCreateState(dir, tenant, hostName, tokenID, existingIdentity string) (_ *state, _ []byte, resumed bool, _ error) {
+func (bcsr *ByohCSR) loadOrCreateState(dir, tenant, hostName, tokenID, existingIdentity string) (_ *State, _ []byte, resumed bool, _ error) {
 	keyPath := filepath.Join(dir, PrivateKeyFileName)
 	var keyData []byte
 
@@ -212,11 +212,11 @@ func (bcsr *ByohCSR) loadOrCreateState(dir, tenant, hostName, tokenID, existingI
 	if identity == "" {
 		identity = newIdentity(tenant, hostName)
 	}
-	st = &state{
+	st = &State{
 		Version:          stateVersion,
 		BootstrapTokenID: tokenID,
 		Identity:         identity,
-		Phase:            phasePending,
+		Phase:            PhasePending,
 		CSRName:          newCSRName(tenant, hostName),
 	}
 	if err := st.save(dir); err != nil {
@@ -233,11 +233,11 @@ func (bcsr *ByohCSR) loadOrCreateState(dir, tenant, hostName, tokenID, existingI
 // phase pending, and reusing that CSR would return the old certificate. The
 // state is saved before a CSR is created, so a crash never leaves a CSR the
 // state does not name.
-func (bcsr *ByohCSR) ensureCSR(ctx context.Context, dir string, st *state, tenant, hostName string, privateKey any, resumed, renewal bool) (string, types.UID, error) {
+func (bcsr *ByohCSR) ensureCSR(ctx context.Context, dir string, st *State, tenant, hostName string, privateKey any, resumed, renewal bool) (string, types.UID, error) {
 	if resumed {
 		reusable := false
 		var uid types.UID
-		if st.Phase == phasePending && !renewal {
+		if st.Phase == PhasePending && !renewal {
 			var err error
 			uid, reusable, err = bcsr.reusableCSR(ctx, st)
 			if err != nil {
@@ -254,7 +254,7 @@ func (bcsr *ByohCSR) ensureCSR(ctx context.Context, dir string, st *state, tenan
 			return st.CSRName, uid, nil
 		}
 		st.CSRName = newCSRName(tenant, hostName)
-		st.Phase = phasePending
+		st.Phase = PhasePending
 		st.CSRUID = ""
 		if err := st.save(dir); err != nil {
 			return "", "", err
@@ -287,7 +287,7 @@ func (bcsr *ByohCSR) ensureCSR(ctx context.Context, dir string, st *state, tenan
 // reusableCSR reports whether the CSR named in the state can still be waited
 // on: it exists, is the same object the agent created, and was not denied or
 // failed. A state without a CSR name has nothing to reuse.
-func (bcsr *ByohCSR) reusableCSR(ctx context.Context, st *state) (types.UID, bool, error) {
+func (bcsr *ByohCSR) reusableCSR(ctx context.Context, st *State) (types.UID, bool, error) {
 	if st.CSRName == "" {
 		return "", false, nil
 	}
