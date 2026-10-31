@@ -15,6 +15,10 @@ import (
 	restclient "k8s.io/client-go/rest"
 )
 
+// ErrNoIdentity means neither the state file nor a client certificate holds an
+// identity.
+var ErrNoIdentity = errors.New("no identity in the state file or in a client certificate")
+
 // IdentityFromRESTConfig returns the common name of the client certificate in
 // config, which is the identity the API server knows the agent by. It returns
 // an empty string when the config has no client certificate.
@@ -43,10 +47,6 @@ func IdentityFromRESTConfig(config *restclient.Config) (string, error) {
 
 	return cert.Subject.CommonName, nil
 }
-
-// ErrNoIdentity means neither the state file nor a client certificate holds an
-// identity.
-var ErrNoIdentity = errors.New("no identity in the state file or in a client certificate")
 
 // ResolveIdentity returns the identity of this agent's onboarding. The state
 // file next to the kubeconfig is read first; without a usable identity there,
