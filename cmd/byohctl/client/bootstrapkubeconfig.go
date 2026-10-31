@@ -41,6 +41,12 @@ func (e *StatusError) Error() string {
 // errNamespaceNotResolved is returned when a call needs the tenant namespace before ResolveTenantNamespace ran.
 var errNamespaceNotResolved = errors.New("tenant namespace is not resolved, call ResolveTenantNamespace first")
 
+// Namespace returns the tenant namespace found by ResolveTenantNamespace, or an empty string
+// before it has run.
+func (c *K8sClient) Namespace() string {
+	return c.namespace
+}
+
 // tenantRequest sends one request through the oidc-proxy. The path is
 // relative to the region, for example "api/v1/namespaces/<ns>/secrets/<name>". It returns the
 // status and body of the answer.
