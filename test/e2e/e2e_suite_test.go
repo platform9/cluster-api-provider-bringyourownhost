@@ -514,6 +514,14 @@ func Byf(format string, a ...interface{}) {
 // runs with, because it becomes the tenant in the host certificate identity. The host name is
 // normalized and stored in the BootstrapKubeconfig spec.
 func generateBootstrapKubeconfig(ctx context.Context, clusterProxy framework.ClusterProxy, name, namespace, hostName string) string {
+	_, kubeconfig := createBootstrapKubeconfig(ctx, clusterProxy, name, namespace, hostName)
+	return kubeconfig
+}
+
+// createBootstrapKubeconfig creates a BootstrapKubeconfig like generateBootstrapKubeconfig does,
+// waits for the controller to publish its credential Secret, and returns the object with the
+// kubeconfig stored in that Secret. The object is returned as the controller left it.
+func createBootstrapKubeconfig(ctx context.Context, clusterProxy framework.ClusterProxy, name, namespace, hostName string) (created *infraproviderv1.BootstrapKubeconfig, kubeconfig string) {
 	config, _ := clientcmd.LoadFromFile(clusterProxy.GetKubeconfigPath())
 	name = "kind-" + name
 
@@ -535,13 +543,20 @@ func generateBootstrapKubeconfig(ctx context.Context, clusterProxy framework.Clu
 		Namespace: bootstrapKubeconfigCRD.Namespace,
 	}
 	createdBootstrapKubeconfig := &infraproviderv1.BootstrapKubeconfig{}
-	Eventually(func() *string {
+	Eventually(func() string {
 		err := clusterProxy.GetClient().Get(ctx, bootstrapKubeconfigLookupKey, createdBootstrapKubeconfig)
 		if err != nil {
-			return nil
+			return ""
 		}
-		return createdBootstrapKubeconfig.Status.BootstrapKubeconfigData //nolint: staticcheck // SA1019: deprecated field, readers go away with the controller changes
-	}, e2eConfig.GetIntervals("", "wait-controllers")...).ShouldNot(BeNil())
+		return createdBootstrapKubeconfig.Status.CredentialSecretRef
+	}, e2eConfig.GetIntervals("", "wait-controllers")...).ShouldNot(BeEmpty())
 
-	return *createdBootstrapKubeconfig.Status.BootstrapKubeconfigData //nolint: staticcheck // SA1019: deprecated field, readers go away with the controller changes
+	credentialSecret := &corev1.Secret{}
+	credentialSecretKey := types.NamespacedName{
+		Name:      createdBootstrapKubeconfig.Status.CredentialSecretRef,
+		Namespace: createdBootstrapKubeconfig.Namespace,
+	}
+	Expect(clusterProxy.GetClient().Get(ctx, credentialSecretKey, credentialSecret)).To(Succeed(), "failed to get the credential Secret")
+
+	return createdBootstrapKubeconfig, string(credentialSecret.Data["kubeconfig"])
 }
