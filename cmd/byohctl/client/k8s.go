@@ -53,18 +53,7 @@ type K8sClient struct {
 	// insecure mirrors the --insecure flag. Kept on the client because the kubeconfig
 	// SaveKubeConfig writes has to record it too, not just the requests made here.
 	insecure bool
-	// projectID is the tenant's Keystone project ID, empty if it couldn't be looked up.
-	projectID string
-	// namespace is the tenant namespace GetSecret found the secret in; empty until then.
-	namespace string
-}
-
-// maxLenProjectID matches barista generateTenantNameByID.
-const maxLenProjectID = 8
-
-// tenantRef is an oidc-proxy key and the tenant namespace it serves.
-type tenantRef struct {
-	key       string
+	// namespace is the real tenant namespace, read from the saved kubeconfig; empty until then.
 	namespace string
 }
 
@@ -109,19 +98,19 @@ func GetNamespaceFromConfig(kubeconfigPath string) (string, error) {
 	return "", fmt.Errorf("namespace not found in kubeconfig")
 }
 
-// SetProjectID sets the project ID used to find an ID-based tenant namespace.
-func (c *K8sClient) SetProjectID(projectID string) {
-	c.projectID = projectID
+// sanitizeName matches barista's openstack.SanitizeKubernetesName.
+func sanitizeName(s string) string {
+	return strings.ToLower(strings.ReplaceAll(s, "_", "-"))
 }
 
-// legacyNamespace returns the name-based tenant namespace, "<du>-<domain>-<tenant>".
+// legacyNamespace returns the name-based tenant namespace, "<du>-<domain>-<tenant>",
+// built like barista's generateTenantName.
 func (c *K8sClient) legacyNamespace() string {
 	fqdnPrefix := strings.Split(c.fqdn, ".")[0]
-	tenant := strings.ReplaceAll(c.tenant, "_", "-")
-	return fmt.Sprintf("%s-%s-%s", fqdnPrefix, c.domain, tenant)
+	return fmt.Sprintf("%s-%s-%s", sanitizeName(fqdnPrefix), sanitizeName(c.domain), sanitizeName(c.tenant))
 }
 
-// getNamespace returns the found tenant namespace, else the legacy one.
+// getNamespace returns the real tenant namespace once known, else the legacy one.
 func (c *K8sClient) getNamespace() string {
 	if c.namespace != "" {
 		return c.namespace
@@ -129,73 +118,53 @@ func (c *K8sClient) getNamespace() string {
 	return c.legacyNamespace()
 }
 
-// tenantRefs returns the ID-based "<du>-<id8>" ref (if known), then the legacy one.
-func (c *K8sClient) tenantRefs() []tenantRef {
-	legacy := c.legacyNamespace()
-	refs := []tenantRef{}
-	if c.projectID != "" {
-		shortID := c.projectID
-		if len(shortID) > maxLenProjectID {
-			shortID = shortID[:maxLenProjectID]
-		}
-		fqdnPrefix := strings.Split(c.fqdn, ".")[0]
-		refs = append(refs, tenantRef{key: c.projectID, namespace: fqdnPrefix + "-" + shortID})
-	}
-	return append(refs, tenantRef{key: legacy, namespace: legacy})
+// oidcProxyKey returns the "<domain>-<tenant>" key oidc-proxy looks up in barista's ns-mapping
+// to rewrite the URL's namespace to the real one, sanitized the way barista sanitizes it.
+func (c *K8sClient) oidcProxyKey() string {
+	return sanitizeName(c.domain) + "-" + sanitizeName(c.tenant)
 }
 
-// GetSecret retrieves a secret, trying each tenantRef and remembering the one that worked.
+// GetSecret retrieves a secret from the tenant namespace.
 func (c *K8sClient) GetSecret(secretName string) (*types.Secret, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
 	defer cancel()
 
 	utils.LogInfo("Fetching secret '%s'", secretName)
 
-	refs := c.tenantRefs()
-	for i, ref := range refs {
-		secretEndpoint := fmt.Sprintf("https://%s/oidc-proxy/%s/%s/api/v1/namespaces/%s/secrets/%s",
-			c.fqdn, ref.key, c.regionName, ref.namespace, secretName)
+	// The namespace in the path may not exist (e.g. an ID-named tenant); oidc-proxy replaces it.
+	secretEndpoint := fmt.Sprintf("https://%s/oidc-proxy/%s/%s/api/v1/namespaces/%s/secrets/%s",
+		c.fqdn, c.oidcProxyKey(), c.regionName, c.getNamespace(), secretName)
 
-		req, err := http.NewRequestWithContext(ctx, "GET", secretEndpoint, http.NoBody)
-		if err != nil {
-			return nil, utils.LogErrorf("error creating request: %v", err)
-		}
-
-		req.Header.Add("Authorization", "Bearer "+c.bearerToken)
-
-		resp, err := c.client.Do(req)
-		if err != nil {
-			return nil, utils.LogErrorf("error making request: %v", err)
-		}
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			return nil, utils.LogErrorf("error reading response: %v", err)
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			// 403/404 means wrong namespace, so try the next one.
-			if i < len(refs)-1 {
-				utils.LogDebug("Secret not found in namespace %s (status %d), trying next",
-					ref.namespace, resp.StatusCode)
-				continue
-			}
-			return nil, utils.LogErrorf("error getting secret (status %d): %s", resp.StatusCode, string(body))
-		}
-
-		var secret types.Secret
-		err = json.Unmarshal(body, &secret)
-		if err != nil {
-			return nil, utils.LogErrorf("error parsing secret: %v", err)
-		}
-
-		c.namespace = ref.namespace
-		utils.LogDebug("Using tenant namespace %s", ref.namespace)
-		utils.LogSuccess("Successfully retrieved secret")
-		return &secret, nil
+	req, err := http.NewRequestWithContext(ctx, "GET", secretEndpoint, http.NoBody)
+	if err != nil {
+		return nil, utils.LogErrorf("error creating request: %v", err)
 	}
-	// Unreachable: tenantRefs always returns at least the legacy namespace.
-	return nil, utils.LogErrorf("no tenant namespace to fetch secret %s from", secretName)
+
+	req.Header.Add("Authorization", "Bearer "+c.bearerToken)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, utils.LogErrorf("error making request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, utils.LogErrorf("error reading response: %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, utils.LogErrorf("error getting secret (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	var secret types.Secret
+	err = json.Unmarshal(body, &secret)
+	if err != nil {
+		return nil, utils.LogErrorf("error parsing secret: %v", err)
+	}
+
+	utils.LogSuccess("Successfully retrieved secret")
+	return &secret, nil
 }
 
 // SaveKubeConfig saves the kubeconfig from the secret to the user's BYOH directory
@@ -249,7 +218,12 @@ func (c *K8sClient) SaveKubeConfig(secretName string) error {
 	}
 
 	// oidc-proxy maps the secret request to the real namespace; the kubeconfig names it.
-	if ns, nsErr := GetNamespaceFromConfig(kubeconfigPath); nsErr == nil && ns != "" {
+	switch ns, nsErr := GetNamespaceFromConfig(kubeconfigPath); {
+	case nsErr != nil:
+		utils.LogDebug("Could not read namespace from kubeconfig, keeping %q: %v", c.getNamespace(), nsErr)
+	case ns == "":
+		utils.LogDebug("Kubeconfig context has no namespace, keeping %q", c.getNamespace())
+	default:
 		c.namespace = ns
 	}
 

@@ -68,8 +68,8 @@ func TestGetNamespace(t *testing.T) {
 func TestGetSecret(t *testing.T) {
 	// Set up test HTTP server
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Path format: /oidc-proxy/{namespace}/{region}/api/v1/namespaces/{namespace}/secrets/{name}
-		expectedPath := "/oidc-proxy/127-test-domain-test-tenant/region/api/v1/namespaces/127-test-domain-test-tenant/secrets/kubeconfig"
+		// Path format: /oidc-proxy/{domain}-{tenant}/{region}/api/v1/namespaces/{namespace}/secrets/{name}
+		expectedPath := "/oidc-proxy/test-domain-test-tenant/region/api/v1/namespaces/127-test-domain-test-tenant/secrets/kubeconfig"
 		if r.URL.Path != expectedPath {
 			t.Errorf("Expected path %s, got %s", expectedPath, r.URL.Path)
 		}
@@ -318,15 +318,15 @@ func TestAgentLogOutput(t *testing.T) {
 
 func TestSaveKubeConfigNamespace(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	// Legacy tenant reached by project ID: the kubeconfig's namespace wins.
+	// ID-named tenant: oidc-proxy served the legacy-named request, the kubeconfig names the real namespace.
 	kubeconfig := `apiVersion: v1
 kind: Config
-current-context: byoh-127-test-domain-test-tenant
+current-context: byoh-127-01234567
 contexts:
-- name: byoh-127-test-domain-test-tenant
+- name: byoh-127-01234567
   context:
     cluster: c
-    namespace: 127-test-domain-test-tenant
+    namespace: 127-01234567
     user: byoh
 `
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -340,80 +340,22 @@ contexts:
 	host := strings.TrimPrefix(ts.URL, "https://")
 	client := NewK8sClient(host, "test-domain", "test-tenant", "test-token", "region", false)
 	client.client = ts.Client()
-	client.SetProjectID("0123456789abcdef")
 
 	require.NoError(t, client.SaveKubeConfig("kubeconfig"))
-	assert.Equal(t, "127-test-domain-test-tenant", client.getNamespace())
+	assert.Equal(t, "127-01234567", client.getNamespace())
 }
 
-// Test GetSecret finding the secret in the ID-based or the legacy tenant namespace
-func TestGetSecretTenantNamespace(t *testing.T) {
-	const (
-		projectID = "0123456789abcdef"
-		idPath    = "/oidc-proxy/0123456789abcdef/region/api/v1/namespaces/127-01234567/secrets/kubeconfig"
-		namePath  = "/oidc-proxy/127-test-domain-test-tenant/region/api/v1/namespaces/127-test-domain-test-tenant/secrets/kubeconfig"
-	)
+func TestTenantNames(t *testing.T) {
 	testCases := []struct {
-		name          string
-		projectID     string
-		foundAt       string
-		wantPaths     []string
-		wantNamespace string
-		wantErr       bool
+		fqdn, domain, tenant, wantKey, wantNamespace string
 	}{
-		{
-			name:          "ID-based namespace",
-			projectID:     projectID,
-			foundAt:       idPath,
-			wantPaths:     []string{idPath},
-			wantNamespace: "127-01234567",
-		},
-		{
-			name:          "falls back to the legacy namespace",
-			projectID:     projectID,
-			foundAt:       namePath,
-			wantPaths:     []string{idPath, namePath},
-			wantNamespace: "127-test-domain-test-tenant",
-		},
-		{
-			name:          "no project ID only tries the legacy namespace",
-			foundAt:       namePath,
-			wantPaths:     []string{namePath},
-			wantNamespace: "127-test-domain-test-tenant",
-		},
-		{
-			name:      "found in neither",
-			projectID: projectID,
-			wantPaths: []string{idPath, namePath},
-			wantErr:   true,
-		},
+		{"du.example.com", "default", "service", "default-service", "du-default-service"},
+		{"du.example.com", "Default", "My_Tenant", "default-my-tenant", "du-default-my-tenant"},
+		{"My_DU.example.com", "Team_A", "dev", "team-a-dev", "my-du-team-a-dev"},
 	}
-
 	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			var gotPaths []string
-			ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				gotPaths = append(gotPaths, r.URL.Path)
-				if r.URL.Path != tc.foundAt {
-					w.WriteHeader(http.StatusForbidden)
-					return
-				}
-				_ = json.NewEncoder(w).Encode(types.Secret{Data: map[string]string{"config": "a3ViZWNvbmZpZw=="}})
-			}))
-			defer ts.Close()
-
-			client := NewK8sClient(strings.TrimPrefix(ts.URL, "https://"), "test-domain", "test-tenant", "test-token", "region", true)
-			client.SetProjectID(tc.projectID)
-
-			_, err := client.GetSecret("kubeconfig")
-			assert.Equal(t, tc.wantPaths, gotPaths)
-			if tc.wantErr {
-				assert.Error(t, err)
-				assert.Equal(t, "127-test-domain-test-tenant", client.getNamespace())
-				return
-			}
-			require.NoError(t, err)
-			assert.Equal(t, tc.wantNamespace, client.getNamespace())
-		})
+		client := NewK8sClient(tc.fqdn, tc.domain, tc.tenant, "token", "region", false)
+		assert.Equal(t, tc.wantKey, client.oidcProxyKey(), "fqdn %q domain %q tenant %q", tc.fqdn, tc.domain, tc.tenant)
+		assert.Equal(t, tc.wantNamespace, client.legacyNamespace(), "fqdn %q domain %q tenant %q", tc.fqdn, tc.domain, tc.tenant)
 	}
 }
