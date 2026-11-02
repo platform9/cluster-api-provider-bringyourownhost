@@ -21,7 +21,7 @@ require (
 	golang.org/x/term v0.46.0
 	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/api v0.34.3
-	k8s.io/apimachinery v0.37.1
+	k8s.io/apimachinery v0.37.2
 	k8s.io/client-go v0.34.3
 	k8s.io/cluster-bootstrap v0.34.2
 	k8s.io/component-base v0.34.3
