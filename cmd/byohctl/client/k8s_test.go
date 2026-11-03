@@ -68,8 +68,8 @@ func TestGetNamespace(t *testing.T) {
 func TestGetSecret(t *testing.T) {
 	// Set up test HTTP server
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Path format: /oidc-proxy/{namespace}/{region}/api/v1/namespaces/{namespace}/secrets/{name}
-		expectedPath := "/oidc-proxy/127-test-domain-test-tenant/region/api/v1/namespaces/127-test-domain-test-tenant/secrets/kubeconfig"
+		// Path format: /oidc-proxy/{domain}-{tenant}/{region}/api/v1/namespaces/{namespace}/secrets/{name}
+		expectedPath := "/oidc-proxy/test-domain-test-tenant/region/api/v1/namespaces/127-test-domain-test-tenant/secrets/kubeconfig"
 		if r.URL.Path != expectedPath {
 			t.Errorf("Expected path %s, got %s", expectedPath, r.URL.Path)
 		}
@@ -313,5 +313,49 @@ func TestAgentLogOutput(t *testing.T) {
 	// This is a basic test since the actual display happens in the command
 	if _, err := os.Stat(agentLogPath); os.IsNotExist(err) {
 		t.Errorf("Agent log file doesn't exist at expected path: %s", agentLogPath)
+	}
+}
+
+func TestSaveKubeConfigNamespace(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	// ID-named tenant: oidc-proxy served the legacy-named request, the kubeconfig names the real namespace.
+	kubeconfig := `apiVersion: v1
+kind: Config
+current-context: byoh-127-01234567
+contexts:
+- name: byoh-127-01234567
+  context:
+    cluster: c
+    namespace: 127-01234567
+    user: byoh
+`
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(types.Secret{
+			Data: map[string]string{"config": base64.StdEncoding.EncodeToString([]byte(kubeconfig))},
+		})
+	}))
+	defer ts.Close()
+
+	host := strings.TrimPrefix(ts.URL, "https://")
+	client := NewK8sClient(host, "test-domain", "test-tenant", "test-token", "region", false)
+	client.client = ts.Client()
+
+	require.NoError(t, client.SaveKubeConfig("kubeconfig"))
+	assert.Equal(t, "127-01234567", client.getNamespace())
+}
+
+func TestTenantNames(t *testing.T) {
+	testCases := []struct {
+		fqdn, domain, tenant, wantKey, wantNamespace string
+	}{
+		{"du.example.com", "default", "service", "default-service", "du-default-service"},
+		{"du.example.com", "Default", "My_Tenant", "default-my-tenant", "du-default-my-tenant"},
+		{"My_DU.example.com", "Team_A", "dev", "team-a-dev", "my-du-team-a-dev"},
+	}
+	for _, tc := range testCases {
+		client := NewK8sClient(tc.fqdn, tc.domain, tc.tenant, "token", "region", false)
+		assert.Equal(t, tc.wantKey, client.oidcProxyKey(), "fqdn %q domain %q tenant %q", tc.fqdn, tc.domain, tc.tenant)
+		assert.Equal(t, tc.wantNamespace, client.legacyNamespace(), "fqdn %q domain %q tenant %q", tc.fqdn, tc.domain, tc.tenant)
 	}
 }

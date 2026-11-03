@@ -53,6 +53,8 @@ type K8sClient struct {
 	// insecure mirrors the --insecure flag. Kept on the client because the kubeconfig
 	// SaveKubeConfig writes has to record it too, not just the requests made here.
 	insecure bool
+	// namespace is the real tenant namespace, read from the saved kubeconfig; empty until then.
+	namespace string
 }
 
 // Client wraps the Kubernetes clientset and dynamic client.
@@ -96,23 +98,42 @@ func GetNamespaceFromConfig(kubeconfigPath string) (string, error) {
 	return "", fmt.Errorf("namespace not found in kubeconfig")
 }
 
-// getNamespace returns the namespace for the client
-func (c *K8sClient) getNamespace() string {
-	fqdnPrefix := strings.Split(c.fqdn, ".")[0]
-	tenant := strings.ReplaceAll(c.tenant, "_", "-")
-	return fmt.Sprintf("%s-%s-%s", fqdnPrefix, c.domain, tenant)
+// sanitizeName matches barista's openstack.SanitizeKubernetesName.
+func sanitizeName(s string) string {
+	return strings.ToLower(strings.ReplaceAll(s, "_", "-"))
 }
 
-// GetSecret retrieves a secret from the Kubernetes API
+// legacyNamespace returns the name-based tenant namespace, "<du>-<domain>-<tenant>",
+// built like barista's generateTenantName.
+func (c *K8sClient) legacyNamespace() string {
+	fqdnPrefix := strings.Split(c.fqdn, ".")[0]
+	return fmt.Sprintf("%s-%s-%s", sanitizeName(fqdnPrefix), sanitizeName(c.domain), sanitizeName(c.tenant))
+}
+
+// getNamespace returns the real tenant namespace once known, else the legacy one.
+func (c *K8sClient) getNamespace() string {
+	if c.namespace != "" {
+		return c.namespace
+	}
+	return c.legacyNamespace()
+}
+
+// oidcProxyKey returns the "<domain>-<tenant>" key oidc-proxy looks up in barista's ns-mapping
+// to rewrite the URL's namespace to the real one, sanitized the way barista sanitizes it.
+func (c *K8sClient) oidcProxyKey() string {
+	return sanitizeName(c.domain) + "-" + sanitizeName(c.tenant)
+}
+
+// GetSecret retrieves a secret from the tenant namespace.
 func (c *K8sClient) GetSecret(secretName string) (*types.Secret, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
 	defer cancel()
 
 	utils.LogInfo("Fetching secret '%s'", secretName)
 
-	namespace := c.getNamespace()
+	// The namespace in the path may not exist (e.g. an ID-named tenant); oidc-proxy replaces it.
 	secretEndpoint := fmt.Sprintf("https://%s/oidc-proxy/%s/%s/api/v1/namespaces/%s/secrets/%s",
-		c.fqdn, namespace, c.regionName, namespace, secretName)
+		c.fqdn, c.oidcProxyKey(), c.regionName, c.getNamespace(), secretName)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", secretEndpoint, http.NoBody)
 	if err != nil {
@@ -194,6 +215,16 @@ func (c *K8sClient) SaveKubeConfig(secretName string) error {
 
 	if err = os.WriteFile(kubeconfigPath, kubeconfig, service.DefaultFilePerms); err != nil {
 		return fmt.Errorf("failed to write kubeconfig: %v", err)
+	}
+
+	// oidc-proxy maps the secret request to the real namespace; the kubeconfig names it.
+	switch ns, nsErr := GetNamespaceFromConfig(kubeconfigPath); {
+	case nsErr != nil:
+		utils.LogDebug("Could not read namespace from kubeconfig, keeping %q: %v", c.getNamespace(), nsErr)
+	case ns == "":
+		utils.LogDebug("Kubeconfig context has no namespace, keeping %q", c.getNamespace())
+	default:
+		c.namespace = ns
 	}
 
 	// Success
