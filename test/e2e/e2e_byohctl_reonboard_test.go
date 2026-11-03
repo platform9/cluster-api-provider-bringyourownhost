@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -27,8 +28,10 @@ import (
 	certv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/clientcmd"
+	bootstraputil "k8s.io/cluster-bootstrap/token/util"
 	"sigs.k8s.io/cluster-api/util"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -124,6 +127,27 @@ var _ = Describe("When a host re-onboards via byohctl after a decommission [Byoh
 
 		By("Checking the state the agent left on the host")
 		assertOnboardingState(ctx, dockerClient, mgmtClient, byohostContainer.ID, firstKubeconfig, firstHost)
+
+		By("Checking onboarding is refused while the agent is still installed")
+		issuedBeforeRefusal := snapshotIssuedObjects(ctx, mgmtClient, namespace.Name)
+		refusal, refusedExitCode, err := execInContainerWithEnv(ctx, dockerClient, byohostContainer.ID,
+			[]string{byohAgentBundleURLEnvVar + "=" + byohAgentBundleURLForContainers, byohAgentBundleInsecureEnvVar + "=1"},
+			[]string{
+				byohctlContainerPath, "onboard",
+				"--bootstrap-kubeconfig", byohctlBootstrapConfPath,
+				"--namespace", namespace.Name,
+				"--region", "e2e-byohctl",
+			})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(refusedExitCode).NotTo(BeZero(), "onboarding an installed host must fail, output: %s", refusal)
+		Expect(refusal).To(ContainSubstring("already installed"))
+		assertOnboardingState(ctx, dockerClient, mgmtClient, byohostContainer.ID, firstKubeconfig, firstHost)
+		hosts := &infrastructurev1beta1.ByoHostList{}
+		Expect(mgmtClient.List(ctx, hosts, ctrlclient.InNamespace(namespace.Name))).To(Succeed())
+		Expect(hosts.Items).To(HaveLen(1), "the refused onboarding must not register another ByoHost")
+		Expect(hosts.Items[0].UID).To(Equal(firstHost.UID))
+		issuedAfterRefusal := snapshotIssuedObjects(ctx, mgmtClient, namespace.Name)
+		Expect(issuedAfterRefusal).To(Equal(issuedBeforeRefusal), "the refused onboarding must not create a BootstrapKubeconfig, a token Secret or a CSR")
 
 		By("Checking an in-place identity change is rejected")
 		patchBase := firstHost.DeepCopy()
@@ -321,4 +345,52 @@ func execInContainerWithEnv(ctx context.Context, dockerClient *dockerclient.Clie
 	}
 
 	return combined.String(), inspect.ExitCode, nil
+}
+
+// issuedObjects names what onboarding creates in the management cluster for one tenant namespace.
+// Parallel specs share the cluster, so it only lists objects that belong to the namespace.
+type issuedObjects struct {
+	BootstrapKubeconfigs []string
+	TokenSecrets         []string
+	CSRs                 []string
+}
+
+// snapshotIssuedObjects lists the BootstrapKubeconfigs of namespaceName, the token Secrets those
+// objects issued in kube-system, and the CSRs the agent named after the namespace.
+func snapshotIssuedObjects(ctx context.Context, mgmtClient ctrlclient.Client, namespaceName string) issuedObjects {
+	GinkgoHelper()
+
+	issued := issuedObjects{}
+
+	bootstrapKubeconfigs := &infrastructurev1beta1.BootstrapKubeconfigList{}
+	Expect(mgmtClient.List(ctx, bootstrapKubeconfigs, ctrlclient.InNamespace(namespaceName))).To(Succeed())
+	for i := range bootstrapKubeconfigs.Items {
+		bootstrapKubeconfig := &bootstrapKubeconfigs.Items[i]
+		issued.BootstrapKubeconfigs = append(issued.BootstrapKubeconfigs, bootstrapKubeconfig.Name)
+		if bootstrapKubeconfig.Status.TokenID == "" {
+			continue
+		}
+		tokenSecretName := bootstraputil.BootstrapTokenSecretName(bootstrapKubeconfig.Status.TokenID)
+		err := mgmtClient.Get(ctx, k8stypes.NamespacedName{Namespace: metav1.NamespaceSystem, Name: tokenSecretName}, &corev1.Secret{})
+		if apierrors.IsNotFound(err) {
+			continue
+		}
+		Expect(err).NotTo(HaveOccurred())
+		issued.TokenSecrets = append(issued.TokenSecrets, tokenSecretName)
+	}
+
+	csrs := &certv1.CertificateSigningRequestList{}
+	Expect(mgmtClient.List(ctx, csrs)).To(Succeed())
+	csrNamePrefix := fmt.Sprintf("byoh-csr-%s-", namespaceName)
+	for i := range csrs.Items {
+		if strings.HasPrefix(csrs.Items[i].Name, csrNamePrefix) {
+			issued.CSRs = append(issued.CSRs, csrs.Items[i].Name)
+		}
+	}
+
+	sort.Strings(issued.BootstrapKubeconfigs)
+	sort.Strings(issued.TokenSecrets)
+	sort.Strings(issued.CSRs)
+
+	return issued
 }

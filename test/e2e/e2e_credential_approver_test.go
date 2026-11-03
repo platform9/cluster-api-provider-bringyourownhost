@@ -6,6 +6,8 @@ package e2e
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"time"
@@ -15,6 +17,7 @@ import (
 	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/test/builder"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	certv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -33,6 +36,9 @@ const (
 	credentialCSRKeySize = 2048
 	// credentialDeniedReason is the reason the approver sets on the Denied condition.
 	credentialDeniedReason = "DeniedByByoAdmissionController"
+	// credentialTokenLifetimeTolerance is how far the recorded token lifetime may exceed the configured one.
+	// The creation time has second precision and the controller reconciles after the object is created.
+	credentialTokenLifetimeTolerance = 5 * time.Second
 )
 
 var _ = Describe("When a BootstrapKubeconfig issues a credential [Credential]", func() {
@@ -158,6 +164,68 @@ var _ = Describe("When a BootstrapKubeconfig issues a credential [Credential]", 
 			err := bootstrapClusterProxy.GetClient().Get(ctx, client.ObjectKey{Name: csrName}, csr)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(csr.Status.Conditions).To(ContainElement(HaveField("Reason", credentialDeniedReason)))
+		}
+	})
+
+	It("Should record the requester as createdBy and issue a token with the configured lifetime", func() {
+		// The bootstrap cluster is too old for SelfSubjectReview, so the requester is the common name
+		// of the admin client certificate the API server authenticates the create request with.
+		adminCert, _ := pem.Decode(bootstrapClusterProxy.GetRESTConfig().CertData)
+		Expect(adminCert).NotTo(BeNil(), "the bootstrap cluster admin credential has no client certificate")
+		parsedAdminCert, err := x509.ParseCertificate(adminCert.Bytes)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(parsedAdminCert.Subject.CommonName).NotTo(BeEmpty())
+		Expect(issued.Spec.CreatedBy).To(Equal(parsedAdminCert.Subject.CommonName), "the mutating webhook did not set createdBy from the requester")
+
+		Expect(issued.Status.TokenExpiresAt).NotTo(BeNil())
+		lifetime := issued.Status.TokenExpiresAt.Sub(issued.CreationTimestamp.Time)
+		Expect(lifetime.Seconds()).To(BeNumerically("~", infrastructurev1beta1.DefaultTokenExpiry.Seconds(), credentialTokenLifetimeTolerance.Seconds()), "token lifetime was %s", lifetime)
+	})
+
+	It("Should reject a host name that is not normalized", func() {
+		notNormalized := builder.BootstrapKubeconfig(namespace.Name, "not-normalized-"+util.RandomString(5)).Build()
+		notNormalized.Spec.HostName = "Not_Normalized"
+
+		err := bootstrapClusterProxy.GetClient().Create(ctx, notNormalized)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("vbootstrapkubeconfig.kb.io"))
+		Expect(err.Error()).To(ContainSubstring("host name is not normalized"))
+	})
+
+	It("Should only allow the credential to create, get, list and watch certificate signing requests", func() {
+		restConfig, err := clientcmd.RESTConfigFromKubeConfig([]byte(kubeconfig))
+		Expect(err).NotTo(HaveOccurred())
+		credentialClient, err := kubernetes.NewForConfig(restConfig)
+		Expect(err).NotTo(HaveOccurred())
+
+		testCases := []struct {
+			attributes authorizationv1.ResourceAttributes
+			allowed    bool
+		}{
+			{attributes: authorizationv1.ResourceAttributes{Verb: "create", Group: "certificates.k8s.io", Resource: "certificatesigningrequests"}, allowed: true},
+			{attributes: authorizationv1.ResourceAttributes{Verb: "get", Group: "certificates.k8s.io", Resource: "certificatesigningrequests"}, allowed: true},
+			{attributes: authorizationv1.ResourceAttributes{Verb: "list", Group: "certificates.k8s.io", Resource: "certificatesigningrequests"}, allowed: true},
+			{attributes: authorizationv1.ResourceAttributes{Verb: "watch", Group: "certificates.k8s.io", Resource: "certificatesigningrequests"}, allowed: true},
+			{attributes: authorizationv1.ResourceAttributes{Verb: "update", Group: "certificates.k8s.io", Resource: "certificatesigningrequests"}, allowed: false},
+			{attributes: authorizationv1.ResourceAttributes{Verb: "patch", Group: "certificates.k8s.io", Resource: "certificatesigningrequests"}, allowed: false},
+			{attributes: authorizationv1.ResourceAttributes{Verb: "delete", Group: "certificates.k8s.io", Resource: "certificatesigningrequests"}, allowed: false},
+			{attributes: authorizationv1.ResourceAttributes{Verb: "deletecollection", Group: "certificates.k8s.io", Resource: "certificatesigningrequests"}, allowed: false},
+			{attributes: authorizationv1.ResourceAttributes{Verb: "update", Group: "certificates.k8s.io", Resource: "certificatesigningrequests", Subresource: "approval"}, allowed: false},
+			{attributes: authorizationv1.ResourceAttributes{Verb: "update", Group: "certificates.k8s.io", Resource: "certificatesigningrequests", Subresource: "status"}, allowed: false},
+			{attributes: authorizationv1.ResourceAttributes{Verb: "approve", Group: "certificates.k8s.io", Resource: "signers", Name: certv1.KubeAPIServerClientSignerName}, allowed: false},
+			{attributes: authorizationv1.ResourceAttributes{Verb: "get", Resource: "secrets", Namespace: metav1.NamespaceSystem}, allowed: false},
+			{attributes: authorizationv1.ResourceAttributes{Verb: "get", Resource: "secrets", Namespace: namespace.Name}, allowed: false},
+			{attributes: authorizationv1.ResourceAttributes{Verb: "create", Group: infrastructurev1beta1.GroupVersion.Group, Resource: "bootstrapkubeconfigs", Namespace: namespace.Name}, allowed: false},
+			{attributes: authorizationv1.ResourceAttributes{Verb: "list", Group: infrastructurev1beta1.GroupVersion.Group, Resource: "byohosts", Namespace: namespace.Name}, allowed: false},
+		}
+
+		for _, tc := range testCases {
+			review, reviewErr := credentialClient.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, &authorizationv1.SelfSubjectAccessReview{
+				Spec: authorizationv1.SelfSubjectAccessReviewSpec{ResourceAttributes: &tc.attributes},
+			}, metav1.CreateOptions{})
+			Expect(reviewErr).NotTo(HaveOccurred())
+			Expect(review.Status.Allowed).To(Equal(tc.allowed), "verb %q on %s/%s subresource %q name %q in namespace %q",
+				tc.attributes.Verb, tc.attributes.Group, tc.attributes.Resource, tc.attributes.Subresource, tc.attributes.Name, tc.attributes.Namespace)
 		}
 	})
 })

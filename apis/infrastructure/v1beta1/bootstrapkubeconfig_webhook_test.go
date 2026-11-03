@@ -6,6 +6,7 @@ package v1beta1
 import (
 	"encoding/base64"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -109,4 +110,51 @@ func TestBootstrapKubeconfig_ValidateOptionalAPIServerAndCA(t *testing.T) {
 			assert.Equal(t, tc.wantErr, err)
 		})
 	}
+}
+
+func TestBootstrapKubeconfig_ValidateCreateHostName(t *testing.T) {
+	hostNamePath := field.NewPath("spec").Child("hostName")
+
+	testCases := []struct {
+		name     string
+		hostName string
+		wantErr  error
+	}{
+		{
+			name:     "normalized host name is admitted",
+			hostName: "example-worker-1",
+			wantErr:  nil,
+		},
+		{
+			name:     "unnormalized host name is rejected",
+			hostName: "Example_Worker_1",
+			wantErr:  field.Invalid(hostNamePath, "Example_Worker_1", `host name is not normalized, use "example-worker-1"`),
+		},
+		{
+			name:     "trailing dot is rejected",
+			hostName: "example-worker-1.",
+			wantErr:  field.Invalid(hostNamePath, "example-worker-1.", `host name is not normalized, use "example-worker-1"`),
+		},
+		{
+			name:     "empty host name is rejected",
+			hostName: "",
+			wantErr:  field.Invalid(hostNamePath, "", "hostName field cannot be empty"),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			obj := &BootstrapKubeconfig{Spec: BootstrapKubeconfigSpec{HostName: tc.hostName}}
+
+			_, err := obj.ValidateCreate(t.Context(), obj)
+
+			assert.Equal(t, tc.wantErr, err)
+		})
+	}
+}
+
+// The token lifetime bounds how long a leaked bootstrap token can be used, so a
+// change to it has to be a deliberate edit of this test.
+func TestDefaultTokenExpiry(t *testing.T) {
+	assert.Equal(t, 30*time.Minute, DefaultTokenExpiry)
 }

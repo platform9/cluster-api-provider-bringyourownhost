@@ -5,6 +5,7 @@
 package registration
 
 import (
+	"context"
 	"crypto/x509"
 	"encoding/pem"
 	"os"
@@ -25,6 +26,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	restclient "k8s.io/client-go/rest"
 	clienttesting "k8s.io/client-go/testing"
+	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/keyutil"
 
 	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
@@ -722,4 +724,52 @@ func TestByohCSR_EnsureCSR_Renewal(t *testing.T) {
 			assert.Len(t, list.Items, 2, "the old CSR is left alone and a new one is created")
 		})
 	}
+}
+
+func TestByohCSR_BootstrapKubeconfig_ResumesInterruptedOnboarding(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	certificate := []byte("issued-certificate")
+	issued := &certv1.CertificateSigningRequest{
+		ObjectMeta: metav1.ObjectMeta{Name: oldCSRName, UID: existingCSRUID},
+		Status: certv1.CertificateSigningRequestStatus{
+			Conditions:  []certv1.CertificateSigningRequestCondition{{Type: certv1.CertificateApproved, Status: corev1.ConditionTrue}},
+			Certificate: certificate,
+		},
+	}
+	bcsr, client := newTestByohCSR(t, dir, issued)
+
+	// The agent was interrupted after it created its CSR and before it wrote the kubeconfig.
+	keyData, _, err := keyutil.LoadOrGenerateKeyFile(filepath.Join(dir, PrivateKeyFileName))
+	require.NoError(t, err)
+	seeded := &State{
+		Phase:            PhasePending,
+		BootstrapTokenID: testTokenID,
+		Identity:         oldIdentity,
+		CSRName:          oldCSRName,
+		CSRUID:           existingCSRUID,
+	}
+	require.NoError(t, seeded.save(dir))
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	err = bcsr.BootstrapKubeconfig(ctx, testTenantNamespace, testNormalizedHostName, "")
+	require.NoError(t, err)
+
+	// The same CSR is waited on, so no second request is filed and the identity is kept.
+	list, err := client.CertificatesV1().CertificateSigningRequests().List(t.Context(), metav1.ListOptions{})
+	require.NoError(t, err)
+	require.Len(t, list.Items, 1)
+	assert.Equal(t, oldCSRName, list.Items[0].Name)
+	wantState := *seeded
+	wantState.Phase = PhaseIssued
+	assert.Equal(t, &wantState, readState(t, dir))
+
+	written, err := clientcmd.LoadFromFile(filepath.Join(dir, "config"))
+	require.NoError(t, err)
+	authInfo := written.AuthInfos["default-auth"]
+	require.NotNil(t, authInfo)
+	assert.Equal(t, certificate, authInfo.ClientCertificateData)
+	assert.Equal(t, keyData, authInfo.ClientKeyData)
 }
