@@ -44,7 +44,7 @@ func spinUpByoHosts(ctx context.Context, dockerClient *client.Client, namespace 
 				agentFlagNamespace:           namespace,
 				agentFlagVerbosity:           "1",
 			},
-			BootstrapKubeconfigData: generateBootstrapKubeconfig(ctx, bootstrapClusterProxy, clusterConName),
+			BootstrapKubeconfigData: generateBootstrapKubeconfig(ctx, bootstrapClusterProxy, clusterConName, namespace, byoHostName),
 		}
 
 		byohost, err := runner.SetupByoDockerHost()
