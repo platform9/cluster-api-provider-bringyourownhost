@@ -48,9 +48,9 @@ func runHostOperation(cmd *cobra.Command, operation pkg.HostOperationType, force
 		os.Exit(1)
 	}
 
-	namespace, err := client.GetNamespaceFromConfig(service.KubeconfigFilePath)
+	namespace, byoHostName, err := client.GetHostRefFromConfig(service.KubeconfigFilePath)
 	if err != nil {
-		fmt.Println("Failed to get namespace from kubeconfig: " + err.Error())
+		fmt.Println("Failed to get host identity from kubeconfig: " + err.Error())
 		os.Exit(1)
 	}
 
@@ -60,7 +60,7 @@ func runHostOperation(cmd *cobra.Command, operation pkg.HostOperationType, force
 		os.Exit(1)
 	}
 
-	err = pkg.PerformHostOperation(cmd.Context(), k8sClient, pkg.DefaultHostIO{}, operation, namespace, force)
+	err = pkg.PerformHostOperation(cmd.Context(), k8sClient, pkg.DefaultHostIO{}, operation, namespace, byoHostName, force)
 	if err != nil {
 		fmt.Println(failureMsg + err.Error())
 		os.Exit(1)
