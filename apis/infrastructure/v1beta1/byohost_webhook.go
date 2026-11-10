@@ -99,14 +99,28 @@ func (v *ByoHostValidator) handleCreateUpdate(req *admission.Request) admission.
 		return admission.Denied(fmt.Sprintf("%s is not a valid agent username: %s", userName, err.Error()))
 	}
 
-	if hostIdentity.TenantNamespace != req.Namespace || hostIdentity.ByoHostName() != byoHost.Name {
+	if hostIdentity.TenantNamespace != req.Namespace {
 		return admission.Denied(fmt.Sprintf("%s cannot create/update resource %s", userName, byoHost.Name))
 	}
 
-	// On create the object must already carry the requester's identity, which
-	// the stamping webhook wrote. A mismatch means the stamp was bypassed.
-	if req.Operation == v1.Create && byoHost.Spec.Identity != userName {
-		return admission.Denied(fmt.Sprintf("%s cannot create resource %s with identity %q", userName, byoHost.Name, byoHost.Spec.Identity))
+	switch req.Operation {
+	case v1.Create:
+		// A new host is named after its identity, so the name must match the
+		// identity of the requester.
+		if hostIdentity.ByoHostName() != byoHost.Name {
+			return admission.Denied(fmt.Sprintf("%s cannot create resource %s", userName, byoHost.Name))
+		}
+	case v1.Update:
+		// The requester controls the new object, so authorize against the
+		// identity stored on the existing host instead.
+		oldHost := &ByoHost{}
+		err = v.Decoder.DecodeRaw(req.OldObject, oldHost)
+		if err != nil {
+			return admission.Errored(http.StatusBadRequest, err)
+		}
+		if oldHost.Spec.Identity != userName {
+			return admission.Denied(fmt.Sprintf("%s cannot update resource %s", userName, byoHost.Name))
+		}
 	}
 
 	return admission.Allowed("")
@@ -141,7 +155,7 @@ func (v *ByoHostValidator) handleDelete(ctx context.Context, req *admission.Requ
 			return admission.Denied(fmt.Sprintf("%s is not a valid agent username: %s", userName, parseErr.Error()))
 		}
 
-		if hostIdentity.TenantNamespace != req.Namespace || hostIdentity.ByoHostName() != byoHost.Name {
+		if hostIdentity.TenantNamespace != req.Namespace || byoHost.Spec.Identity != userName {
 			return admission.Denied(fmt.Sprintf("%s cannot delete resource %s", userName, byoHost.Name))
 		}
 	}

@@ -52,6 +52,16 @@ var (
 		NormalizedHostName: "worker-1",
 		Suffix:             "abcde",
 	}.String()
+	worker10User = identity.HostIdentity{
+		TenantNamespace:    "default",
+		NormalizedHostName: "worker-10",
+		Suffix:             "abcde",
+	}.String()
+	worker1OtherSuffixUser = identity.HostIdentity{
+		TenantNamespace:    "default",
+		NormalizedHostName: "worker-1",
+		Suffix:             "zzzzz",
+	}.String()
 	suffixLikeUser = identity.HostIdentity{
 		TenantNamespace:    "default",
 		NormalizedHostName: "web-abcde",
@@ -225,9 +235,11 @@ func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 		userName  string
 		hostName  string
 		identity  string
-		namespace string // namespace of the admission request, testNamespace when empty
-		wantAllow bool
-		wantMsg   string
+		// oldIdentity is the identity stored on the existing host, used on update.
+		oldIdentity string
+		namespace   string // namespace of the admission request, testNamespace when empty
+		wantAllow   bool
+		wantMsg     string
 	}{
 		{
 			name:      "create allowed from a valid agent username",
@@ -239,25 +251,14 @@ func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 			wantMsg:   "",
 		},
 		{
-			// Create requires the object to already carry the requester's
-			// identity. Without it the stamping webhook was bypassed.
-			name:      "create denied when the object carries no identity",
-			operation: admissionv1.Create,
-			userName:  byohHostOneUser,
-			hostName:  defaultHostName,
-			identity:  "",
-			wantAllow: false,
-			wantMsg:   fmt.Sprintf("%s cannot create resource %s with identity %q", byohHostOneUser, defaultHostName, ""),
-		},
-		{
-			// Update does not check the stamp, only that the identity names
-			// this host.
-			name:      "update allowed from a valid agent username",
-			operation: admissionv1.Update,
-			userName:  byohHostOneUser,
-			hostName:  defaultHostName,
-			wantAllow: true,
-			wantMsg:   "",
+			// Update compares the identity stored on the existing host.
+			name:        "update allowed from a valid agent username",
+			operation:   admissionv1.Update,
+			userName:    byohHostOneUser,
+			hostName:    defaultHostName,
+			oldIdentity: byohHostOneUser,
+			wantAllow:   true,
+			wantMsg:     "",
 		},
 		{
 			name:      "create denied from a username that is not a host identity",
@@ -372,7 +373,7 @@ func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 			hostName:  defaultHostName,
 			identity:  byohHostTwoUser,
 			wantAllow: false,
-			wantMsg:   byohHostTwoUser + " cannot create/update resource " + defaultHostName,
+			wantMsg:   fmt.Sprintf("%s cannot create resource %s", byohHostTwoUser, defaultHostName),
 		},
 		{
 			// Names are compared whole, so "host1-x7k2p0" is not "host1-x7k2p".
@@ -382,7 +383,7 @@ func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 			hostName:  "host1-x7k2p0",
 			identity:  byohHostOneUser,
 			wantAllow: false,
-			wantMsg:   byohHostOneUser + " cannot create/update resource host1-x7k2p0",
+			wantMsg:   fmt.Sprintf("%s cannot create resource %s", byohHostOneUser, "host1-x7k2p0"),
 		},
 		{
 			name:      "name lacking the suffix is denied",
@@ -391,38 +392,42 @@ func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 			hostName:  "host1",
 			identity:  byohHostOneUser,
 			wantAllow: false,
-			wantMsg:   byohHostOneUser + " cannot create/update resource host1",
+			wantMsg:   fmt.Sprintf("%s cannot create resource %s", byohHostOneUser, "host1"),
 		},
 		{
-			name:      "worker-1 certificate acting on worker-10 is denied",
-			operation: admissionv1.Update,
-			userName:  worker1User,
-			hostName:  "worker-10-abcde",
-			wantAllow: false,
-			wantMsg:   worker1User + " cannot create/update resource worker-10-abcde",
+			name:        "worker-1 certificate updating a host stored under worker-10 is denied",
+			operation:   admissionv1.Update,
+			userName:    worker1User,
+			hostName:    "worker-10-abcde",
+			oldIdentity: worker10User,
+			wantAllow:   false,
+			wantMsg:     worker1User + " cannot update resource worker-10-abcde",
 		},
 		{
-			name:      "worker-1 certificate acting on worker-1-zzzzz is denied",
-			operation: admissionv1.Update,
-			userName:  worker1User,
-			hostName:  "worker-1-zzzzz",
-			wantAllow: false,
-			wantMsg:   worker1User + " cannot create/update resource worker-1-zzzzz",
+			name:        "worker-1 certificate updating a host stored under another worker-1 suffix is denied",
+			operation:   admissionv1.Update,
+			userName:    worker1User,
+			hostName:    "worker-1-zzzzz",
+			oldIdentity: worker1OtherSuffixUser,
+			wantAllow:   false,
+			wantMsg:     worker1User + " cannot update resource worker-1-zzzzz",
 		},
 		{
-			name:      "hostname that ends like a suffix is split from the right and allowed",
-			operation: admissionv1.Update,
-			userName:  suffixLikeUser,
-			hostName:  "web-abcde-xyzwq",
-			wantAllow: true,
+			name:        "hostname that ends like a suffix is split from the right and allowed",
+			operation:   admissionv1.Update,
+			userName:    suffixLikeUser,
+			hostName:    "web-abcde-xyzwq",
+			oldIdentity: suffixLikeUser,
+			wantAllow:   true,
 		},
 		{
-			name:      "tenant with hyphens is allowed in its own namespace",
-			operation: admissionv1.Update,
-			userName:  hyphenTenantUser,
-			hostName:  defaultHostName,
-			namespace: "a-b-c",
-			wantAllow: true,
+			name:        "tenant with hyphens is allowed in its own namespace",
+			operation:   admissionv1.Update,
+			userName:    hyphenTenantUser,
+			hostName:    defaultHostName,
+			oldIdentity: hyphenTenantUser,
+			namespace:   "a-b-c",
+			wantAllow:   true,
 		},
 		{
 			// The tenant is compared with the namespace of the request, not
@@ -490,6 +495,14 @@ func TestByoHostValidator_handleCreateUpdate(t *testing.T) {
 						Object: byoHost,
 					},
 				},
+			}
+
+			if tc.operation == admissionv1.Update {
+				oldHost := byoHost.DeepCopy()
+				oldHost.Spec.Identity = tc.oldIdentity
+				oldHostRaw, marshalErr := json.Marshal(oldHost)
+				require.NoError(t, marshalErr)
+				req.OldObject = runtime.RawExtension{Raw: oldHostRaw}
 			}
 
 			resp := v.Handle(t.Context(), req)
@@ -654,6 +667,7 @@ func TestByoHostValidator_handleDelete_hostCertificate(t *testing.T) {
 		userName  string
 		namespace string
 		objName   string
+		identity  string
 		wantAllow bool
 		wantMsg   string
 	}{
@@ -662,6 +676,7 @@ func TestByoHostValidator_handleDelete_hostCertificate(t *testing.T) {
 			userName:  byohHostOneUser,
 			namespace: testNamespace,
 			objName:   defaultHostName,
+			identity:  byohHostOneUser,
 			wantAllow: true,
 		},
 		{
@@ -669,6 +684,7 @@ func TestByoHostValidator_handleDelete_hostCertificate(t *testing.T) {
 			userName:  byohHostTwoUser,
 			namespace: testNamespace,
 			objName:   defaultHostName,
+			identity:  byohHostOneUser,
 			wantAllow: false,
 			wantMsg:   byohHostTwoUser + " cannot delete resource " + defaultHostName,
 		},
@@ -681,18 +697,20 @@ func TestByoHostValidator_handleDelete_hostCertificate(t *testing.T) {
 			wantMsg:   otherTenantUser + " cannot delete resource " + defaultHostName,
 		},
 		{
-			name:      "worker-1 certificate deleting worker-10 is denied",
+			name:      "worker-1 certificate deleting a host stored under worker-10 is denied",
 			userName:  worker1User,
 			namespace: testNamespace,
 			objName:   "worker-10-abcde",
+			identity:  worker10User,
 			wantAllow: false,
 			wantMsg:   worker1User + " cannot delete resource worker-10-abcde",
 		},
 		{
-			name:      "worker-1 certificate deleting worker-1-zzzzz is denied",
+			name:      "worker-1 certificate deleting a host stored under another worker-1 suffix is denied",
 			userName:  worker1User,
 			namespace: testNamespace,
 			objName:   "worker-1-zzzzz",
+			identity:  worker1OtherSuffixUser,
 			wantAllow: false,
 			wantMsg:   worker1User + " cannot delete resource worker-1-zzzzz",
 		},
@@ -733,6 +751,9 @@ func TestByoHostValidator_handleDelete_hostCertificate(t *testing.T) {
 					Name:      tc.objName,
 					Namespace: tc.namespace,
 				},
+				Spec: ByoHostSpec{
+					Identity: tc.identity,
+				},
 			}
 			byoHostRaw, err := json.Marshal(byoHost)
 			require.NoError(t, err)
@@ -744,6 +765,149 @@ func TestByoHostValidator_handleDelete_hostCertificate(t *testing.T) {
 					UserInfo:  v1.UserInfo{Username: tc.userName},
 					OldObject: runtime.RawExtension{Raw: byoHostRaw},
 				},
+			}
+
+			resp := v.Handle(t.Context(), req)
+
+			assert.Equal(t, tc.wantAllow, resp.Allowed)
+			assert.Equal(t, tc.wantMsg, resp.Result.Message)
+		})
+	}
+}
+
+// TestByoHostValidator_Handle_storedIdentity covers how the validator compares
+// the requester with the identity stored on the existing ByoHost.
+func TestByoHostValidator_Handle_storedIdentity(t *testing.T) {
+	// legacyLookalikeUser is a certificate whose encoded name equals the name
+	// of a ByoHost that was created before identities were stamped.
+	legacyLookalikeUser := identity.HostIdentity{
+		TenantNamespace:    testNamespace,
+		NormalizedHostName: "foo",
+		Suffix:             "bar12",
+	}.String()
+	const legacyHostName = "foo-bar12"
+	legacyServiceAccount := "system:serviceaccount:" + testNamespace + ":byoh"
+
+	testCases := []struct {
+		name      string
+		operation admissionv1.Operation
+		userName  string
+		hostName  string
+		// identity is the identity on the object being created or updated.
+		identity string
+		// oldIdentity is the identity stored on the existing host.
+		oldIdentity string
+		wantAllow   bool
+		wantMsg     string
+	}{
+		{
+			name:        "certificate named like a legacy host cannot update it",
+			operation:   admissionv1.Update,
+			userName:    legacyLookalikeUser,
+			hostName:    legacyHostName,
+			identity:    legacyLookalikeUser,
+			oldIdentity: "",
+			wantAllow:   false,
+			wantMsg:     legacyLookalikeUser + " cannot update resource " + legacyHostName,
+		},
+		{
+			name:        "certificate named like a legacy host cannot delete it",
+			operation:   admissionv1.Delete,
+			userName:    legacyLookalikeUser,
+			hostName:    legacyHostName,
+			oldIdentity: "",
+			wantAllow:   false,
+			wantMsg:     legacyLookalikeUser + " cannot delete resource " + legacyHostName,
+		},
+		{
+			name:        "host updating its own ByoHost",
+			operation:   admissionv1.Update,
+			userName:    byohHostOneUser,
+			hostName:    defaultHostName,
+			identity:    byohHostOneUser,
+			oldIdentity: byohHostOneUser,
+			wantAllow:   true,
+			wantMsg:     "",
+		},
+		{
+			name:        "update that rewrites the identity of another host's ByoHost",
+			operation:   admissionv1.Update,
+			userName:    byohHostOneUser,
+			hostName:    defaultHostName,
+			identity:    byohHostOneUser,
+			oldIdentity: byohHostTwoUser,
+			wantAllow:   false,
+			wantMsg:     byohHostOneUser + " cannot update resource " + defaultHostName,
+		},
+		{
+			name:        "host deleting its own ByoHost",
+			operation:   admissionv1.Delete,
+			userName:    byohHostOneUser,
+			hostName:    defaultHostName,
+			oldIdentity: byohHostOneUser,
+			wantAllow:   true,
+			wantMsg:     "",
+		},
+		{
+			name:      "create with matching name and stamped identity",
+			operation: admissionv1.Create,
+			userName:  byohHostOneUser,
+			hostName:  defaultHostName,
+			identity:  byohHostOneUser,
+			wantAllow: true,
+			wantMsg:   "",
+		},
+		{
+			name:        "legacy service account updating a host without an identity",
+			operation:   admissionv1.Update,
+			userName:    legacyServiceAccount,
+			hostName:    legacyHostName,
+			identity:    "",
+			oldIdentity: "",
+			wantAllow:   true,
+			wantMsg:     "",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			v := newFakeByoHostValidator(t, nil)
+
+			newHost := &ByoHost{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       testByoHostKind,
+					APIVersion: testAPIVersion,
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      tc.hostName,
+					Namespace: testNamespace,
+				},
+				Spec: ByoHostSpec{
+					Identity: tc.identity,
+				},
+			}
+			newHostRaw, err := json.Marshal(newHost)
+			require.NoError(t, err)
+
+			oldHost := newHost.DeepCopy()
+			oldHost.Spec.Identity = tc.oldIdentity
+			oldHostRaw, err := json.Marshal(oldHost)
+			require.NoError(t, err)
+
+			req := admission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Operation: tc.operation,
+					Namespace: testNamespace,
+					UserInfo:  v1.UserInfo{Username: tc.userName},
+				},
+			}
+			if tc.operation == admissionv1.Delete {
+				req.OldObject = runtime.RawExtension{Raw: oldHostRaw}
+			} else {
+				req.Object = runtime.RawExtension{Raw: newHostRaw}
+			}
+			if tc.operation == admissionv1.Update {
+				req.OldObject = runtime.RawExtension{Raw: oldHostRaw}
 			}
 
 			resp := v.Handle(t.Context(), req)
