@@ -354,7 +354,7 @@ func TestResolveByoHostName(t *testing.T) {
 		t.Helper()
 
 		dir := t.TempDir()
-		data := fmt.Sprintf(`{"version":1,"phase":"issued","identity":%q}`, stateIdentity)
+		data := fmt.Sprintf(`{"phase":"issued","identity":%q}`, stateIdentity)
 		err := os.WriteFile(filepath.Join(dir, registration.StateFileName), []byte(data), 0o600)
 		require.NoError(t, err)
 
