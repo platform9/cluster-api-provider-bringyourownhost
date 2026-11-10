@@ -25,7 +25,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
+	clienttesting "k8s.io/client-go/testing"
 
+	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/types"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
 )
@@ -495,4 +500,143 @@ func TestGetHostRefFromConfig_UnknownContext(t *testing.T) {
 	_, _, err = GetHostRefFromConfig(path)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "current context")
+}
+
+func TestGetHostRefFromConfig_ErrNoClientCertificate(t *testing.T) {
+	t.Run("kubeconfig without a client certificate", func(t *testing.T) {
+		path := writeHostKubeconfig(t, nil, false)
+
+		_, _, err := GetHostRefFromConfig(path)
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrNoClientCertificate)
+	})
+
+	t.Run("certificate whose common name is not a host identity", func(t *testing.T) {
+		path := writeHostKubeconfig(t, newCertPEM(t, "kubernetes-admin"), true)
+
+		_, _, err := GetHostRefFromConfig(path)
+
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, ErrNoClientCertificate)
+	})
+}
+
+func TestGetNamespaceFromConfig(t *testing.T) {
+	t.Run("current context namespace", func(t *testing.T) {
+		path := writeHostKubeconfig(t, nil, false)
+
+		namespace, err := GetNamespaceFromConfig(path)
+
+		require.NoError(t, err)
+		assert.Equal(t, "default", namespace)
+	})
+
+	t.Run("unreadable config", func(t *testing.T) {
+		_, err := GetNamespaceFromConfig(filepath.Join(t.TempDir(), "missing"))
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "error reading kubeconfig")
+	})
+
+	t.Run("unknown context", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "config")
+		err := os.WriteFile(path, []byte("apiVersion: v1\nkind: Config\ncurrent-context: nope\n"), 0o600)
+		require.NoError(t, err)
+
+		_, err = GetNamespaceFromConfig(path)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "current context")
+	})
+
+	t.Run("context without namespace", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "config")
+		content := "apiVersion: v1\nkind: Config\ncurrent-context: ctx\n" +
+			"contexts:\n- name: ctx\n  context:\n    cluster: c\n    user: u\n"
+		err := os.WriteFile(path, []byte(content), 0o600)
+		require.NoError(t, err)
+
+		_, err = GetNamespaceFromConfig(path)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "has no namespace")
+	})
+}
+
+func TestClient_ResolveTokenHostName(t *testing.T) {
+	const namespace = "tenant-a"
+
+	scheme := runtime.NewScheme()
+	require.NoError(t, infrastructurev1beta1.AddToScheme(scheme))
+
+	testCases := []struct {
+		name       string
+		osHostname string
+		existing   []string
+		want       string
+		wantGets   []string
+	}{
+		{
+			name:       "raw name exists",
+			osHostname: "Worker_1",
+			existing:   []string{"Worker_1", "worker-1"},
+			want:       "Worker_1",
+			wantGets:   []string{"Worker_1"},
+		},
+		{
+			name:       "raw name absent and normalized name exists",
+			osHostname: "Worker_1",
+			existing:   []string{"worker-1"},
+			want:       "worker-1",
+			wantGets:   []string{"Worker_1", "worker-1"},
+		},
+		{
+			name:       "neither name exists",
+			osHostname: "Worker_1",
+			existing:   nil,
+			want:       "Worker_1",
+			wantGets:   []string{"Worker_1", "worker-1"},
+		},
+		{
+			name:       "raw name equals normalized name",
+			osHostname: "worker-1",
+			existing:   nil,
+			want:       "worker-1",
+			wantGets:   []string{"worker-1"},
+		},
+		{
+			name:       "host name that cannot be normalized",
+			osHostname: "bad name!",
+			existing:   nil,
+			want:       "bad name!",
+			wantGets:   []string{"bad name!"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var objs []runtime.Object
+			for _, name := range tc.existing {
+				objs = append(objs, &infrastructurev1beta1.ByoHost{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespace,
+						Name:      name,
+					},
+				})
+			}
+			dynamicClient := dynamicfake.NewSimpleDynamicClient(scheme, objs...)
+			var gets []string
+			dynamicClient.PrependReactor("get", "byohosts", func(action clienttesting.Action) (bool, runtime.Object, error) {
+				gets = append(gets, action.(clienttesting.GetAction).GetName())
+				return false, nil, nil
+			})
+			c := &Client{DynamicClient: dynamicClient}
+
+			got := c.ResolveTokenHostName(namespace, tc.osHostname)
+
+			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.wantGets, gets)
+		})
+	}
 }

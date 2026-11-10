@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -22,6 +23,7 @@ import (
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/service"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/types"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/hostname"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -43,6 +45,10 @@ const (
 	// ByoHost's machineRef being cleared.
 	machineRefPollInterval = 5 * time.Second
 )
+
+// ErrNoClientCertificate is returned by GetHostRefFromConfig when the kubeconfig user has no
+// client certificate. Hosts onboarded with a bearer token have such a kubeconfig.
+var ErrNoClientCertificate = errors.New("kubeconfig has no client certificate")
 
 // K8sClient handles Kubernetes API operations
 type K8sClient struct {
@@ -105,7 +111,7 @@ func GetHostRefFromConfig(kubeconfigPath string) (namespace, name string, err er
 		}
 	}
 	if len(certPEM) == 0 {
-		return "", "", fmt.Errorf("kubeconfig %s has no client certificate for user %q", kubeconfigPath, kubeContext.AuthInfo)
+		return "", "", fmt.Errorf("%w: %s, user %q", ErrNoClientCertificate, kubeconfigPath, kubeContext.AuthInfo)
 	}
 
 	block, _ := pem.Decode(certPEM)
@@ -127,6 +133,23 @@ func GetHostRefFromConfig(kubeconfigPath string) (namespace, name string, err er
 // sanitizeName matches barista's openstack.SanitizeKubernetesName.
 func sanitizeName(s string) string {
 	return strings.ToLower(strings.ReplaceAll(s, "_", "-"))
+}
+
+// GetNamespaceFromConfig returns the namespace of the kubeconfig's current context.
+func GetNamespaceFromConfig(kubeconfigPath string) (string, error) {
+	config, err := clientcmd.LoadFromFile(kubeconfigPath)
+	if err != nil {
+		return "", fmt.Errorf("error reading kubeconfig %s: %w", kubeconfigPath, err)
+	}
+
+	kubeContext, ok := config.Contexts[config.CurrentContext]
+	if !ok {
+		return "", fmt.Errorf("current context %q not found in kubeconfig %s", config.CurrentContext, kubeconfigPath)
+	}
+	if kubeContext.Namespace == "" {
+		return "", fmt.Errorf("current context %q in kubeconfig %s has no namespace", config.CurrentContext, kubeconfigPath)
+	}
+	return kubeContext.Namespace, nil
 }
 
 // legacyNamespace returns the name-based tenant namespace, "<du>-<domain>-<tenant>",
@@ -332,6 +355,25 @@ func (client *Client) GetByoHostObject(namespace, name string) (*infrastructurev
 	}
 
 	return byoHost, nil
+}
+
+// ResolveTokenHostName returns the ByoHost name of a token-onboarded host. Agents of different
+// versions name such a host after either the raw OS host name or its normalized form, so both
+// are looked up, raw first. When neither ByoHost exists the raw name is returned, so callers
+// report the missing host under the name the operator knows.
+func (client *Client) ResolveTokenHostName(namespace, osHostname string) string {
+	if _, err := client.GetByoHostObject(namespace, osHostname); err == nil {
+		return osHostname
+	}
+
+	normalized, err := hostname.Normalize(osHostname)
+	if err != nil || normalized == osHostname {
+		return osHostname
+	}
+	if _, err := client.GetByoHostObject(namespace, normalized); err == nil {
+		return normalized
+	}
+	return osHostname
 }
 
 // DeleteByoHostObject deletes the named ByoHost object in the given namespace.
