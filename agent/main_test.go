@@ -254,42 +254,42 @@ func TestLabelFlagsString(t *testing.T) {
 }
 
 // The parser exists only to substitute host details into bootstrap data, so
-// a host with neither a default interface nor a host name must leave it nil
+// a host with neither a default interface nor a ByoHost name must leave it nil
 // rather than producing a parser that substitutes empty strings.
 func TestSetupTemplateParser(t *testing.T) {
 	testCases := []struct {
-		name               string
-		interfaceName      string
-		normalizedHostName string
-		template           string
-		wantParser         bool
-		want               string
+		name          string
+		interfaceName string
+		byoHostName   string
+		template      string
+		wantParser    bool
+		want          string
 	}{
 		{
-			name:       "no interface and no host name",
+			name:       "no interface and no ByoHost name",
 			wantParser: false,
 		},
 		{
 			name:          "default interface only",
 			interfaceName: "eth0",
-			template:      "iface={{ .DefaultNetworkInterfaceName }} host={{ .HostName }}",
+			template:      "iface={{ .DefaultNetworkInterfaceName }} host={{ .ByoHostName }}",
 			wantParser:    true,
 			want:          "iface=eth0 host=",
 		},
 		{
-			name:               "host name only",
-			normalizedHostName: "example-worker-1",
-			template:           "iface={{ .DefaultNetworkInterfaceName }} host={{ .HostName }}",
-			wantParser:         true,
-			want:               "iface= host=example-worker-1",
+			name:        "ByoHost name only",
+			byoHostName: "example-worker-1-abc12",
+			template:    "iface={{ .DefaultNetworkInterfaceName }} host={{ .ByoHostName }}",
+			wantParser:  true,
+			want:        "iface= host=example-worker-1-abc12",
 		},
 		{
-			name:               "interface and host name",
-			interfaceName:      "eth0",
-			normalizedHostName: "example-worker-1",
-			template:           "iface={{ .DefaultNetworkInterfaceName }} host={{ .HostName }}",
-			wantParser:         true,
-			want:               "iface=eth0 host=example-worker-1",
+			name:          "interface and ByoHost name",
+			interfaceName: "eth0",
+			byoHostName:   "example-worker-1-abc12",
+			template:      "iface={{ .DefaultNetworkInterfaceName }} host={{ .ByoHostName }}",
+			wantParser:    true,
+			want:          "iface=eth0 host=example-worker-1-abc12",
 		},
 	}
 
@@ -301,7 +301,7 @@ func TestSetupTemplateParser(t *testing.T) {
 			registration.LocalHostRegistrar = &registration.HostRegistrar{
 				ByoHostInfo: registration.HostInfo{
 					DefaultNetworkInterfaceName: tc.interfaceName,
-					HostName:                    tc.normalizedHostName,
+					ByoHostName:                 tc.byoHostName,
 				},
 			}
 

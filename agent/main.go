@@ -176,13 +176,13 @@ func newScheme() *runtime.Scheme {
 
 func setupTemplateParser() *cloudinit.TemplateParser {
 	info := registration.LocalHostRegistrar.ByoHostInfo
-	if info.DefaultNetworkInterfaceName == "" && info.HostName == "" {
+	if info.DefaultNetworkInterfaceName == "" && info.ByoHostName == "" {
 		return nil
 	}
 	return &cloudinit.TemplateParser{
 		Template: registration.HostInfo{
 			DefaultNetworkInterfaceName: info.DefaultNetworkInterfaceName,
-			HostName:                    info.HostName,
+			ByoHostName:                 info.ByoHostName,
 		},
 	}
 }
@@ -421,7 +421,7 @@ func main() {
 	registration.LocalHostRegistrar = &registration.HostRegistrar{
 		K8sClient:   k8sClient,
 		Identity:    hostIdentity,
-		ByoHostInfo: registration.HostInfo{HostName: normalizedHostName},
+		ByoHostInfo: registration.HostInfo{ByoHostName: byoHostName},
 	}
 	err = registration.LocalHostRegistrar.Register(ctx, byoHostName, namespace, labels)
 	if err != nil {

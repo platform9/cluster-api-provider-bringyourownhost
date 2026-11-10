@@ -38,9 +38,9 @@ var (
 // HostInfo contains information about the host.
 type HostInfo struct {
 	DefaultNetworkInterfaceName string
-	// HostName is the normalized host name. Cloud-init bootstrap data reads it
-	// as .HostName.
-	HostName string
+	// ByoHostName is the name of the host's ByoHost. Cloud-init bootstrap data
+	// reads it as .ByoHostName.
+	ByoHostName string
 }
 
 // HostRegistrar used to register a host.
@@ -184,7 +184,6 @@ func (hr *HostRegistrar) getHostInfo() (infrastructurev1beta1.HostInfo, error) {
 
 	hostInfo.Architecture = runtime.GOARCH
 	hostInfo.OSName = runtime.GOOS
-	hostInfo.NormalizedHostName = hr.ByoHostInfo.HostName
 
 	if distribution, err := getOperatingSystem(os.ReadFile); err != nil {
 		return hostInfo, pkgerrors.Wrap(err, "failed to get host operating system image")
