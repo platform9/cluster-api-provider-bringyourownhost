@@ -146,7 +146,6 @@ var _ = Describe("When a host re-onboards via byohctl after a decommission [Byoh
 
 		By("Planting a leftover state file from an unrelated onboarding")
 		plantedState := registration.State{
-			Version:          1,
 			Phase:            registration.PhasePending,
 			BootstrapTokenID: "planted",
 			Identity:         "byoh:host:" + namespace.Name + ":" + hostName + "-plant",
@@ -239,7 +238,6 @@ func assertOnboardingState(ctx context.Context, dockerClient *dockerclient.Clien
 	Expect(csr.Status.Certificate).NotTo(BeEmpty(), "CSR %s was not issued", state.CSRName)
 
 	expectedState := registration.State{
-		Version:          1,
 		Phase:            registration.PhaseIssued,
 		BootstrapTokenID: tokenID,
 		Identity:         byoHost.Spec.Identity,
