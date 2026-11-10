@@ -34,7 +34,7 @@ spec:
           EOF
       joinConfiguration:
         nodeRegistration:
-          name: "{{ .HostName }}"
+          name: "{{ .ByoHostName }}"
           ignorePreflightErrors:
             - Swap
             - SystemVerification

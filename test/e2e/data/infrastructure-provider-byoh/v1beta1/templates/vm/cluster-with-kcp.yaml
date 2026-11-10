@@ -121,7 +121,7 @@ spec:
       path: /etc/kubernetes/manifests/kube-vip.yaml
     initConfiguration:
       nodeRegistration:
-        name: "{{ .HostName }}"
+        name: "{{ .ByoHostName }}"
         ignorePreflightErrors:
         - Swap
         - DirAvailable--etc-kubernetes-manifests
@@ -129,7 +129,7 @@ spec:
         criSocket: /var/run/containerd/containerd.sock
     joinConfiguration:
       nodeRegistration:
-        name: "{{ .HostName }}"
+        name: "{{ .ByoHostName }}"
         ignorePreflightErrors:
         - Swap
         - DirAvailable--etc-kubernetes-manifests

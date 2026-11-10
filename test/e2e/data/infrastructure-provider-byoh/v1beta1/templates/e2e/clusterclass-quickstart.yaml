@@ -190,7 +190,7 @@ spec:
             path: /etc/kubernetes/manifests/kube-vip.yaml
         initConfiguration:
           nodeRegistration:
-            name: "{{ .HostName }}"
+            name: "{{ .ByoHostName }}"
             criSocket: /var/run/containerd/containerd.sock
             ignorePreflightErrors:
               - Swap
@@ -203,7 +203,7 @@ spec:
               resolv-conf: /etc/kubernetes/resolv.conf
         joinConfiguration:
           nodeRegistration:
-            name: "{{ .HostName }}"
+            name: "{{ .ByoHostName }}"
             criSocket: /var/run/containerd/containerd.sock
             ignorePreflightErrors:
               - Swap
@@ -267,7 +267,7 @@ spec:
           EOF
       joinConfiguration:
         nodeRegistration:
-          name: "{{ .HostName }}"
+          name: "{{ .ByoHostName }}"
           ignorePreflightErrors:
             - Swap
             - SystemVerification

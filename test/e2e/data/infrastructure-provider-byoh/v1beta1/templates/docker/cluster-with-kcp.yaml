@@ -118,7 +118,7 @@ spec:
       path: /etc/kubernetes/manifests/kube-vip.yaml
     initConfiguration:
       nodeRegistration:
-        name: "{{ .HostName }}"
+        name: "{{ .ByoHostName }}"
         ignorePreflightErrors:
         - Swap
         - DirAvailable--etc-kubernetes-manifests
@@ -129,7 +129,7 @@ spec:
           eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
     joinConfiguration:
       nodeRegistration:
-        name: "{{ .HostName }}"
+        name: "{{ .ByoHostName }}"
         ignorePreflightErrors:
         - Swap
         - DirAvailable--etc-kubernetes-manifests
