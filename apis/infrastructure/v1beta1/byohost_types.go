@@ -130,10 +130,6 @@ type HostInfo struct {
 
 	// The Architecture reported by the host.
 	Architecture string `json:"architecture,omitempty"`
-
-	// NormalizedHostName is the normalized host name, written by the agent. The
-	// Kubernetes Node is named this.
-	NormalizedHostName string `json:"normalizedHostName,omitempty"`
 }
 
 // ByoHostStatus defines the observed state of ByoHost
