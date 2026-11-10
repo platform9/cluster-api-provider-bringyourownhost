@@ -213,7 +213,6 @@ func TestByohCSR_LoadOrCreateState(t *testing.T) {
 	const oldKey = "old-key"
 	oldState := func(tokenID string) *State {
 		return &State{
-			Version:          stateVersion,
 			Phase:            PhasePending,
 			BootstrapTokenID: tokenID,
 			Identity:         oldIdentity,
@@ -243,19 +242,10 @@ func TestByohCSR_LoadOrCreateState(t *testing.T) {
 			wantResumed: false,
 		},
 		{
-			name: "unknown version starts fresh",
-			seed: func(t *testing.T, dir string) {
-				t.Helper()
-				require.NoError(t, os.WriteFile(filepath.Join(dir, StateFileName), []byte(`{"version":99}`), 0o600))
-				require.NoError(t, os.WriteFile(filepath.Join(dir, PrivateKeyFileName), []byte(oldKey), 0o600))
-			},
-			wantResumed: false,
-		},
-		{
 			name: "unknown phase starts fresh",
 			seed: func(t *testing.T, dir string) {
 				t.Helper()
-				contents := `{"version":1,"phase":"done","bootstrapTokenID":"` + testTokenID + `","identity":"` + oldIdentity + `"}`
+				contents := `{"phase":"done","bootstrapTokenID":"` + testTokenID + `","identity":"` + oldIdentity + `"}`
 				require.NoError(t, os.WriteFile(filepath.Join(dir, StateFileName), []byte(contents), 0o600))
 				require.NoError(t, os.WriteFile(filepath.Join(dir, PrivateKeyFileName), []byte(oldKey), 0o600))
 			},
@@ -486,7 +476,6 @@ func TestByohCSR_EnsureCSR_Resume(t *testing.T) {
 			bcsr, client := newTestByohCSR(t, dir, objects...)
 
 			seeded := &State{
-				Version:          stateVersion,
 				Phase:            PhasePending,
 				BootstrapTokenID: testTokenID,
 				Identity:         oldIdentity,
@@ -579,7 +568,7 @@ func TestByohCSR_LoadOrCreateState_ExistingIdentity(t *testing.T) {
 
 		dir := t.TempDir()
 		bcsr, _ := newTestByohCSR(t, dir)
-		seeded := &State{Version: stateVersion, Phase: PhasePending, BootstrapTokenID: testTokenID, Identity: oldIdentity, CSRName: oldCSRName}
+		seeded := &State{Phase: PhasePending, BootstrapTokenID: testTokenID, Identity: oldIdentity, CSRName: oldCSRName}
 		require.NoError(t, seeded.save(dir))
 		require.NoError(t, os.WriteFile(filepath.Join(dir, PrivateKeyFileName), []byte("old-key"), 0o600))
 
@@ -616,7 +605,6 @@ func TestByohCSR_EnsureCSR_RenewsAfterIssued(t *testing.T) {
 	bcsr, client := newTestByohCSR(t, dir, oldCSR)
 
 	seeded := &State{
-		Version:          stateVersion,
 		Phase:            PhaseIssued,
 		BootstrapTokenID: testTokenID,
 		Identity:         oldIdentity,
@@ -694,7 +682,6 @@ func TestByohCSR_EnsureCSR_Renewal(t *testing.T) {
 			bcsr, client := newTestByohCSR(t, dir, oldCSR)
 
 			seeded := &State{
-				Version:          stateVersion,
 				Phase:            tc.phase,
 				BootstrapTokenID: testTokenID,
 				Identity:         oldIdentity,

@@ -207,7 +207,6 @@ func (bcsr *ByohCSR) loadOrCreateState(dir, tenantNamespace, normalizedHostName,
 		hostIdentity = newIdentity(tenantNamespace, normalizedHostName)
 	}
 	st = &State{
-		Version:          stateVersion,
 		BootstrapTokenID: tokenID,
 		Identity:         hostIdentity,
 		Phase:            PhasePending,
