@@ -24,7 +24,6 @@ func TestState_SaveAndLoad(t *testing.T) {
 
 	dir := filepath.Join(t.TempDir(), "nested", ".byoh")
 	want := &State{
-		Version:          stateVersion,
 		Phase:            PhaseIssued,
 		BootstrapTokenID: "abcdef",
 		Identity:         "byoh:host:example-worker-1:q4m9z",
@@ -57,8 +56,8 @@ func TestState_SaveReplacesExistingFile(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	first := &State{Version: stateVersion, Phase: PhasePending, BootstrapTokenID: "abcdef", Identity: "first"}
-	second := &State{Version: stateVersion, Phase: PhasePending, BootstrapTokenID: "abcdef", Identity: "second"}
+	first := &State{Phase: PhasePending, BootstrapTokenID: "abcdef", Identity: "first"}
+	second := &State{Phase: PhasePending, BootstrapTokenID: "abcdef", Identity: "second"}
 
 	require.NoError(t, first.save(dir))
 	require.NoError(t, second.save(dir))
@@ -81,14 +80,10 @@ func TestLoadState_Errors(t *testing.T) {
 		},
 		{
 			name:     "invalid JSON",
-			contents: new(`{"version": 1,`),
+			contents: new(`{"phase": "pending",`),
 		},
 		{
-			name:     "unknown version",
-			contents: new(`{"version": 2, "bootstrapTokenID": "abcdef"}`),
-		},
-		{
-			name:     "no version",
+			name:     "no phase",
 			contents: new(`{"bootstrapTokenID": "abcdef"}`),
 		},
 	}
@@ -120,19 +115,18 @@ func TestLoadState_InvalidFields(t *testing.T) {
 		wantErr  bool
 	}{
 		{
-			name:     "wrong version and unknown phase",
-			contents: `{"version": 7, "phase": "done"}`,
+			name:     "unknown phase",
+			contents: `{"phase": "done"}`,
 			want: &InvalidStateError{
 				Problems: []*StateFieldError{
-					{Field: "version", Reason: `unknown version 7`},
 					{Field: "phase", Reason: `unknown phase "done"`},
 				},
 			},
 			wantErr: true,
 		},
 		{
-			name:     "unknown phase only",
-			contents: `{"version": 1, "phase": ""}`,
+			name:     "empty phase",
+			contents: `{"phase": ""}`,
 			want: &InvalidStateError{
 				Problems: []*StateFieldError{
 					{Field: "phase", Reason: `unknown phase ""`},
@@ -142,7 +136,7 @@ func TestLoadState_InvalidFields(t *testing.T) {
 		},
 		{
 			name:     "valid fields",
-			contents: `{"version": 1, "phase": "pending"}`,
+			contents: `{"phase": "pending"}`,
 			wantErr:  false,
 		},
 	}
@@ -203,7 +197,6 @@ func TestState_SaveIsAtomicUnderConcurrency(t *testing.T) {
 	dir := t.TempDir()
 	newState := func(writer int) *State {
 		return &State{
-			Version:          stateVersion,
 			Phase:            PhasePending,
 			BootstrapTokenID: "abcdef",
 			Identity:         fmt.Sprintf("writer-%d-%s", writer, strings.Repeat("x", identityPadding)),
@@ -355,7 +348,7 @@ func TestLoadState_Phase(t *testing.T) {
 			t.Parallel()
 
 			dir := t.TempDir()
-			want := &State{Version: stateVersion, Phase: phase, BootstrapTokenID: "abcdef"}
+			want := &State{Phase: phase, BootstrapTokenID: "abcdef"}
 			require.NoError(t, want.save(dir))
 
 			got, err := loadState(dir)
@@ -370,11 +363,11 @@ func TestLoadState_Phase(t *testing.T) {
 	}{
 		{
 			name:     "empty phase is rejected",
-			contents: `{"version": 1, "phase": "", "bootstrapTokenID": "abcdef"}`,
+			contents: `{"phase": "", "bootstrapTokenID": "abcdef"}`,
 		},
 		{
 			name:     "unknown phase is rejected",
-			contents: `{"version": 1, "phase": "done", "bootstrapTokenID": "abcdef"}`,
+			contents: `{"phase": "done", "bootstrapTokenID": "abcdef"}`,
 		},
 	}
 	for _, tc := range testCases {
@@ -398,7 +391,6 @@ func TestState_MarkIssued(t *testing.T) {
 
 	dir := t.TempDir()
 	st := &State{
-		Version:          stateVersion,
 		Phase:            PhasePending,
 		BootstrapTokenID: "abcdef",
 		Identity:         "byoh:host:example-worker-1:q4m9z",
@@ -411,7 +403,6 @@ func TestState_MarkIssued(t *testing.T) {
 
 	// The CSR the agent created stays named, even though it may be gone from the cluster.
 	want := &State{
-		Version:          stateVersion,
 		Phase:            PhaseIssued,
 		BootstrapTokenID: "abcdef",
 		Identity:         "byoh:host:example-worker-1:q4m9z",

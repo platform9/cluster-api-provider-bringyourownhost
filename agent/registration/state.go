@@ -22,10 +22,8 @@ const (
 	// the client private key.
 	PrivateKeyFileName = "client.key"
 
-	stateFieldVersion = "version"
-	stateFieldPhase   = "phase"
+	stateFieldPhase = "phase"
 
-	stateVersion  = 1
 	stateFileMode = 0o600
 	stateDirMode  = 0o700
 )
@@ -43,7 +41,6 @@ const (
 
 // State is what the agent needs to resume an interrupted onboarding.
 type State struct {
-	Version int `json:"version"`
 	// Phase is how far the onboarding got. It is never empty in a valid state.
 	Phase Phase `json:"phase"`
 	// BootstrapTokenID is the id half of the bootstrap token. It ties the
@@ -120,9 +117,6 @@ func loadState(dir string) (*State, error) {
 	}
 
 	var problems []*StateFieldError
-	if s.Version != stateVersion {
-		problems = append(problems, &StateFieldError{Field: stateFieldVersion, Reason: fmt.Sprintf("unknown version %d", s.Version)})
-	}
 	if s.Phase != PhasePending && s.Phase != PhaseIssued {
 		problems = append(problems, &StateFieldError{Field: stateFieldPhase, Reason: fmt.Sprintf("unknown phase %q", s.Phase)})
 	}
