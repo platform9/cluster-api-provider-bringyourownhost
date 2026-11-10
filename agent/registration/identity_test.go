@@ -139,7 +139,7 @@ func TestResolveIdentity(t *testing.T) {
 	}{
 		{
 			name:      "state file wins over the client certificate",
-			stateFile: &State{Version: stateVersion, Phase: PhasePending, Identity: stateIdentity},
+			stateFile: &State{Phase: PhasePending, Identity: stateIdentity},
 			config:    certConfig,
 			want:      stateIdentity,
 		},
@@ -150,7 +150,7 @@ func TestResolveIdentity(t *testing.T) {
 		},
 		{
 			name:      "client certificate is used when the state has no identity",
-			stateFile: &State{Version: stateVersion, Phase: PhasePending},
+			stateFile: &State{Phase: PhasePending},
 			config:    certConfig,
 			want:      certIdentity,
 		},
