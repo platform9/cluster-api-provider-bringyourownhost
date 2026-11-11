@@ -30,6 +30,10 @@ jobs:
   e2e:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        attempt: [1, 2, 3, 4, 5, 6, 7, 8]
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -115,16 +119,26 @@ jobs:
       if: ${{ github.event_name == 'workflow_dispatch' }}
       run: make build-host-agent-deb
 
+    - name: Start cgroup collector
+      run: |
+        mkdir -p _artifacts/cgroup-collector
+        nohup bash hack/flake-collect-cgroup-state.sh --out-dir _artifacts/cgroup-collector >/dev/null 2>&1 &
+        echo "$!" >/tmp/cgroup-collector.pid
+
     - name: Run e2e tests
       env:
         SKIP_BUILD: ${{ github.event_name != 'workflow_dispatch' && '1' || '' }}
       run: yes | GINKGO_NODES=3 make test-e2e
 
+    - name: Stop cgroup collector
+      if: always()
+      run: kill "$(cat /tmp/cgroup-collector.pid)" || true
+
     - name: Upload e2e artifacts
-      if: failure()
+      if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: e2e-artifacts
+        name: e2e-artifacts-attempt-${{ matrix.attempt }}
         path: _artifacts/
         retention-days: 5
 
