@@ -48,6 +48,7 @@ const (
 )
 
 // ByoHostSpec defines the desired state of ByoHost
+// +kubebuilder:validation:XValidation:rule="has(self.identity) == has(oldSelf.identity) && (!has(self.identity) || self.identity == oldSelf.identity)",message="identity is immutable"
 type ByoHostSpec struct {
 	// BootstrapSecret is an optional reference to a Cluster API Secret
 	// for bootstrap purpose
@@ -73,11 +74,12 @@ type ByoHostSpec struct {
 	DesiredAgent *DesiredAgentSpec `json:"desiredAgent,omitempty"`
 
 	// Identity is the certificate identity of this host, in the form
-	// byoh:host:<hostName>:<suffix>. The admission webhook sets it from the
-	// authenticated requester when the host is created, never from the request
-	// body. It does not change for the life of the host. Renewal is authorized
-	// against it, so a certificate with any other identity cannot renew even
-	// while it is still cryptographically valid.
+	// byoh:host:<tenantNamespace>:<normalizedHostName>-<suffix>. The tenant
+	// namespace is the ByoHost's namespace. The admission webhook sets the
+	// identity from the authenticated requester when the host is created, never
+	// from the request body. It does not change for the life of the host.
+	// Renewal is authorized against it, so a certificate with any other
+	// identity cannot renew even while it is still cryptographically valid.
 	// +optional
 	Identity string `json:"identity,omitempty"`
 }
