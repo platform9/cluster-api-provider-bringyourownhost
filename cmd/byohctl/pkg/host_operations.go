@@ -44,7 +44,7 @@ func (DefaultHostIO) Purge() error {
 // PerformHostOperation performs the common steps for host deauthorisation or decommissioning.
 //
 //nolint:gocyclo,funlen,gocritic // sequential host operation steps; refactor out of scope
-func PerformHostOperation(ctx context.Context, client *client.Client, io HostIO, operationType HostOperationType, namespace string, force bool) error {
+func PerformHostOperation(ctx context.Context, client *client.Client, io HostIO, operationType HostOperationType, namespace, byoHostName string, force bool) error {
 	// Deauthorise and decommission host steps -
 	// 1. Check if the host is already onboarded ( by checking the respective byohost object in the management cluster)
 	// 2. If the host is onboarded - Check if machineRef is set to the byohost object; If not set, just delete the byohost object and exit
@@ -59,7 +59,7 @@ func PerformHostOperation(ctx context.Context, client *client.Client, io HostIO,
 	utils.LogInfo("Performing %s operation for host in namespace %s", operationType, namespace)
 
 	// 1. Check if byohost object exists
-	byoHost, err := client.GetByoHostObject(namespace)
+	byoHost, err := client.GetByoHostObject(namespace, byoHostName)
 	if err != nil {
 		fmt.Println("failed to get ByoHosts object from the management plane: " + err.Error())
 		// There might be a chance that the byohost object is not present in the management cluster
@@ -103,7 +103,7 @@ func PerformHostOperation(ctx context.Context, client *client.Client, io HostIO,
 		// If deauthorise, just return
 		if operationType == OperationDecommission {
 			utils.LogInfo("MachineRef is not set to the byohost object. Host is not part of any cluster. Deleting the byohost object and running dpkg purge.")
-			return performHostDecommissionWithNoMachineRef(ctx, client, io, namespace)
+			return performHostDecommissionWithNoMachineRef(ctx, client, io, namespace, byoHostName)
 		}
 		return fmt.Errorf("machineRef is not set for the byohost object. This host is not part of the cluster. Cannot proceed ahead with de-auth")
 
@@ -173,7 +173,7 @@ func PerformHostOperation(ctx context.Context, client *client.Client, io HostIO,
 	utils.LogSuccess("Successfully scaled down machine deployment by 1")
 
 	// 5. Wait for machineRef to be unset from the byohost object status field
-	err = client.WaitForMachineRefToBeUnset(ctx, byoHost, namespace)
+	err = client.WaitForMachineRefToBeUnset(ctx, byoHost, namespace, byoHostName)
 	if err != nil {
 		return fmt.Errorf("failed to wait for machineRef to be unset: %v", err)
 	}
@@ -182,17 +182,17 @@ func PerformHostOperation(ctx context.Context, client *client.Client, io HostIO,
 
 	// If operation is decommission, delete the byohost object and run dpkg purge
 	if operationType == OperationDecommission {
-		return performHostDecommissionWithNoMachineRef(ctx, client, io, namespace)
+		return performHostDecommissionWithNoMachineRef(ctx, client, io, namespace, byoHostName)
 	}
 
 	return nil
 }
 
 // Helper function to consolidate decommissioning logic when no machineRef is set
-func performHostDecommissionWithNoMachineRef(ctx context.Context, byohClient *client.Client, io HostIO, namespace string) error {
+func performHostDecommissionWithNoMachineRef(ctx context.Context, byohClient *client.Client, io HostIO, namespace, byoHostName string) error {
 	utils.LogInfo("Deleting ByoHosts object and running dpkg purge")
 
-	if err := byohClient.DeleteByoHostObject(namespace); err != nil {
+	if err := byohClient.DeleteByoHostObject(namespace, byoHostName); err != nil {
 		return fmt.Errorf("failed to delete ByoHosts object: %v", err)
 	}
 
