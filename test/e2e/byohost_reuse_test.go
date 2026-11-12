@@ -63,9 +63,8 @@ var _ = Describe("When BYO Host rejoins the capacity pool [Reuse]", func() {
 		applyClusterAndWait(ctx, namespace.Name, clusterName, specName, e2eConfig.GetVariableOrEmpty(KubernetesVersion), clusterctl.DefaultFlavor, 1, 1, clusterResources)
 
 		// Assert on byohost cluster label to match clusterName
-		byoHostLookupKey := k8stypes.NamespacedName{Name: byoHostName2, Namespace: namespace.Name}
-		byoHostToBeReused := &infrastructurev1beta1.ByoHost{}
-		Expect(bootstrapClusterProxy.GetClient().Get(ctx, byoHostLookupKey, byoHostToBeReused)).Should(Succeed())
+		byoHostToBeReused := waitForByoHost(ctx, bootstrapClusterProxy, namespace.Name, byoHostName2, specName)
+		byoHostObjectName := byoHostToBeReused.Name
 		cluster, ok := byoHostToBeReused.Labels[clusterv1.ClusterNameLabel]
 		Expect(ok).To(BeTrue())
 		Expect(cluster).To(Equal(clusterName))
@@ -90,6 +89,7 @@ var _ = Describe("When BYO Host rejoins the capacity pool [Reuse]", func() {
 		// deleting, so this must poll rather than check once.
 		Eventually(func() bool {
 			polledByoHost := &infrastructurev1beta1.ByoHost{}
+			byoHostLookupKey := k8stypes.NamespacedName{Name: byoHostObjectName, Namespace: namespace.Name}
 			if err := bootstrapClusterProxy.GetClient().Get(ctx, byoHostLookupKey, polledByoHost); err != nil {
 				return true
 			}
@@ -104,7 +104,7 @@ var _ = Describe("When BYO Host rejoins the capacity pool [Reuse]", func() {
 
 		// Assert on byohost cluster label to match clusterName
 		byoHostToBeReused = &infrastructurev1beta1.ByoHost{}
-		Expect(bootstrapClusterProxy.GetClient().Get(ctx, byoHostLookupKey, byoHostToBeReused)).Should(Succeed())
+		Expect(bootstrapClusterProxy.GetClient().Get(ctx, k8stypes.NamespacedName{Name: byoHostObjectName, Namespace: namespace.Name}, byoHostToBeReused)).Should(Succeed())
 		cluster, ok = byoHostToBeReused.Labels[clusterv1.ClusterNameLabel]
 		Expect(ok).To(BeTrue())
 		Expect(cluster).To(Equal(clusterName))

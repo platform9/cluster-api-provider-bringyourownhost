@@ -66,10 +66,9 @@ var _ = Describe("When an agent upgrade rollout hits pre-existing unavailability
 		disconnected := hosts[0]
 		Expect(killAgentProcess(ctx, dockerClient, disconnected.ContainerID)).To(Succeed())
 
-		disconnectedKey := k8stypes.NamespacedName{Name: disconnected.Name, Namespace: namespace.Name}
 		Eventually(func() bool {
-			host := &infrastructurev1beta1.ByoHost{}
-			if getErr := bootstrapClusterProxy.GetClient().Get(ctx, disconnectedKey, host); getErr != nil {
+			host, getErr := findByoHost(ctx, bootstrapClusterProxy.GetClient(), namespace.Name, disconnected.Name)
+			if getErr != nil {
 				return false
 			}
 			return conditions.IsFalse(host, infrastructurev1beta1.AgentConnected)
@@ -94,12 +93,12 @@ var _ = Describe("When an agent upgrade rollout hits pre-existing unavailability
 		By("Asserting the rollout stays Pending and picks no host while the unrelated host is disconnected")
 		Consistently(func() error {
 			for _, host := range hosts {
-				h := &infrastructurev1beta1.ByoHost{}
-				if getErr := bootstrapClusterProxy.GetClient().Get(ctx, k8stypes.NamespacedName{Name: host.Name, Namespace: namespace.Name}, h); getErr != nil {
+				h, getErr := findByoHost(ctx, bootstrapClusterProxy.GetClient(), namespace.Name, host.Name)
+				if getErr != nil {
 					return getErr
 				}
 				if h.Spec.DesiredAgent != nil {
-					return fmt.Errorf("host %s already has DesiredAgent set, expected the rollout to stay blocked", host.Name)
+					return fmt.Errorf("host %s already has DesiredAgent set, expected the rollout to stay blocked", h.Name)
 				}
 			}
 
@@ -128,8 +127,8 @@ var _ = Describe("When an agent upgrade rollout hits pre-existing unavailability
 		By("Asserting the rollout resumes picking hosts on its own, no operator action taken on the upgrade itself")
 		Eventually(func() bool {
 			for _, host := range hosts {
-				h := &infrastructurev1beta1.ByoHost{}
-				if err := bootstrapClusterProxy.GetClient().Get(ctx, k8stypes.NamespacedName{Name: host.Name, Namespace: namespace.Name}, h); err != nil {
+				h, err := findByoHost(ctx, bootstrapClusterProxy.GetClient(), namespace.Name, host.Name)
+				if err != nil {
 					continue
 				}
 				if h.Spec.DesiredAgent != nil && h.Spec.DesiredAgent.Version == "v9.9.9" {
