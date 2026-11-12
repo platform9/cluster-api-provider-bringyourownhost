@@ -30,6 +30,10 @@ jobs:
   e2e:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        attempt: [1, 2, 3, 4, 5, 6, 7, 8]
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -124,7 +128,7 @@ jobs:
       if: failure()
       uses: actions/upload-artifact@v4
       with:
-        name: e2e-artifacts
+        name: e2e-artifacts-attempt-${{ matrix.attempt }}
         path: _artifacts/
         retention-days: 5
 
