@@ -5,8 +5,10 @@ package pkg
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/client"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/service"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/cmd/byohctl/utils"
@@ -42,6 +44,9 @@ func (DefaultHostIO) Purge() error {
 }
 
 // PerformHostOperation performs the common steps for host deauthorisation or decommissioning.
+//
+// With force set, a failed management plane step is logged and skipped, so a decommission
+// still purges the agent package. A declined prompt still stops the operation.
 //
 //nolint:gocyclo,funlen,gocritic // sequential host operation steps; refactor out of scope
 func PerformHostOperation(ctx context.Context, client *client.Client, io HostIO, operationType HostOperationType, namespace, byoHostName string, force bool) error {
@@ -103,13 +108,49 @@ func PerformHostOperation(ctx context.Context, client *client.Client, io HostIO,
 		// If deauthorise, just return
 		if operationType == OperationDecommission {
 			utils.LogInfo("MachineRef is not set to the byohost object. Host is not part of any cluster. Deleting the byohost object and running dpkg purge.")
-			return performHostDecommissionWithNoMachineRef(ctx, client, io, namespace, byoHostName)
+			return performHostDecommissionWithNoMachineRef(ctx, client, io, namespace, byoHostName, force)
+		}
+		if force {
+			utils.LogWarn("--force set: machineRef is not set for the byohost object; the host is not part of a cluster, nothing to deauthorise")
+			return nil
 		}
 		return fmt.Errorf("machineRef is not set for the byohost object. This host is not part of the cluster. Cannot proceed ahead with de-auth")
 
 		// We should return from here even if deauth or decommission
 	}
 
+	// Each detach step depends on the previous one, so a forced run skips the rest after a
+	// failure. A declined prompt is a decision, not a failure, so --force does not override it.
+	if err = detachHostFromMachine(ctx, client, io, byoHost, namespace, byoHostName); err != nil {
+		var decisionErr *userDecisionError
+		if errors.As(err, &decisionErr) || !force {
+			return err
+		}
+		utils.LogWarn("--force set: %v; skipping the remaining management plane steps", err)
+	}
+
+	if operationType == OperationDecommission {
+		return performHostDecommissionWithNoMachineRef(ctx, client, io, namespace, byoHostName, force)
+	}
+
+	return nil
+}
+
+// userDecisionError is an error caused by the operator's answer to a prompt. --force does
+// not override it, unlike a management plane failure.
+type userDecisionError struct {
+	err error
+}
+
+func (e *userDecisionError) Error() string { return e.err.Error() }
+
+func (e *userDecisionError) Unwrap() error { return e.err }
+
+// detachHostFromMachine marks the host's machine for removal, scales down its machine
+// deployment and waits for the machineRef to be unset. It stops at the first failing step.
+//
+//nolint:gocyclo,gocritic // sequential host operation steps
+func detachHostFromMachine(ctx context.Context, client *client.Client, io HostIO, byoHost *infrastructurev1beta1.ByoHost, namespace, byoHostName string) error {
 	machineName := byoHost.Status.MachineRef.Name
 
 	// Get the machine object ( unstructured )
@@ -137,10 +178,10 @@ func PerformHostOperation(ctx context.Context, client *client.Client, io HostIO,
 		// Ask user to continue de-auth or not
 		continueDeauth, confirmErr := io.Confirm("Do you want to continue with de-auth? (y/n)")
 		if confirmErr != nil {
-			return fmt.Errorf("failed to get user input: %v", confirmErr)
+			return &userDecisionError{err: fmt.Errorf("failed to get user input: %w", confirmErr)}
 		}
 		if !continueDeauth {
-			return fmt.Errorf("Info: De-auth cancelled by user.") //nolint:staticcheck,misspell // user-facing message kept unchanged
+			return &userDecisionError{err: fmt.Errorf("Info: De-auth cancelled by user.")} //nolint:staticcheck,misspell // user-facing message kept unchanged
 		}
 
 		// Since this is the last machine in the cluster, annotate machine objects to exclude the node drain
@@ -180,23 +221,22 @@ func PerformHostOperation(ctx context.Context, client *client.Client, io HostIO,
 
 	utils.LogSuccess("MachineRef successfully unset for the host")
 
-	// If operation is decommission, delete the byohost object and run dpkg purge
-	if operationType == OperationDecommission {
-		return performHostDecommissionWithNoMachineRef(ctx, client, io, namespace, byoHostName)
-	}
-
 	return nil
 }
 
-// Helper function to consolidate decommissioning logic when no machineRef is set
-func performHostDecommissionWithNoMachineRef(ctx context.Context, byohClient *client.Client, io HostIO, namespace, byoHostName string) error {
+// performHostDecommissionWithNoMachineRef deletes the ByoHost object and purges the agent
+// package. With force set, a failed delete is logged and the purge still runs.
+func performHostDecommissionWithNoMachineRef(ctx context.Context, byohClient *client.Client, io HostIO, namespace, byoHostName string, force bool) error {
 	utils.LogInfo("Deleting ByoHosts object and running dpkg purge")
 
 	if err := byohClient.DeleteByoHostObject(namespace, byoHostName); err != nil {
-		return fmt.Errorf("failed to delete ByoHosts object: %v", err)
+		if !force {
+			return fmt.Errorf("failed to delete ByoHosts object: %v", err)
+		}
+		utils.LogWarn("--force set: failed to delete ByoHosts object: %v; continuing with dpkg purge. The ByoHost object may remain on the DU", err)
+	} else {
+		utils.LogSuccess("Successfully deleted ByoHosts object")
 	}
-
-	utils.LogSuccess("Successfully deleted ByoHosts object")
 
 	if purgeErr := io.Purge(); purgeErr != nil {
 		return fmt.Errorf("failed to run dpkg purge: %v", purgeErr)
