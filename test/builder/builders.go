@@ -382,16 +382,14 @@ func (s *SecretBuilder) Build() *corev1.Secret {
 
 // NodeBuilder holds the variables and objects required to build a corev1.Node
 type NodeBuilder struct {
-	namespace  string
 	name       string
 	providerID string
 }
 
-// Node returns a NodeBuilder with the given name and namespace
-func Node(namespace, name string) *NodeBuilder {
+// Node returns a NodeBuilder with the given name
+func Node(name string) *NodeBuilder {
 	return &NodeBuilder{
-		namespace: namespace,
-		name:      name,
+		name: name,
 	}
 }
 
@@ -409,8 +407,7 @@ func (n *NodeBuilder) Build() *corev1.Node {
 			APIVersion: "v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      n.name,
-			Namespace: n.namespace,
+			Name: n.name,
 		},
 		Spec: corev1.NodeSpec{
 			ProviderID: n.providerID,

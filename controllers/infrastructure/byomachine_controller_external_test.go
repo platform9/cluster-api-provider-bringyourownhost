@@ -156,7 +156,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 			})
 
 			It("should not return error when node.Spec.ProviderID is with correct value", func() {
-				node = builder.Node(defaultNamespace, byoHost.Name).
+				node = builder.Node(byoHost.Name).
 					WithProviderID(fmt.Sprintf("%s%s/%s", controllers.ProviderIDPrefix, byoHost.Name, util.RandomString(controllers.ProviderIDSuffixLength))).
 					Build()
 				Expect(clientFake.Create(ctx, node)).Should(Succeed())
@@ -165,7 +165,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 			})
 
 			It("should return error when node.Spec.ProviderID has stale value", func() {
-				node = builder.Node(defaultNamespace, byoHost.Name).
+				node = builder.Node(byoHost.Name).
 					WithProviderID(fmt.Sprintf("%sanother-host/%s", controllers.ProviderIDPrefix, util.RandomString(controllers.ProviderIDSuffixLength))).
 					Build()
 				Expect(clientFake.Create(ctx, node)).Should(Succeed())
@@ -238,7 +238,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 				byoHost = builder.ByoHost(defaultNamespace, "single-available-default-host").Build()
 				Expect(k8sClientUncached.Create(ctx, byoHost)).Should(Succeed())
 
-				node = builder.Node(defaultNamespace, byoHost.Name).Build()
+				node = builder.Node(byoHost.Name).Build()
 				Expect(clientFake.Create(ctx, node)).Should(Succeed())
 				WaitForObjectsToBePopulatedInCache(ctx, byoHost)
 
@@ -290,7 +290,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 				}))
 
 				node := corev1.Node{}
-				err = clientFake.Get(ctx, types.NamespacedName{Name: byoHost.Name, Namespace: defaultNamespace}, &node)
+				err = clientFake.Get(ctx, types.NamespacedName{Name: byoHost.Name}, &node)
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(node.Spec.ProviderID).To(ContainSubstring(controllers.ProviderIDPrefix))
@@ -738,8 +738,8 @@ var _ = Describe("Controllers/ByomachineController", func() {
 
 				WaitForObjectsToBePopulatedInCache(ctx, byoHost1, byoHost2)
 
-				Expect(clientFake.Create(ctx, builder.Node(defaultNamespace, byoHost1.Name).Build())).Should(Succeed())
-				Expect(clientFake.Create(ctx, builder.Node(defaultNamespace, byoHost2.Name).Build())).Should(Succeed())
+				Expect(clientFake.Create(ctx, builder.Node(byoHost1.Name).Build())).Should(Succeed())
+				Expect(clientFake.Create(ctx, builder.Node(byoHost2.Name).Build())).Should(Succeed())
 			})
 
 			It("claims one of the available host", func() {
@@ -767,11 +767,11 @@ var _ = Describe("Controllers/ByomachineController", func() {
 				Expect(len(events)).Should(Equal(3))
 
 				node1 := corev1.Node{}
-				err = clientFake.Get(ctx, types.NamespacedName{Name: byoHost1.Name, Namespace: defaultNamespace}, &node1)
+				err = clientFake.Get(ctx, types.NamespacedName{Name: byoHost1.Name}, &node1)
 				Expect(err).NotTo(HaveOccurred())
 
 				node2 := corev1.Node{}
-				err = clientFake.Get(ctx, types.NamespacedName{Name: byoHost2.Name, Namespace: defaultNamespace}, &node2)
+				err = clientFake.Get(ctx, types.NamespacedName{Name: byoHost2.Name}, &node2)
 				Expect(err).NotTo(HaveOccurred())
 
 				var nodeTagged bool
@@ -818,7 +818,7 @@ var _ = Describe("Controllers/ByomachineController", func() {
 				Expect(len(events)).Should(Equal(3))
 
 				node := corev1.Node{}
-				err = clientFake.Get(ctx, types.NamespacedName{Name: byoHost1.Name, Namespace: defaultNamespace}, &node)
+				err = clientFake.Get(ctx, types.NamespacedName{Name: byoHost1.Name}, &node)
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(node.Spec.ProviderID).To(ContainSubstring(controllers.ProviderIDPrefix))
