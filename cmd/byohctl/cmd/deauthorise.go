@@ -44,9 +44,26 @@ func runDeauthorise(cmd *cobra.Command, args []string) {
 func runHostOperation(cmd *cobra.Command, operation pkg.HostOperationType, force bool, failureMsg, successMsg string) {
 	utils.SetConsoleOutputLevel(verbosity)
 
+	// failLookup exits the process. Without force it exits 1. With force it skips the
+	// management plane step, so a decommission still purges the agent package, and exits 0.
+	failLookup := func(msg string) {
+		if !force {
+			fmt.Println(msg)
+			os.Exit(1)
+		}
+		utils.LogWarn("--force set: skipping the management plane step: %s", msg)
+		if operation == pkg.OperationDecommission {
+			if purgeErr := (pkg.DefaultHostIO{}).Purge(); purgeErr != nil {
+				fmt.Println(failureMsg + "failed to run dpkg purge: " + purgeErr.Error())
+				os.Exit(1)
+			}
+			utils.LogSuccess("Successfully ran dpkg purge")
+		}
+		os.Exit(0)
+	}
+
 	if _, err := os.Stat(service.KubeconfigFilePath); os.IsNotExist(err) {
-		fmt.Printf("kubeconfig file not found at %s. Please onboard the host first.\n", service.KubeconfigFilePath)
-		os.Exit(1)
+		failLookup(fmt.Sprintf("kubeconfig file not found at %q. Please onboard the host first.", service.KubeconfigFilePath))
 	}
 
 	namespace, byoHostName, err := client.GetHostRefFromConfig(service.KubeconfigFilePath)
@@ -54,26 +71,22 @@ func runHostOperation(cmd *cobra.Command, operation pkg.HostOperationType, force
 	// is named after the OS host name, which is looked up below once the client exists.
 	tokenHost := errors.Is(err, client.ErrNoClientCertificate)
 	if err != nil && !tokenHost {
-		fmt.Println("Failed to get host identity from kubeconfig: " + err.Error())
-		os.Exit(1)
+		failLookup("Failed to get host identity from kubeconfig: " + err.Error())
 	}
 
 	k8sClient, err := client.GetK8sClient(service.KubeconfigFilePath)
 	if err != nil {
-		fmt.Println("Failed to get Kubernetes client: " + err.Error())
-		os.Exit(1)
+		failLookup("Failed to get Kubernetes client: " + err.Error())
 	}
 
 	if tokenHost {
 		namespace, err = client.GetNamespaceFromConfig(service.KubeconfigFilePath)
 		if err != nil {
-			fmt.Println("Failed to get namespace from kubeconfig: " + err.Error())
-			os.Exit(1)
+			failLookup("Failed to get namespace from kubeconfig: " + err.Error())
 		}
 		osHostname, hostnameErr := os.Hostname()
 		if hostnameErr != nil {
-			fmt.Println("Failed to get the OS host name: " + hostnameErr.Error())
-			os.Exit(1)
+			failLookup("Failed to get the OS host name: " + hostnameErr.Error())
 		}
 		byoHostName = k8sClient.ResolveTokenHostName(namespace, osHostname)
 	}
