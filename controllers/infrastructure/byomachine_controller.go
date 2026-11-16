@@ -406,7 +406,7 @@ func (r *ByoMachineReconciler) ClusterToByoMachines(logger logr.Logger) handler.
 func (r *ByoMachineReconciler) setNodeProviderID(ctx context.Context, remoteClient client.Client, host *infrav1.ByoHost) (string, error) {
 	// The bootstrap templates register the Node under the ByoHost name.
 	node := &corev1.Node{}
-	key := client.ObjectKey{Name: host.Name, Namespace: host.Namespace}
+	key := client.ObjectKey{Name: host.Name}
 	err := remoteClient.Get(ctx, key, node)
 	if err != nil {
 		return "", err
