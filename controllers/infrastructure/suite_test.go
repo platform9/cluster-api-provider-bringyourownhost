@@ -96,7 +96,7 @@ func setupReconcilers() {
 		panic(err)
 	}
 
-	node := builder.Node(defaultNamespace, defaultNodeName).Build()
+	node := builder.Node(defaultNodeName).Build()
 	clientFake = fake.NewClientBuilder().WithObjects(capiCluster, node).Build()
 
 	recorder = record.NewFakeRecorder(32)
