@@ -50,9 +50,29 @@ func TestNormalize(t *testing.T) {
 			want:  "01",
 		},
 		{
-			name:  "longest accepted name",
-			input: strings.Repeat("a", 253),
-			want:  strings.Repeat("a", 253),
+			name:  "exactly the maximum length is kept as is",
+			input: strings.Repeat("a", hostname.MaxLength),
+			want:  strings.Repeat("a", hostname.MaxLength),
+		},
+		{
+			name:  "one over the maximum length loses its last character",
+			input: strings.Repeat("a", hostname.MaxLength+1),
+			want:  strings.Repeat("a", hostname.MaxLength),
+		},
+		{
+			name:  "uppercase and underscores are normalized before the cut",
+			input: strings.Repeat("WEB_", 20) + "END",
+			want:  strings.Repeat("web-", 13) + "web",
+		},
+		{
+			name:  "a hyphen left at the end by the cut is removed",
+			input: strings.Repeat("a", 54) + "-bbbb",
+			want:  strings.Repeat("a", 54),
+		},
+		{
+			name:  "a dot left at the end by the cut is removed",
+			input: strings.Repeat("a", 54) + ".bbbb",
+			want:  strings.Repeat("a", 54),
 		},
 
 		// Rejection cases

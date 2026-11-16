@@ -12,17 +12,24 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
+// MaxLength is the longest normalized host name. A ByoHost is named
+// "<host name>-<suffix>" with a 5 character suffix, so the name stays within
+// the 63 character DNS label limit.
+const MaxLength = 55
+
 // Normalize turns a machine's host name into the object name used for that
 // host:
 // - lowercase
 // - underscores replaced with hyphens
 // - trailing dot removed
+// - cut to MaxLength characters, then any trailing "-" or "." removed
 //
 // It ensures that the returned value can be used as a valid RFC 1123 subdomain
 // or returns an error.
 //
 // CAVEAT: Two separate hostname inputs may resolve to the same normalized
-// output. But ensuring unique hostnames is beyond the scope of this function.
+// output, for example when they share their first MaxLength characters. But
+// ensuring unique hostnames is beyond the scope of this function.
 //
 // NOTE: Ensure kubeadm's nodeRegistration.name is set to the normalized name,
 // so the Node and the ByoHost agree.
@@ -34,6 +41,10 @@ func Normalize(name string) (string, error) {
 	if errs := validation.IsDNS1123Subdomain(normalized); len(errs) > 0 {
 		return "", fmt.Errorf("host name %q normalizes to %q, which is not a valid object name: %s",
 			name, normalized, strings.Join(errs, "; "))
+	}
+
+	if len(normalized) > MaxLength {
+		normalized = strings.TrimRight(normalized[:MaxLength], "-.")
 	}
 
 	return normalized, nil
