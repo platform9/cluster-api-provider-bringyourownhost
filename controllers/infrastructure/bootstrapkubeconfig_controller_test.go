@@ -33,9 +33,9 @@ import (
 const (
 	bkTestNamespace    = "dg-d-default-service"
 	bkTestName         = "host-a1b2c"
-	bkTestHostTemplate = "vcluster-cp.k8s.{customerFqdn}"
+	bkTestHostTemplate = "byoh.k8s.{customerFqdn}"
 	bkTestFQDN         = "dg-d.platform9.horse"
-	bkTestServer       = "https://vcluster-cp.k8s.dg-d.platform9.horse:443"
+	bkTestServer       = "https://byoh.k8s.dg-d.platform9.horse:443"
 	bkTestRootCA       = "-----BEGIN CERTIFICATE-----\nroot\n-----END CERTIFICATE-----\n"
 	bkTestSpecCA       = "spec-ca-pem"
 	bkTestTokenID      = "abcdef"

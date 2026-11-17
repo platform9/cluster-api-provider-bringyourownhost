@@ -57,8 +57,8 @@ var (
 )
 
 // defaultBootstrapAPIServerHostTemplate is the apiserver host template used
-// when --bootstrap-apiserver-host-template is not set. It is the dev value.
-const defaultBootstrapAPIServerHostTemplate = "vcluster-cp.k8s.{customerFqdn}"
+// when --bootstrap-apiserver-host-template is not set.
+const defaultBootstrapAPIServerHostTemplate = "byoh.k8s.{customerFqdn}"
 
 // controllerOptions is the flag- and environment-derived configuration
 // setupControllers needs.

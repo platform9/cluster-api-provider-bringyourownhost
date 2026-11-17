@@ -188,7 +188,7 @@ func TestValidateBootstrapAPIServerHostTemplate(t *testing.T) {
 		template string
 		wantErr  bool
 	}{
-		{name: "dev default", template: defaultBootstrapAPIServerHostTemplate, wantErr: false},
+		{name: "built-in default", template: defaultBootstrapAPIServerHostTemplate, wantErr: false},
 		{name: "plain host", template: "kube.example.com", wantErr: false},
 		{name: "scheme", template: "https://vcluster-cp.k8s.{customerFqdn}", wantErr: true},
 		{name: "port", template: "vcluster-cp.k8s.{customerFqdn}:443", wantErr: true},
