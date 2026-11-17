@@ -4,6 +4,7 @@
 package identity_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -12,23 +13,9 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/validation"
 
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/hostname"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
 )
-
-// dottedHostName returns a valid DNS-1123 subdomain of the given length, made
-// of short labels so that no label exceeds 63 characters.
-func dottedHostName(length int) string {
-	var b strings.Builder
-	for i := 0; i < length; i++ {
-		if i%10 == 9 {
-			b.WriteByte('.')
-			continue
-		}
-		b.WriteByte('a')
-	}
-
-	return b.String()
-}
 
 func TestParse(t *testing.T) {
 	testCases := []struct {
@@ -190,6 +177,12 @@ func TestParse(t *testing.T) {
 			wantErr:  true,
 			wantMsg:  "invalid suffix",
 		},
+		{
+			name:     "host name one character over the maximum",
+			identity: "byoh:host:acme-prod:" + strings.Repeat("a", hostname.MaxLength+1) + "-x7k2p",
+			wantErr:  true,
+			wantMsg:  fmt.Sprintf("longer than %d characters", hostname.MaxLength),
+		},
 	}
 
 	for _, tc := range testCases {
@@ -210,59 +203,89 @@ func TestParse(t *testing.T) {
 	}
 }
 
-func TestParse_hostNameLength(t *testing.T) {
-	const suffix = "x7k2p"
+func TestHostIdentity_hostNameLength(t *testing.T) {
+	const (
+		tenant = "acme-prod"
+		suffix = "x7k2p"
+	)
 
 	testCases := []struct {
 		name         string
-		hostNameLen  int
-		wantNameLen  int
-		wantValid    bool
-		wantParseErr string
+		input        string
+		wantHostName string
+		wantDNSLabel bool
 	}{
 		{
-			name:        "object name at the 253 character limit",
-			hostNameLen: 247,
-			wantNameLen: 253,
-			wantValid:   true,
+			name:         fmt.Sprintf("%d characters is kept", hostname.MaxLength),
+			input:        strings.Repeat("a", hostname.MaxLength),
+			wantHostName: strings.Repeat("a", hostname.MaxLength),
+			wantDNSLabel: true,
 		},
 		{
-			name:         "object name one character over the limit",
-			hostNameLen:  248,
-			wantNameLen:  254,
-			wantValid:    false,
-			wantParseErr: "invalid name",
+			name:         fmt.Sprintf("%d characters is cut to %d", hostname.MaxLength+1, hostname.MaxLength),
+			input:        strings.Repeat("a", hostname.MaxLength+1),
+			wantHostName: strings.Repeat("a", hostname.MaxLength),
+			wantDNSLabel: true,
+		},
+		{
+			name:         "dotted name is cut inside a label",
+			input:        "node-1.rack-7.dc1.example.internal.cluster.platform9.example.com",
+			wantHostName: "node-1.rack-7.dc1.example.internal.cluster.platform9.ex",
+			wantDNSLabel: false,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			want := identity.HostIdentity{
-				TenantNamespace:    "default",
-				NormalizedHostName: dottedHostName(tc.hostNameLen),
+			normalized, err := hostname.Normalize(tc.input)
+			require.NoError(t, err)
+
+			id := identity.HostIdentity{
+				TenantNamespace:    tenant,
+				NormalizedHostName: normalized,
 				Suffix:             suffix,
 			}
-			name := want.ByoHostName()
-			require.Len(t, name, tc.wantNameLen)
-
-			problems := validation.IsDNS1123Subdomain(name)
-			if tc.wantValid {
-				assert.Empty(t, problems)
-			} else {
-				assert.NotEmpty(t, problems)
+			byoHostName := id.ByoHostName()
+			assert.Equal(t, tc.wantHostName+"-"+suffix, byoHostName)
+			assert.LessOrEqual(t, len(byoHostName), validation.DNS1123LabelMaxLength)
+			if tc.wantDNSLabel {
+				assert.Empty(t, validation.IsDNS1123Label(byoHostName))
 			}
 
-			got, err := identity.Parse(want.String())
-			if !tc.wantValid {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tc.wantParseErr)
-				return
-			}
-
+			got, err := identity.Parse(id.String())
 			require.NoError(t, err)
-			assert.Equal(t, want, got)
+			assert.Equal(t, id, got)
 		})
 	}
+
+	t.Run("hosts sharing the first characters keep distinct names", func(t *testing.T) {
+		prefix := strings.Repeat("a", hostname.MaxLength)
+		hostA, err := hostname.Normalize(prefix + "-worker-1.example.com")
+		require.NoError(t, err)
+		hostB, err := hostname.Normalize(prefix + "-worker-2.example.com")
+		require.NoError(t, err)
+		require.Equal(t, hostA, hostB, "the cut must make both host names identical")
+
+		idA := identity.HostIdentity{
+			TenantNamespace:    tenant,
+			NormalizedHostName: hostA,
+			Suffix:             suffix,
+		}
+		idB := identity.HostIdentity{
+			TenantNamespace:    tenant,
+			NormalizedHostName: hostB,
+			Suffix:             "m3q9d",
+		}
+
+		assert.NotEqual(t, idA.ByoHostName(), idB.ByoHostName())
+		assert.NotEqual(t, idA.String(), idB.String())
+
+		for _, id := range []identity.HostIdentity{idA, idB} {
+			got, err := identity.Parse(id.String())
+			require.NoError(t, err)
+			assert.Equal(t, id, got)
+		}
+	})
 }
 
 func TestParse_allProblems(t *testing.T) {

@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"k8s.io/apimachinery/pkg/util/validation"
+
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/hostname"
 )
 
 // Prefix is what every host certificate's common name starts with. The full
@@ -134,12 +136,14 @@ func Parse(identity string) (HostIdentity, error) {
 
 		if parsed.NormalizedHostName == "" {
 			problems = append(problems, errors.New("has an empty host name"))
+		} else if len(parsed.NormalizedHostName) > hostname.MaxLength {
+			problems = append(problems, fmt.Errorf("has a host name %q longer than %d characters", parsed.NormalizedHostName, hostname.MaxLength))
 		} else if hostProblems := validation.IsDNS1123Subdomain(parsed.NormalizedHostName); len(hostProblems) > 0 {
 			problems = append(problems, fmt.Errorf("has an invalid host name %q: %s", parsed.NormalizedHostName, strings.Join(hostProblems, ", ")))
 		}
 
-		// The object name must itself be a valid name, which bounds the host
-		// name to what leaves room for the suffix.
+		// The object name must itself be a valid name. The MaxLength check above
+		// already keeps it within the DNS label limit.
 		if nameProblems := validation.IsDNS1123Subdomain(name); len(nameProblems) > 0 {
 			problems = append(problems, fmt.Errorf("has an invalid name %q: %s", name, strings.Join(nameProblems, ", ")))
 		}
