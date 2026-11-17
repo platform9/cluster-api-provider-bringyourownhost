@@ -27,6 +27,7 @@ import (
 	restclient "k8s.io/client-go/rest"
 	clienttesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/clientcmd"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/client-go/util/keyutil"
 
 	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
@@ -726,6 +727,54 @@ func TestByohCSR_EnsureCSR_Renewal(t *testing.T) {
 	}
 }
 
+func TestWriteKubeconfigFromBootstrapping_TLSServerName(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name       string
+		serverName string
+	}{
+		{name: "server name of the bootstrap kubeconfig is kept", serverName: "kubernetes.default"},
+		{name: "empty server name stays empty", serverName: ""},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			bootstrapPath := filepath.Join(dir, "bootstrap-config")
+			bootstrapKubeconfig := clientcmdapi.Config{
+				Clusters: map[string]*clientcmdapi.Cluster{kubeconfigClusterName: {
+					Server:                   "https://byoh.k8s.example.com:443",
+					TLSServerName:            tc.serverName,
+					CertificateAuthorityData: []byte("ca-data"),
+				}},
+				AuthInfos: map[string]*clientcmdapi.AuthInfo{kubeconfigAuthName: {Token: testToken}},
+				Contexts: map[string]*clientcmdapi.Context{kubeconfigContextName: {
+					Cluster:  kubeconfigClusterName,
+					AuthInfo: kubeconfigAuthName,
+				}},
+				CurrentContext: kubeconfigContextName,
+			}
+			err := clientcmd.WriteToFile(bootstrapKubeconfig, bootstrapPath)
+			require.NoError(t, err)
+			bootstrapConfig, err := LoadRESTClientConfig(bootstrapPath)
+			require.NoError(t, err)
+
+			path := filepath.Join(dir, "config")
+			err = writeKubeconfigFromBootstrapping(bootstrapConfig, path, []byte("cert-data"), []byte("key-data"))
+			require.NoError(t, err)
+
+			written, err := clientcmd.LoadFromFile(path)
+			require.NoError(t, err)
+			cluster := written.Clusters[kubeconfigClusterName]
+			require.NotNil(t, cluster)
+			assert.Equal(t, tc.serverName, cluster.TLSServerName)
+		})
+	}
+}
+
 func TestByohCSR_BootstrapKubeconfig_ResumesInterruptedOnboarding(t *testing.T) {
 	t.Parallel()
 
@@ -768,7 +817,7 @@ func TestByohCSR_BootstrapKubeconfig_ResumesInterruptedOnboarding(t *testing.T) 
 
 	written, err := clientcmd.LoadFromFile(filepath.Join(dir, "config"))
 	require.NoError(t, err)
-	authInfo := written.AuthInfos["default-auth"]
+	authInfo := written.AuthInfos[kubeconfigAuthName]
 	require.NotNil(t, authInfo)
 	assert.Equal(t, certificate, authInfo.ClientCertificateData)
 	assert.Equal(t, keyData, authInfo.ClientKeyData)
