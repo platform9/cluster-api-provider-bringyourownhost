@@ -192,20 +192,22 @@ func TestBootstrapKubeconfigReconciler_Endpoint(t *testing.T) {
 	specCA := b64.StdEncoding.EncodeToString([]byte(bkTestSpecCA))
 
 	testCases := []struct {
-		name         string
-		namespace    string
-		spec         infrastructurev1beta1.BootstrapKubeconfigSpec
-		apiServerURL string
-		objects      []client.Object
-		wantServer   string
-		wantCA       string
+		name           string
+		namespace      string
+		spec           infrastructurev1beta1.BootstrapKubeconfigSpec
+		apiServerURL   string
+		objects        []client.Object
+		wantServer     string
+		wantServerName string
+		wantCA         string
 	}{
 		{
-			name:       "derive the URL from the customer namespace",
-			namespace:  "dg-d-default-service",
-			objects:    []client.Object{newBKNamespace(bkTestNamespace, bkTestFQDN), newBKRootCA()},
-			wantServer: bkTestServer,
-			wantCA:     bkTestRootCA,
+			name:           "derive the URL and the server name from the customer namespace",
+			namespace:      "dg-d-default-service",
+			objects:        []client.Object{newBKNamespace(bkTestNamespace, bkTestFQDN), newBKRootCA()},
+			wantServer:     bkTestServer,
+			wantServerName: "kubernetes.default",
+			wantCA:         bkTestRootCA,
 		},
 		{
 			name:      "labels of other namespaces are ignored",
@@ -216,18 +218,20 @@ func TestBootstrapKubeconfigReconciler_Endpoint(t *testing.T) {
 				newBKNamespace(bkTestNamespace, bkTestFQDN),
 				newBKRootCA(),
 			},
-			wantServer: bkTestServer,
-			wantCA:     bkTestRootCA,
+			wantServer:     bkTestServer,
+			wantServerName: "kubernetes.default",
+			wantCA:         bkTestRootCA,
 		},
 		{
-			name:       "ID-based namespace",
-			namespace:  "dg-d-1a2b3c4d",
-			objects:    []client.Object{newBKNamespace("dg-d-1a2b3c4d", bkTestFQDN), newBKRootCA()},
-			wantServer: bkTestServer,
-			wantCA:     bkTestRootCA,
+			name:           "ID-based namespace",
+			namespace:      "dg-d-1a2b3c4d",
+			objects:        []client.Object{newBKNamespace("dg-d-1a2b3c4d", bkTestFQDN), newBKRootCA()},
+			wantServer:     bkTestServer,
+			wantServerName: "kubernetes.default",
+			wantCA:         bkTestRootCA,
 		},
 		{
-			name:         "override flag skips the derivation",
+			name:         "override flag skips the derivation and sets no server name",
 			namespace:    "dg-d-default-service",
 			apiServerURL: "https://override.example.com:6443",
 			objects:      []client.Object{newBKRootCA()},
@@ -235,7 +239,7 @@ func TestBootstrapKubeconfigReconciler_Endpoint(t *testing.T) {
 			wantCA:       bkTestRootCA,
 		},
 		{
-			name:      "spec wins and no ConfigMap is needed",
+			name:      "spec wins, needs no ConfigMap and sets no server name",
 			namespace: "dg-d-default-service",
 			spec: infrastructurev1beta1.BootstrapKubeconfigSpec{
 				APIServer:                "https://spec.example.com:6443",
@@ -251,9 +255,10 @@ func TestBootstrapKubeconfigReconciler_Endpoint(t *testing.T) {
 			spec: infrastructurev1beta1.BootstrapKubeconfigSpec{
 				CertificateAuthorityData: specCA,
 			},
-			objects:    []client.Object{newBKNamespace(bkTestNamespace, bkTestFQDN), newBKRootCA()},
-			wantServer: bkTestServer,
-			wantCA:     bkTestSpecCA,
+			objects:        []client.Object{newBKNamespace(bkTestNamespace, bkTestFQDN), newBKRootCA()},
+			wantServer:     bkTestServer,
+			wantServerName: "kubernetes.default",
+			wantCA:         bkTestSpecCA,
 		},
 		{
 			name:      "CA from the cluster when the spec has none",
@@ -282,6 +287,7 @@ func TestBootstrapKubeconfigReconciler_Endpoint(t *testing.T) {
 			cluster := kubeconfig.Clusters[infrastructurev1beta1.DefaultClusterName]
 			require.NotNil(t, cluster)
 			assert.Equal(t, tc.wantServer, cluster.Server)
+			assert.Equal(t, tc.wantServerName, cluster.TLSServerName)
 			assert.Equal(t, tc.wantCA, string(cluster.CertificateAuthorityData))
 		})
 	}
