@@ -56,6 +56,11 @@ const (
 	// apiServerPort is the port of the derived apiserver URL.
 	apiServerPort = 443
 
+	// derivedAPIServerTLSServerName is the TLS server name for a derived
+	// apiserver URL. The apiserver certificate lists it and the ingress routes
+	// on it.
+	derivedAPIServerTLSServerName = "kubernetes.default"
+
 	// rootCAConfigMapName is the name of the ConfigMap, in every namespace,
 	// that holds the cluster's root CA.
 	rootCAConfigMapName = "kube-root-ca.crt"
@@ -121,7 +126,7 @@ func (r *BootstrapKubeconfigReconciler) Reconcile(ctx context.Context, req ctrl.
 
 	// Resolve the endpoint before issuing a token, so a failure leaves no
 	// token behind.
-	apiServer, caData, err := r.resolveEndpoint(ctx, bootstrapKubeconfig)
+	apiServer, tlsServerName, caData, err := r.resolveEndpoint(ctx, bootstrapKubeconfig)
 	if err != nil {
 		logger.Error(err, "Cannot resolve the apiserver endpoint, will retry", "retryAfter", endpointRetryInterval)
 		r.Recorder.Event(bootstrapKubeconfig, corev1.EventTypeWarning, endpointFailedReason, err.Error())
@@ -138,7 +143,7 @@ func (r *BootstrapKubeconfigReconciler) Reconcile(ctx context.Context, req ctrl.
 	resolved := bootstrapKubeconfig.DeepCopy()
 	resolved.Spec.APIServer = apiServer
 	resolved.Spec.CertificateAuthorityData = caData
-	renderedKubeconfig, err := renderBootstrapKubeconfig(tokenStr, resolved)
+	renderedKubeconfig, err := renderBootstrapKubeconfig(tokenStr, resolved, tlsServerName)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -297,11 +302,12 @@ func tokenFromSecret(tokenID string, secret *corev1.Secret) (string, time.Time, 
 	return tokenID + "." + tokenSecret, expiresAt, nil
 }
 
-// resolveEndpoint returns the apiserver URL and the base64 encoded CA the
-// rendered kubeconfig should use. A value in the spec wins. Otherwise the URL
-// is the controller override or derived from the namespace, and the CA is the
-// cluster root CA.
-func (r *BootstrapKubeconfigReconciler) resolveEndpoint(ctx context.Context, bootstrapKubeconfig *infrastructurev1beta1.BootstrapKubeconfig) (apiServer, caData string, err error) {
+// resolveEndpoint returns the apiserver URL, the TLS server name and the base64
+// encoded CA for the rendered kubeconfig. The spec wins, then the controller
+// override, then a URL derived from the namespace. The CA falls back to the
+// cluster root CA. Only a derived URL gets a TLS server name, the others are
+// dialed as written.
+func (r *BootstrapKubeconfigReconciler) resolveEndpoint(ctx context.Context, bootstrapKubeconfig *infrastructurev1beta1.BootstrapKubeconfig) (apiServer, tlsServerName, caData string, err error) {
 	apiServer = bootstrapKubeconfig.Spec.APIServer
 	if apiServer == "" {
 		apiServer = r.APIServerURL
@@ -309,8 +315,9 @@ func (r *BootstrapKubeconfigReconciler) resolveEndpoint(ctx context.Context, boo
 	if apiServer == "" {
 		apiServer, err = r.deriveAPIServerURL(ctx, bootstrapKubeconfig.Namespace)
 		if err != nil {
-			return "", "", err
+			return "", "", "", err
 		}
+		tlsServerName = derivedAPIServerTLSServerName
 	}
 
 	caData = bootstrapKubeconfig.Spec.CertificateAuthorityData
@@ -319,16 +326,16 @@ func (r *BootstrapKubeconfigReconciler) resolveEndpoint(ctx context.Context, boo
 		key := types.NamespacedName{Namespace: metav1.NamespaceSystem, Name: rootCAConfigMapName}
 		err = r.APIReader.Get(ctx, key, rootCA)
 		if err != nil {
-			return "", "", fmt.Errorf("get the cluster CA from configmap %q: %w", key, err)
+			return "", "", "", fmt.Errorf("get the cluster CA from configmap %q: %w", key, err)
 		}
 		pem := rootCA.Data[rootCAConfigMapKey]
 		if pem == "" {
-			return "", "", fmt.Errorf("configmap %q has no %q", key, rootCAConfigMapKey)
+			return "", "", "", fmt.Errorf("configmap %q has no %q", key, rootCAConfigMapKey)
 		}
 		caData = b64.StdEncoding.EncodeToString([]byte(pem))
 	}
 
-	return apiServer, caData, nil
+	return apiServer, tlsServerName, caData, nil
 }
 
 // deriveAPIServerURL builds the apiserver URL from the customer FQDN. The
@@ -369,8 +376,9 @@ func (r *BootstrapKubeconfigReconciler) deriveAPIServerURL(ctx context.Context, 
 
 // renderBootstrapKubeconfig turns a bootstrap token into the kubeconfig bytes a
 // host uses to request its certificate. The CA data arrives base64 encoded and
-// is decoded here, because the encoder encodes it again on the way out.
-func renderBootstrapKubeconfig(tokenStr string, bootstrapKubeconfig *infrastructurev1beta1.BootstrapKubeconfig) ([]byte, error) {
+// is decoded here, because the encoder encodes it again on the way out. An
+// empty tlsServerName leaves the cluster's tls-server-name unset.
+func renderBootstrapKubeconfig(tokenStr string, bootstrapKubeconfig *infrastructurev1beta1.BootstrapKubeconfig, tlsServerName string) ([]byte, error) {
 	bootstrapKubeconfigData, err := bootstraptoken.GenerateBootstrapKubeconfigFromBootstrapToken(tokenStr, bootstrapKubeconfig)
 	if err != nil {
 		return nil, fmt.Errorf("render the kubeconfig for %q: %w", bootstrapKubeconfig.Name, err)
@@ -383,6 +391,7 @@ func renderBootstrapKubeconfig(tokenStr string, bootstrapKubeconfig *infrastruct
 	}
 
 	bootstrapKubeconfigData.Clusters[infrastructurev1beta1.DefaultClusterName].CertificateAuthorityData = decodedCAData
+	bootstrapKubeconfigData.Clusters[infrastructurev1beta1.DefaultClusterName].TLSServerName = tlsServerName
 	encoded, err := runtime.Encode(clientcmdlatest.Codec, bootstrapKubeconfigData)
 	if err != nil {
 		return nil, fmt.Errorf("encode the kubeconfig for %q: %w", bootstrapKubeconfig.Name, err)
