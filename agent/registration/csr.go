@@ -50,6 +50,11 @@ const (
 	// csrNameSuffixLength is the length of the random suffix at the end of a
 	// CSR name.
 	csrNameSuffixLength = 5
+
+	// The names of the entries in the kubeconfig the agent writes.
+	kubeconfigClusterName = "default-cluster"
+	kubeconfigAuthName    = "default-auth"
+	kubeconfigContextName = "default-context"
 )
 
 var (
@@ -358,24 +363,25 @@ func writeKubeconfigFromBootstrapping(bootstrapClientConfig *restclient.Config, 
 	// Build resulting kubeconfig.
 	kubeconfigData := clientcmdapi.Config{
 		// Define a cluster stanza based on the bootstrap kubeconfig.
-		Clusters: map[string]*clientcmdapi.Cluster{"default-cluster": {
+		Clusters: map[string]*clientcmdapi.Cluster{kubeconfigClusterName: {
 			Server:                   bootstrapClientConfig.Host,
+			TLSServerName:            bootstrapClientConfig.ServerName,
 			InsecureSkipTLSVerify:    bootstrapClientConfig.Insecure,
 			CertificateAuthority:     caFile,
 			CertificateAuthorityData: caData,
 		}},
 		// Define auth based on the obtained client cert.
-		AuthInfos: map[string]*clientcmdapi.AuthInfo{"default-auth": {
+		AuthInfos: map[string]*clientcmdapi.AuthInfo{kubeconfigAuthName: {
 			ClientCertificateData: certData,
 			ClientKeyData:         keyData,
 		}},
 		// Define a context that connects the auth info and cluster, and set it as the default
-		Contexts: map[string]*clientcmdapi.Context{"default-context": {
-			Cluster:   "default-cluster",
-			AuthInfo:  "default-auth",
+		Contexts: map[string]*clientcmdapi.Context{kubeconfigContextName: {
+			Cluster:   kubeconfigClusterName,
+			AuthInfo:  kubeconfigAuthName,
 			Namespace: "default",
 		}},
-		CurrentContext: "default-context",
+		CurrentContext: kubeconfigContextName,
 	}
 
 	// Marshal to disk
