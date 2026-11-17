@@ -257,6 +257,35 @@ func TestHostIdentity_hostNameLength(t *testing.T) {
 			assert.Equal(t, id, got)
 		})
 	}
+
+	t.Run("hosts sharing the first characters keep distinct names", func(t *testing.T) {
+		prefix := strings.Repeat("a", hostname.MaxLength)
+		hostA, err := hostname.Normalize(prefix + "-worker-1.example.com")
+		require.NoError(t, err)
+		hostB, err := hostname.Normalize(prefix + "-worker-2.example.com")
+		require.NoError(t, err)
+		require.Equal(t, hostA, hostB, "the cut must make both host names identical")
+
+		idA := identity.HostIdentity{
+			TenantNamespace:    tenant,
+			NormalizedHostName: hostA,
+			Suffix:             suffix,
+		}
+		idB := identity.HostIdentity{
+			TenantNamespace:    tenant,
+			NormalizedHostName: hostB,
+			Suffix:             "m3q9d",
+		}
+
+		assert.NotEqual(t, idA.ByoHostName(), idB.ByoHostName())
+		assert.NotEqual(t, idA.String(), idB.String())
+
+		for _, id := range []identity.HostIdentity{idA, idB} {
+			got, err := identity.Parse(id.String())
+			require.NoError(t, err)
+			assert.Equal(t, id, got)
+		}
+	})
 }
 
 func TestParse_allProblems(t *testing.T) {
