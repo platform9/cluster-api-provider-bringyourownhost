@@ -24,6 +24,7 @@ import (
 	"sigs.k8s.io/cluster-api/controllers/clustercache"
 	"sigs.k8s.io/cluster-api/controllers/external"
 	"sigs.k8s.io/cluster-api/util"
+	"sigs.k8s.io/cluster-api/util/collections"
 	conditions "sigs.k8s.io/cluster-api/util/conditions/deprecated/v1beta1"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/cluster-api/util/predicates"
@@ -659,20 +660,105 @@ func (r *ByoMachineReconciler) markHostForCleanup(ctx context.Context, machineSc
 	}
 	machineScope.ByoHost.Annotations[infrav1.HostCleanupAnnotation] = ""
 
-	// Debug: Log the value and presence of the upgrade-in-progress annotation
-	upgradeInProgress, ok := machineScope.ByoMachine.Annotations["barista.platform9.io/upgrade-in-progress"]
-	logger.Info("DEBUG: upgrade-in-progress annotation check", "value", upgradeInProgress, "present", ok)
-	// Improved logic: skip label removal only if annotation exists and is set to "true"
-	if ok && upgradeInProgress == "true" {
-		logger.Info("Upgrade in progress: skipping removal of pf9 cluster label from ByoHost %s", machineScope.ByoHost.Name)
+	rollout, err := r.isRolloutReplacement(ctx, machineScope)
+	if err != nil {
+		logger.Error(err, "failed to determine whether machine delete is a rollout replacement; releasing the host", "byohost", machineScope.ByoHost.Name)
+	}
+	if rollout {
+		logger.Info("Machine delete is a rollout replacement, keeping cluster-reservation label on ByoHost", "byohost", machineScope.ByoHost.Name)
 	} else {
-		logger.Info("Removing pf9 cluster label %s from ByoHost %s", infrav1.ClusterLabel, machineScope.ByoHost.Name)
+		logger.Info("Releasing ByoHost from cluster", "byohost", machineScope.ByoHost.Name)
 		delete(machineScope.ByoHost.Labels, infrav1.ClusterLabel)
 		delete(machineScope.ByoHost.Labels, infrav1.ClusterLabelCP)
 	}
 
 	// Issue the patch for byohost
 	return helper.Patch(ctx, machineScope.ByoHost)
+}
+
+// isRolloutReplacement decides whether machineScope.Machine's delete is a
+// rollout replacing it (restart, cert rotation, version bump, an automatic
+// unhealthy-node replacement) rather than a real release (scale down,
+// cluster or node-group deleted). Only the former should keep the ByoHost's
+// kaapi.pf9.io/cluster-name(-cp) reservation label. See KAAP-2639.
+func (r *ByoMachineReconciler) isRolloutReplacement(ctx context.Context, machineScope *byoMachineScope) (bool, error) {
+	// Explicit signal: an operator or automation (e.g. barista's
+	// ClusterUpgradeJob flow) has told us this delete is a planned
+	// replacement, not a release.
+	if machineScope.ByoMachine.Annotations["barista.platform9.io/upgrade-in-progress"] == "true" {
+		return true, nil
+	}
+
+	// CAPI itself is replacing this machine because MachineHealthCheck found
+	// it unhealthy -- this isn't an operator-requested release either.
+	if collections.IsUnhealthyAndOwnerRemediated(machineScope.Machine) {
+		return true, nil
+	}
+
+	// The cluster itself is going away: always a real release, regardless of
+	// anything else going on with sibling machines.
+	if !machineScope.Cluster.DeletionTimestamp.IsZero() {
+		return false, nil
+	}
+
+	// Today BYOH always rolls out with maxSurge>=1 for both KCP and worker
+	// MachineDeployments (create the replacement, then delete the original
+	// once it's ready). A plain scale-down never creates a new machine, so
+	// if a sibling for the same control plane / node group already exists
+	// and was created after this one, that sibling is the replacement a
+	// rollout already surged in -- this delete is cleaning up after it, not
+	// releasing the host.
+	siblings, err := r.listSiblingMachines(ctx, machineScope.Machine)
+	if err != nil {
+		return false, err
+	}
+	for i := range siblings {
+		sibling := &siblings[i]
+		if sibling.Name == machineScope.Machine.Name {
+			continue
+		}
+		if !sibling.DeletionTimestamp.IsZero() {
+			continue
+		}
+		if sibling.CreationTimestamp.After(machineScope.Machine.CreationTimestamp.Time) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// listSiblingMachines returns the other Machines belonging to the same
+// control plane or MachineDeployment as the given Machine, so
+// isRolloutReplacement can check whether a replacement already exists.
+func (r *ByoMachineReconciler) listSiblingMachines(ctx context.Context, machine *clusterv1.Machine) ([]clusterv1.Machine, error) {
+	selector := labels.NewSelector()
+	if mdName, ok := machine.Labels[clusterv1.MachineDeploymentNameLabel]; ok {
+		req, err := labels.NewRequirement(clusterv1.MachineDeploymentNameLabel, selection.Equals, []string{mdName})
+		if err != nil {
+			return nil, err
+		}
+		selector = selector.Add(*req)
+	} else if _, ok := machine.Labels[clusterv1.MachineControlPlaneLabel]; ok {
+		cpReq, err := labels.NewRequirement(clusterv1.MachineControlPlaneLabel, selection.Exists, nil)
+		if err != nil {
+			return nil, err
+		}
+		clusterReq, err := labels.NewRequirement(clusterv1.ClusterNameLabel, selection.Equals, []string{machine.Labels[clusterv1.ClusterNameLabel]})
+		if err != nil {
+			return nil, err
+		}
+		selector = selector.Add(*cpReq, *clusterReq)
+	} else {
+		// Not a control-plane or MachineDeployment-owned machine we know how
+		// to find siblings for; treat as having none.
+		return nil, nil
+	}
+
+	list := &clusterv1.MachineList{}
+	if err := r.List(ctx, list, &client.ListOptions{LabelSelector: selector, Namespace: machine.Namespace}); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
 }
 
 func (r *ByoMachineReconciler) getInstallerConfig(ctx context.Context, byoMachine *infrav1.ByoMachine) (*unstructured.Unstructured, error) {
