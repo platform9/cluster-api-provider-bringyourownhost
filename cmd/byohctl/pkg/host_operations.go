@@ -41,6 +41,38 @@ func (DefaultHostIO) Purge() error {
 	return service.PurgeDebianPackage()
 }
 
+// HandleUnreachableManagementPlane finishes a host operation when the ByoHost cannot be read from
+// the management plane. A decommission purges the agent package after the user confirms, or
+// without a prompt when force is set. A deauthorise needs the ByoHost, so it fails unless force
+// is set, in which case it does nothing.
+func HandleUnreachableManagementPlane(io HostIO, operationType HostOperationType, force bool) error {
+	if operationType == OperationDecommission {
+		if !force {
+			continueDecommission, confirmErr := io.Confirm("Do you want to proceed with host cleanup? (y/n)")
+			if confirmErr != nil {
+				return fmt.Errorf("failed to get user input: %v", confirmErr)
+			}
+			if !continueDecommission {
+				utils.LogInfo("Host cleanup declined by user; skipping dpkg purge")
+				return nil
+			}
+		} else {
+			utils.LogInfo("--force set: proceeding with host cleanup despite unreachable management plane")
+		}
+		if purgeErr := io.Purge(); purgeErr != nil {
+			return fmt.Errorf("failed to run dpkg purge: %v", purgeErr)
+		}
+		utils.LogSuccess("Successfully ran dpkg purge")
+		return nil
+	}
+
+	if force {
+		utils.LogInfo("--force set: management plane unreachable or ByoHost missing; treating deauthorise as a no-op")
+		return nil
+	}
+	return fmt.Errorf("Cannot proceed ahead with the deauthorisation. Either restart the pf9-byohost-agent service or decommission and re-onboard.") //nolint:staticcheck // user-facing message kept unchanged
+}
+
 // PerformHostOperation performs the common steps for host deauthorisation or decommissioning.
 //
 //nolint:gocyclo,funlen,gocritic // sequential host operation steps; refactor out of scope
@@ -62,36 +94,7 @@ func PerformHostOperation(ctx context.Context, client *client.Client, io HostIO,
 	byoHost, err := client.GetByoHostObject(namespace, byoHostName)
 	if err != nil {
 		fmt.Println("failed to get ByoHosts object from the management plane: " + err.Error())
-		// There might be a chance that the byohost object is not present in the management cluster
-		// If decommission, ask user to proceed with host cleanup or not, run dpkg purge if yes
-		if operationType == OperationDecommission {
-			if !force {
-				// Ask user to proceed with host cleanup or not
-				continueDecommission, confirmErr := io.Confirm("Do you want to proceed with host cleanup? (y/n)")
-				if confirmErr != nil {
-					return fmt.Errorf("failed to get user input: %v", confirmErr)
-				}
-				if !continueDecommission {
-					utils.LogInfo("Host cleanup declined by user; skipping dpkg purge")
-					return nil
-				}
-			} else {
-				utils.LogInfo("--force set: proceeding with host cleanup despite unreachable management plane")
-			}
-			if purgeErr := io.Purge(); purgeErr != nil {
-				return fmt.Errorf("failed to run dpkg purge: %v", purgeErr)
-			}
-			utils.LogSuccess("Successfully ran dpkg purge")
-			return nil
-		}
-
-		// If its here, the operationType is deauthorise
-		// For deathorise byoHost object must be present in the management cluster
-		if force {
-			utils.LogInfo("--force set: management plane unreachable or ByoHost missing; treating deauthorise as a no-op")
-			return nil
-		}
-		return fmt.Errorf("Cannot proceed ahead with the deauthorisation. Either restart the pf9-byohost-agent service or decommission and re-onboard.") //nolint:staticcheck // user-facing message kept unchanged
+		return HandleUnreachableManagementPlane(io, operationType, force)
 	}
 
 	utils.LogSuccess("Successfully retrieved ByoHosts object from the management plane")

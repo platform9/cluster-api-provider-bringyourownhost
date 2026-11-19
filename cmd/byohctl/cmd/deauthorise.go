@@ -52,12 +52,9 @@ func runHostOperation(cmd *cobra.Command, operation pkg.HostOperationType, force
 			os.Exit(1)
 		}
 		utils.LogWarn("--force set: skipping the management plane step: %s", msg)
-		if operation == pkg.OperationDecommission {
-			if purgeErr := (pkg.DefaultHostIO{}).Purge(); purgeErr != nil {
-				fmt.Println(failureMsg + "failed to run dpkg purge: " + purgeErr.Error())
-				os.Exit(1)
-			}
-			utils.LogSuccess("Successfully ran dpkg purge")
+		if err := pkg.HandleUnreachableManagementPlane(pkg.DefaultHostIO{}, operation, force); err != nil {
+			fmt.Println(failureMsg + err.Error())
+			os.Exit(1)
 		}
 		os.Exit(0)
 	}

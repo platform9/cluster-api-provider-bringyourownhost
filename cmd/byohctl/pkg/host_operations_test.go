@@ -4,6 +4,7 @@
 package pkg
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -208,6 +209,82 @@ func TestPerformHostOperation_ExistingByoHost(t *testing.T) {
 				_, remainingErr := k8sClient.GetByoHostObject(tt.wantRemainingNamespace, tt.wantRemaining)
 				assert.NoError(t, remainingErr, "ByoHost should be untouched")
 			}
+		})
+	}
+}
+
+func TestHandleUnreachableManagementPlane(t *testing.T) {
+	tests := []struct {
+		name            string
+		operation       HostOperationType
+		force           bool
+		confirmResp     bool
+		confirmErr      error
+		purgeErr        error
+		wantErrContains string
+		wantPurgeCalls  int
+		wantAskCalls    int
+	}{
+		{
+			name:           "decommission / force purges without prompt",
+			operation:      OperationDecommission,
+			force:          true,
+			wantPurgeCalls: 1,
+		},
+		{
+			name:            "decommission / force surfaces purge failure",
+			operation:       OperationDecommission,
+			force:           true,
+			purgeErr:        errors.New("dpkg busy"),
+			wantErrContains: "failed to run dpkg purge: dpkg busy",
+			wantPurgeCalls:  1,
+		},
+		{
+			name:           "decommission / user confirms runs purge",
+			operation:      OperationDecommission,
+			confirmResp:    true,
+			wantPurgeCalls: 1,
+			wantAskCalls:   1,
+		},
+		{
+			name:         "decommission / user declines skips purge",
+			operation:    OperationDecommission,
+			confirmResp:  false,
+			wantAskCalls: 1,
+		},
+		{
+			name:            "decommission / prompt failure skips purge",
+			operation:       OperationDecommission,
+			confirmErr:      errors.New("no tty"),
+			wantErrContains: "failed to get user input: no tty",
+			wantAskCalls:    1,
+		},
+		{
+			name:      "deauthorise / force is a no-op",
+			operation: OperationDeauthorise,
+			force:     true,
+		},
+		{
+			name:            "deauthorise / no force returns error",
+			operation:       OperationDeauthorise,
+			wantErrContains: "Cannot proceed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			io := &stubIO{confirmResp: tt.confirmResp, confirmErr: tt.confirmErr, purgeErr: tt.purgeErr}
+
+			err := HandleUnreachableManagementPlane(io, tt.operation, tt.force)
+
+			if tt.wantErrContains != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErrContains)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tt.wantPurgeCalls, io.purgeN, "purge calls mismatch")
+			assert.Equal(t, tt.wantAskCalls, io.confirmN, "confirm calls mismatch")
 		})
 	}
 }
