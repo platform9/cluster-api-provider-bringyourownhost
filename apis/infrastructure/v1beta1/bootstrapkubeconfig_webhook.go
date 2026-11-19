@@ -123,12 +123,13 @@ func (r *BootstrapKubeconfig) ValidateDelete(_ context.Context, obj runtime.Obje
 	return nil, nil
 }
 
+// validateAPIServer checks the format of APIServer when it is set.
 func (r *BootstrapKubeconfig) validateAPIServer() error {
-	apiserverField := field.NewPath("spec").Child("apiserver")
-
 	if r.Spec.APIServer == "" {
-		return field.Invalid(apiserverField, r.Spec.APIServer, "APIServer field cannot be empty")
+		return nil
 	}
+
+	apiserverField := field.NewPath("spec").Child("apiserver")
 
 	parsedURL, err := url.Parse(r.Spec.APIServer)
 	if err != nil {
@@ -140,12 +141,13 @@ func (r *BootstrapKubeconfig) validateAPIServer() error {
 	return nil
 }
 
+// validateCAData checks the encoding of CertificateAuthorityData when it is set.
 func (r *BootstrapKubeconfig) validateCAData() error {
-	caDataField := field.NewPath("spec").Child("caData")
-
 	if r.Spec.CertificateAuthorityData == "" {
-		return field.Invalid(caDataField, r.Spec.CertificateAuthorityData, "CertificateAuthorityData field cannot be empty")
+		return nil
 	}
+
+	caDataField := field.NewPath("spec").Child("caData")
 
 	decodedCAData, err := b64.StdEncoding.DecodeString(r.Spec.CertificateAuthorityData)
 	if err != nil {
