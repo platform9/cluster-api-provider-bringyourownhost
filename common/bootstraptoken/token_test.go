@@ -55,14 +55,15 @@ func TestGetTokenIDSecretFromBootstrapToken_MalformedToken(t *testing.T) {
 }
 
 func TestGenerateSecretFromBootstrapToken_MalformedToken(t *testing.T) {
-	secret, err := bootstraptoken.GenerateSecretFromBootstrapToken("not-a-token", time.Hour)
+	secret, err := bootstraptoken.GenerateSecretFromBootstrapToken("not-a-token", time.Now().Add(time.Hour))
 	require.Error(t, err)
 	assert.Nil(t, secret)
 }
 
 func TestGenerateSecretFromBootstrapToken_ValidToken(t *testing.T) {
-	before := time.Now().UTC()
-	secret, err := bootstraptoken.GenerateSecretFromBootstrapToken(validToken, time.Hour)
+	// A non-UTC location proves the helper converts the absolute expiry to UTC.
+	expiresAt := time.Date(2026, time.October, 31, 12, 30, 15, 0, time.FixedZone("IST", 5*60*60+30*60))
+	secret, err := bootstraptoken.GenerateSecretFromBootstrapToken(validToken, expiresAt)
 	require.NoError(t, err)
 	require.NotNil(t, secret)
 
@@ -77,10 +78,7 @@ func TestGenerateSecretFromBootstrapToken_ValidToken(t *testing.T) {
 	assert.Equal(t, infrastructurev1beta1.BootstrapTokenDescription, string(secret.Data[bootstrapapi.BootstrapTokenDescriptionKey]))
 	assert.Equal(t, infrastructurev1beta1.BootstrapTokenExtraGroups, string(secret.Data[bootstrapapi.BootstrapTokenExtraGroupsKey]))
 
-	expiration, err := time.Parse(time.RFC3339, string(secret.Data[bootstrapapi.BootstrapTokenExpirationKey]))
-	require.NoError(t, err)
-	// RFC3339 truncates sub-second precision, so allow a small tolerance around before+ttl.
-	assert.WithinDuration(t, before.Add(time.Hour), expiration, time.Second)
+	assert.Equal(t, "2026-10-31T07:00:15Z", string(secret.Data[bootstrapapi.BootstrapTokenExpirationKey]))
 }
 
 func TestGenerateBootstrapKubeconfigFromBootstrapToken_MalformedToken(t *testing.T) {
