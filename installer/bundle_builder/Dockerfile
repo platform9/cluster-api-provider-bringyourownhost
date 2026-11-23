@@ -21,9 +21,9 @@ FROM ubuntu:20.04
 # If set to 1 bundle is built and available as bundle/bundle.tar
 # If set to 0 bundle is build and pushed to repo
 
-RUN apt-get update && apt-get install -y gpg \
+RUN apt-get update && apt-get install -y -o Acquire::Retries=3 gpg \
     curl \
-    libdigest-sha-perl  
+    libdigest-sha-perl
 
 WORKDIR /bundle-builder
 COPY *.sh ./
