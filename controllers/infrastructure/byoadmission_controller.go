@@ -101,6 +101,24 @@ func (e *issuerLookupError) Unwrap() error {
 	return e.err
 }
 
+// holderLookupError reports that the objects that may hold a common name could
+// not be listed. Like issuerLookupError it says nothing about the request, so
+// it is retried and not denied.
+type holderLookupError struct {
+	kind string
+	err  error
+}
+
+// Error implements the error interface.
+func (e *holderLookupError) Error() string {
+	return fmt.Sprintf("list %ss that may hold the common name: %v", e.kind, e.err)
+}
+
+// Unwrap returns the list error.
+func (e *holderLookupError) Unwrap() error {
+	return e.err
+}
+
 // IndexBootstrapKubeconfigByTokenID returns the token ID of a
 // BootstrapKubeconfig for BootstrapKubeconfigTokenIDIndex. An object that has
 // no token yet is not indexed.
@@ -146,11 +164,16 @@ func (r *ByoAdmissionReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
-	denial := r.validateCSR(ctx, csr)
+	issuer, commonName, denial := r.validateCSR(ctx, csr)
 
 	var lookupErr *issuerLookupError
 	if errors.As(denial, &lookupErr) {
 		return reconcile.Result{}, lookupErr
+	}
+
+	var holderErr *holderLookupError
+	if errors.As(denial, &holderErr) {
+		return reconcile.Result{}, holderErr
 	}
 
 	var countErr *issuerCountError
@@ -175,6 +198,20 @@ func (r *ByoAdmissionReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
+	// Claim the token for this CSR before approving it. The write fails on a
+	// stale resource version, so two CSRs of one token cannot both pass. When
+	// the status already names this CSR, an earlier reconcile wrote it and
+	// stopped before the approval.
+	if !approvedCSR(issuer, csr.Name) {
+		issuer.Status.CSRApproval = infrastructurev1beta1.CSRApproved
+		issuer.Status.ApprovedCSRName = csr.Name
+		issuer.Status.ApprovedCommonName = commonName
+		err = r.Client.Status().Update(ctx, issuer)
+		if err != nil {
+			return reconcile.Result{}, fmt.Errorf("record CSR %q on BootstrapKubeconfig %q: %w", csr.Name, issuer.Name, err)
+		}
+	}
+
 	// Update the CSR to the "Approved" condition
 	csr.Status.Conditions = append(csr.Status.Conditions, certv1.CertificateSigningRequestCondition{
 		Type:   certv1.CertificateApproved,
@@ -197,62 +234,114 @@ func (r *ByoAdmissionReconciler) Reconcile(ctx context.Context, req ctrl.Request
 // validateCSR returns why the request must be denied, or nil when it may be
 // approved. The host the request may act as comes from the BootstrapKubeconfig
 // that issued the requester's token, never from what the request asks for.
-func (r *ByoAdmissionReconciler) validateCSR(ctx context.Context, csr *certv1.CertificateSigningRequest) error {
+// When the request may be approved it also returns that issuer and the
+// requested common name.
+func (r *ByoAdmissionReconciler) validateCSR(ctx context.Context, csr *certv1.CertificateSigningRequest) (*infrastructurev1beta1.BootstrapKubeconfig, string, error) {
 	block, _ := pem.Decode(csr.Spec.Request)
 	if block == nil {
-		return errors.New("certificate request is not PEM encoded")
+		return nil, "", errors.New("certificate request is not PEM encoded")
 	}
 
 	certificateRequest, err := x509.ParseCertificateRequest(block.Bytes)
 	if err != nil {
-		return fmt.Errorf("parse the certificate request: %w", err)
+		return nil, "", fmt.Errorf("parse the certificate request: %w", err)
 	}
 
 	if csr.Spec.SignerName != certv1.KubeAPIServerClientSignerName {
-		return fmt.Errorf("signer must be %s, got %q", certv1.KubeAPIServerClientSignerName, csr.Spec.SignerName)
+		return nil, "", fmt.Errorf("signer must be %s, got %q", certv1.KubeAPIServerClientSignerName, csr.Spec.SignerName)
 	}
 
 	if !slices.Equal(csr.Spec.Usages, []certv1.KeyUsage{certv1.UsageClientAuth}) {
-		return fmt.Errorf("usages must be exactly [%s], got %v", certv1.UsageClientAuth, csr.Spec.Usages)
+		return nil, "", fmt.Errorf("usages must be exactly [%s], got %v", certv1.UsageClientAuth, csr.Spec.Usages)
 	}
 
 	if !slices.Equal(certificateRequest.Subject.Organization, []string{hostCertificateOrganization}) {
-		return fmt.Errorf("organization must be exactly [%s], got %v", hostCertificateOrganization, certificateRequest.Subject.Organization)
+		return nil, "", fmt.Errorf("organization must be exactly [%s], got %v", hostCertificateOrganization, certificateRequest.Subject.Organization)
 	}
 
 	requested, err := identity.Parse(certificateRequest.Subject.CommonName)
 	if err != nil {
-		return fmt.Errorf("common name is not a host identity: %w", err)
+		return nil, "", fmt.Errorf("common name is not a host identity: %w", err)
 	}
 
 	tokenID, isBootstrapUser := strings.CutPrefix(csr.Spec.Username, bootstrapUserPrefix)
 	if !isBootstrapUser || tokenID == "" {
-		return fmt.Errorf("requester %q did not authenticate with a bootstrap token", csr.Spec.Username)
+		return nil, "", fmt.Errorf("requester %q did not authenticate with a bootstrap token", csr.Spec.Username)
 	}
 
 	if !slices.Contains(csr.Spec.Groups, bootstrapGroup) {
-		return fmt.Errorf("requester groups must include %s, got %v", bootstrapGroup, csr.Spec.Groups)
+		return nil, "", fmt.Errorf("requester groups must include %s, got %v", bootstrapGroup, csr.Spec.Groups)
 	}
 
 	list := &infrastructurev1beta1.BootstrapKubeconfigList{}
 	err = r.Client.List(ctx, list, client.MatchingFields{BootstrapKubeconfigTokenIDIndex: tokenID})
 	if err != nil {
-		return &issuerLookupError{tokenID: tokenID, err: err}
+		return nil, "", &issuerLookupError{tokenID: tokenID, err: err}
 	}
 
 	if len(list.Items) != 1 {
-		return &issuerCountError{tokenID: tokenID, found: len(list.Items)}
+		return nil, "", &issuerCountError{tokenID: tokenID, found: len(list.Items)}
 	}
-	issuer := list.Items[0]
+	issuer := &list.Items[0]
 
 	if requested.TenantNamespace != issuer.Namespace {
-		return fmt.Errorf("token %q was issued in namespace %q, but the request asks for tenant %q",
+		return nil, "", fmt.Errorf("token %q was issued in namespace %q, but the request asks for tenant %q",
 			tokenID, issuer.Namespace, requested.TenantNamespace)
 	}
 
 	if requested.NormalizedHostName != issuer.Spec.HostName {
-		return fmt.Errorf("token %q was issued for host %q, but the request asks for host %q",
+		return nil, "", fmt.Errorf("token %q was issued for host %q, but the request asks for host %q",
 			tokenID, issuer.Spec.HostName, requested.NormalizedHostName)
+	}
+
+	if issuer.Status.CSRApproval == infrastructurev1beta1.CSRApproved && issuer.Status.ApprovedCSRName != csr.Name {
+		return nil, "", fmt.Errorf("token %q already has approved CSR %q, so CSR %q is denied",
+			tokenID, issuer.Status.ApprovedCSRName, csr.Name)
+	}
+
+	commonName := certificateRequest.Subject.CommonName
+	err = r.checkCommonNameFree(ctx, issuer, commonName)
+	if err != nil {
+		return nil, "", err
+	}
+
+	return issuer, commonName, nil
+}
+
+// approvedCSR reports whether the approver already approved the request named
+// csrName for issuer's token.
+func approvedCSR(issuer *infrastructurev1beta1.BootstrapKubeconfig, csrName string) bool {
+	return issuer.Status.CSRApproval == infrastructurev1beta1.CSRApproved && issuer.Status.ApprovedCSRName == csrName
+}
+
+// checkCommonNameFree returns an error when an object in the tenant of issuer,
+// other than issuer, already holds commonName: a BootstrapKubeconfig that
+// recorded it as approved, or a ByoHost whose identity it is.
+func (r *ByoAdmissionReconciler) checkCommonNameFree(ctx context.Context, issuer *infrastructurev1beta1.BootstrapKubeconfig, commonName string) error {
+	issuers := &infrastructurev1beta1.BootstrapKubeconfigList{}
+	err := r.Client.List(ctx, issuers, client.InNamespace(issuer.Namespace))
+	if err != nil {
+		return &holderLookupError{kind: "BootstrapKubeconfig", err: err}
+	}
+
+	for i := range issuers.Items {
+		other := &issuers.Items[i]
+		if other.Name != issuer.Name && other.Status.CSRApproval == infrastructurev1beta1.CSRApproved && other.Status.ApprovedCommonName == commonName {
+			return fmt.Errorf("common name %q is already held by BootstrapKubeconfig %q", commonName, other.Name)
+		}
+	}
+
+	hosts := &infrastructurev1beta1.ByoHostList{}
+	err = r.Client.List(ctx, hosts, client.InNamespace(issuer.Namespace))
+	if err != nil {
+		return &holderLookupError{kind: "ByoHost", err: err}
+	}
+
+	for i := range hosts.Items {
+		host := &hosts.Items[i]
+		if host.Spec.Identity == commonName {
+			return fmt.Errorf("common name %q is already held by ByoHost %q", commonName, host.Name)
+		}
 	}
 
 	return nil
@@ -268,17 +357,27 @@ func checkCSRCondition(conditions []certv1.CertificateSigningRequestCondition, c
 	return false
 }
 
-// ByoCSRPredicate selects the CSRs the BYOH agent creates, which are named with
-// the byoh-csr- prefix.
+// ByoCSRPredicate selects CSRs named byoh-csr-* that use the
+// kubernetes.io/kube-apiserver-client signer. The manager may approve or deny
+// only that signer.
 func ByoCSRPredicate() predicate.Predicate {
 	return predicate.Funcs{
 		CreateFunc: func(e event.CreateEvent) bool {
-			return strings.HasPrefix(e.Object.GetName(), "byoh-csr-")
+			return isByoCSR(e.Object)
 		},
 		UpdateFunc: func(e event.UpdateEvent) bool {
-			return strings.HasPrefix(e.ObjectOld.GetName(), "byoh-csr-")
+			return isByoCSR(e.ObjectOld)
 		},
 	}
+}
+
+func isByoCSR(obj client.Object) bool {
+	csr, ok := obj.(*certv1.CertificateSigningRequest)
+	if !ok {
+		return false
+	}
+
+	return strings.HasPrefix(csr.Name, "byoh-csr-") && csr.Spec.SignerName == certv1.KubeAPIServerClientSignerName
 }
 
 // SetupWithManager sets up the controller with the Manager.

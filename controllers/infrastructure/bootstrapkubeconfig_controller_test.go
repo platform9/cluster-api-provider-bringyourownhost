@@ -146,7 +146,7 @@ func (h *bkHarness) credentialKubeconfig(t *testing.T) []byte {
 	return credential.Data["kubeconfig"]
 }
 
-func newBKObject(spec infrastructurev1beta1.BootstrapKubeconfigSpec, status infrastructurev1beta1.BootstrapKubeconfigStatus) *infrastructurev1beta1.BootstrapKubeconfig {
+func newBKObject(spec infrastructurev1beta1.BootstrapKubeconfigSpec, status *infrastructurev1beta1.BootstrapKubeconfigStatus) *infrastructurev1beta1.BootstrapKubeconfig {
 	spec.HostName = "host-a"
 	return &infrastructurev1beta1.BootstrapKubeconfig{
 		ObjectMeta: metav1.ObjectMeta{
@@ -155,7 +155,7 @@ func newBKObject(spec infrastructurev1beta1.BootstrapKubeconfigSpec, status infr
 			UID:       types.UID("bk-uid"),
 		},
 		Spec:   spec,
-		Status: status,
+		Status: *status,
 	}
 }
 
@@ -274,7 +274,7 @@ func TestBootstrapKubeconfigReconciler_Endpoint(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			bk := newBKObject(tc.spec, infrastructurev1beta1.BootstrapKubeconfigStatus{})
+			bk := newBKObject(tc.spec, &infrastructurev1beta1.BootstrapKubeconfigStatus{})
 			bk.Namespace = tc.namespace
 			h := newBKHarness(t, tc.apiServerURL, nil, append(tc.objects, bk)...)
 
@@ -360,7 +360,7 @@ func TestBootstrapKubeconfigReconciler_EndpointFailure(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, infrastructurev1beta1.BootstrapKubeconfigStatus{})
+			bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, &infrastructurev1beta1.BootstrapKubeconfigStatus{})
 			h := newBKHarness(t, "", nil, append(tc.objects, bk)...)
 			if tc.noLabelFlag {
 				h.reconciler.CustomerFQDNLabel = ""
@@ -382,7 +382,7 @@ func TestBootstrapKubeconfigReconciler_EndpointFailure(t *testing.T) {
 }
 
 func TestBootstrapKubeconfigReconciler_FreshObject(t *testing.T) {
-	bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, infrastructurev1beta1.BootstrapKubeconfigStatus{})
+	bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, &infrastructurev1beta1.BootstrapKubeconfigStatus{})
 	h := newBKHarness(t, "", nil, newBKNamespace(bkTestNamespace, bkTestFQDN), newBKRootCA(), bk)
 
 	result, err := h.reconcile(t)
@@ -428,7 +428,7 @@ func TestBootstrapKubeconfigReconciler_FreshObject(t *testing.T) {
 }
 
 func TestBootstrapKubeconfigReconciler_SecondReconcile(t *testing.T) {
-	bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, infrastructurev1beta1.BootstrapKubeconfigStatus{})
+	bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, &infrastructurev1beta1.BootstrapKubeconfigStatus{})
 	h := newBKHarness(t, "", nil, newBKNamespace(bkTestNamespace, bkTestFQDN), newBKRootCA(), bk)
 
 	_, err := h.reconcile(t)
@@ -446,7 +446,7 @@ func TestBootstrapKubeconfigReconciler_SecondReconcile(t *testing.T) {
 
 func TestBootstrapKubeconfigReconciler_CredentialRefSkipsReconcile(t *testing.T) {
 	status := infrastructurev1beta1.BootstrapKubeconfigStatus{CredentialSecretRef: "issued-elsewhere"}
-	bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, status)
+	bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, &status)
 	h := newBKHarness(t, "", nil, bk)
 
 	result, err := h.reconcile(t)
@@ -461,7 +461,7 @@ func TestBootstrapKubeconfigReconciler_CredentialRefSkipsReconcile(t *testing.T)
 func TestBootstrapKubeconfigReconciler_DeprecatedDataDoesNotSkipReconcile(t *testing.T) {
 	existing := "already present"
 	status := infrastructurev1beta1.BootstrapKubeconfigStatus{BootstrapKubeconfigData: &existing} //nolint: staticcheck // SA1019: deprecated field, the guard on it is gone
-	bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, status)
+	bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, &status)
 	h := newBKHarness(t, "", nil, newBKNamespace(bkTestNamespace, bkTestFQDN), newBKRootCA(), bk)
 
 	_, err := h.reconcile(t)
@@ -481,7 +481,7 @@ func TestBootstrapKubeconfigReconciler_TokenIDRecordedFirst(t *testing.T) {
 			return c.Create(ctx, obj, opts...)
 		},
 	}
-	bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, infrastructurev1beta1.BootstrapKubeconfigStatus{})
+	bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, &infrastructurev1beta1.BootstrapKubeconfigStatus{})
 	h := newBKHarness(t, "", funcs, newBKNamespace(bkTestNamespace, bkTestFQDN), newBKRootCA(), bk)
 
 	_, err := h.reconcile(t)
@@ -496,7 +496,7 @@ func TestBootstrapKubeconfigReconciler_TokenIDRecordedFirst(t *testing.T) {
 func TestBootstrapKubeconfigReconciler_ResumeWithExistingToken(t *testing.T) {
 	expiresAt := time.Now().UTC().Add(10 * time.Minute).Truncate(time.Second)
 	status := infrastructurev1beta1.BootstrapKubeconfigStatus{TokenID: bkTestTokenID}
-	bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, status)
+	bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, &status)
 	h := newBKHarness(t, "", nil, newBKNamespace(bkTestNamespace, bkTestFQDN), newBKRootCA(), newBKTokenSecret(t, expiresAt), bk)
 
 	_, err := h.reconcile(t)
@@ -519,7 +519,7 @@ func TestBootstrapKubeconfigReconciler_ResumeWithExistingToken(t *testing.T) {
 
 func TestBootstrapKubeconfigReconciler_ResumeWithoutToken(t *testing.T) {
 	status := infrastructurev1beta1.BootstrapKubeconfigStatus{TokenID: bkTestTokenID}
-	bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, status)
+	bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, &status)
 	h := newBKHarness(t, "", nil, newBKNamespace(bkTestNamespace, bkTestFQDN), newBKRootCA(), bk)
 
 	_, err := h.reconcile(t)
@@ -540,7 +540,7 @@ func TestBootstrapKubeconfigReconciler_ResumeWithoutToken(t *testing.T) {
 func TestBootstrapKubeconfigReconciler_ResumeWithExpiredToken(t *testing.T) {
 	expiredAt := time.Now().UTC().Add(-10 * time.Minute).Truncate(time.Second)
 	status := infrastructurev1beta1.BootstrapKubeconfigStatus{TokenID: bkTestTokenID}
-	bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, status)
+	bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, &status)
 	h := newBKHarness(t, "", nil, newBKNamespace(bkTestNamespace, bkTestFQDN), newBKRootCA(), newBKTokenSecret(t, expiredAt), bk)
 
 	_, err := h.reconcile(t)
@@ -589,7 +589,7 @@ func resumableBKObjects(t *testing.T, extra ...client.Object) []client.Object {
 		newBKNamespace(bkTestNamespace, bkTestFQDN),
 		newBKRootCA(),
 		newBKTokenSecret(t, expiresAt),
-		newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, status),
+		newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, &status),
 	}
 	return append(objects, extra...)
 }
