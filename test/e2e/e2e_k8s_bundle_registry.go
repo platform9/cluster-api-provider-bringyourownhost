@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/docker/docker/client"
 
@@ -33,6 +34,11 @@ const (
 
 	k8sBundleBuilderImageTag  = "byoh-bundle-e2e:local"
 	k8sBundleBuilderContainer = "byoh-bundle-e2e-builder"
+
+	// bundleBuilderBuildTimeout bounds the docker build of the bundle-builder image. Healthy e2e
+	// runs spent 1 to 5 minutes in the bundle steps, so a build still running after ten minutes
+	// is a stalled apt mirror.
+	bundleBuilderBuildTimeout = 10 * time.Minute
 )
 
 // ensureLocalK8sBundleRegistry builds the k8s installer bundle (containerd + kubeadm/kubelet/
@@ -159,7 +165,9 @@ func buildK8sBundle(ctx context.Context, repoRoot, debianArch, k8sVersion string
 	critoolVersion := strings.TrimPrefix(majorMinor, "v") + ".0-1.1"
 
 	builderDir := filepath.Join(repoRoot, "installer", "bundle_builder")
-	buildCmd := exec.CommandContext(ctx, "docker", "build", "-t", k8sBundleBuilderImageTag, builderDir) // #nosec G204 -- fixed args, no user input
+	buildCtx, cancelBuild := context.WithTimeout(ctx, bundleBuilderBuildTimeout)
+	defer cancelBuild()
+	buildCmd := exec.CommandContext(buildCtx, "docker", "build", "-t", k8sBundleBuilderImageTag, builderDir) // #nosec G204 -- fixed args, no user input
 	if output, buildErr := buildCmd.CombinedOutput(); buildErr != nil {
 		return "", fmt.Errorf("failed to build bundle-builder image: %w\n%s", buildErr, output)
 	}
