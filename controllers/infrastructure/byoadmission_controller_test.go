@@ -11,6 +11,8 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,11 +20,13 @@ import (
 	"github.com/stretchr/testify/require"
 	certv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	k8stesting "k8s.io/client-go/testing"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -87,28 +91,46 @@ func certificateRequestPEM(t *testing.T, cn string, orgs []string) []byte {
 func reconcileAdmission(t *testing.T, csr *certv1.CertificateSigningRequest, issuers []client.Object, listFails bool) (ctrl.Result, []certv1.CertificateSigningRequestCondition, error) {
 	t.Helper()
 
-	scheme := runtime.NewScheme()
-	require.NoError(t, clientgoscheme.AddToScheme(scheme))
-	require.NoError(t, infrastructurev1beta1.AddToScheme(scheme))
-
 	funcs := interceptor.Funcs{}
 	if listFails {
 		funcs.List = func(_ context.Context, _ client.WithWatch, _ client.ObjectList, _ ...client.ListOption) error {
 			return errors.New("cache not started")
 		}
 	}
-	cl := ctrlfake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(issuers...).
-		WithIndex(&infrastructurev1beta1.BootstrapKubeconfig{}, controllers.BootstrapKubeconfigTokenIDIndex, controllers.IndexBootstrapKubeconfigByTokenID).
-		WithInterceptorFuncs(funcs).
-		Build()
+	cl := newAdmissionClient(t, &funcs, issuers...)
 	clientSet := fake.NewSimpleClientset(csr)
+
+	return reconcileAdmissionWith(t, clientSet, cl, csr.Name)
+}
+
+// newAdmissionClient returns a fake client that holds objs and indexes
+// BootstrapKubeconfigs by token id, like the manager's cache does.
+func newAdmissionClient(t *testing.T, funcs *interceptor.Funcs, objs ...client.Object) client.Client {
+	t.Helper()
+
+	scheme := runtime.NewScheme()
+	require.NoError(t, clientgoscheme.AddToScheme(scheme))
+	require.NoError(t, infrastructurev1beta1.AddToScheme(scheme))
+
+	return ctrlfake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(objs...).
+		WithStatusSubresource(&infrastructurev1beta1.BootstrapKubeconfig{}).
+		WithIndex(&infrastructurev1beta1.BootstrapKubeconfig{}, controllers.BootstrapKubeconfigTokenIDIndex, controllers.IndexBootstrapKubeconfigByTokenID).
+		WithInterceptorFuncs(*funcs).
+		Build()
+}
+
+// reconcileAdmissionWith reconciles the CSR named csrName and returns the
+// result and error with the conditions the CSR ends with.
+func reconcileAdmissionWith(t *testing.T, clientSet *fake.Clientset, cl client.Client, csrName string) (ctrl.Result, []certv1.CertificateSigningRequestCondition, error) {
+	t.Helper()
+
 	reconciler := &controllers.ByoAdmissionReconciler{ClientSet: clientSet, Client: cl}
 
-	result, err := reconciler.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{Name: admissionCSRName}})
+	result, err := reconciler.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{Name: csrName}})
 
-	got, getErr := clientSet.CertificatesV1().CertificateSigningRequests().Get(t.Context(), admissionCSRName, metav1.GetOptions{})
+	got, getErr := clientSet.CertificatesV1().CertificateSigningRequests().Get(t.Context(), csrName, metav1.GetOptions{})
 	require.NoError(t, getErr)
 
 	return result, got.Status.Conditions, err
@@ -530,4 +552,337 @@ func TestByoCSRPredicate(t *testing.T) {
 			assert.Equal(t, tc.want, gotUpdate)
 		})
 	}
+}
+
+// approvedIssuer returns an issuer whose status records an approved CSR.
+func approvedIssuer(name, tokenID, csrName, commonName string) *infrastructurev1beta1.BootstrapKubeconfig {
+	issuer := admissionIssuer(name, admissionNamespace, tokenID)
+	issuer.Status.CSRApproval = infrastructurev1beta1.CSRApproved
+	issuer.Status.ApprovedCSRName = csrName
+	issuer.Status.ApprovedCommonName = commonName
+
+	return issuer
+}
+
+func TestByoAdmissionReconciler_Reconcile_OneCSRPerToken(t *testing.T) {
+	const (
+		otherCSRName  = "byoh-csr-worker-1-second"
+		newSuffixCN   = "byoh:host:dg-d-default-service:worker-1-xyz99"
+		otherTokenID  = "fedcba"
+		otherTokenUsr = "system:bootstrap:fedcba"
+	)
+
+	testCases := []struct {
+		name         string
+		csrName      string
+		username     string
+		commonName   string
+		objects      []client.Object
+		wantDenied   bool
+		wantMessage  string
+		wantApproved bool
+		wantStatus   infrastructurev1beta1.BootstrapKubeconfigStatus
+	}{
+		{
+			name:         "first CSR of a token",
+			csrName:      admissionCSRName,
+			username:     admissionUsername,
+			commonName:   admissionIdentity,
+			objects:      []client.Object{admissionIssuer("worker-1-a1b2c", admissionNamespace, admissionTokenID)},
+			wantApproved: true,
+			wantStatus: infrastructurev1beta1.BootstrapKubeconfigStatus{
+				TokenID:            admissionTokenID,
+				CSRApproval:        infrastructurev1beta1.CSRApproved,
+				ApprovedCSRName:    admissionCSRName,
+				ApprovedCommonName: admissionIdentity,
+			},
+		},
+		{
+			name:       "second CSR with the same common name",
+			csrName:    otherCSRName,
+			username:   admissionUsername,
+			commonName: admissionIdentity,
+			objects:    []client.Object{approvedIssuer("worker-1-a1b2c", admissionTokenID, admissionCSRName, admissionIdentity)},
+			wantDenied: true,
+			wantMessage: `token "abcdef" already has approved CSR "byoh-csr-worker-1", ` +
+				`so CSR "byoh-csr-worker-1-second" is denied`,
+			wantStatus: infrastructurev1beta1.BootstrapKubeconfigStatus{
+				TokenID:            admissionTokenID,
+				CSRApproval:        infrastructurev1beta1.CSRApproved,
+				ApprovedCSRName:    admissionCSRName,
+				ApprovedCommonName: admissionIdentity,
+			},
+		},
+		{
+			name:       "second CSR with a new suffix",
+			csrName:    otherCSRName,
+			username:   admissionUsername,
+			commonName: newSuffixCN,
+			objects:    []client.Object{approvedIssuer("worker-1-a1b2c", admissionTokenID, admissionCSRName, admissionIdentity)},
+			wantDenied: true,
+			wantMessage: `token "abcdef" already has approved CSR "byoh-csr-worker-1", ` +
+				`so CSR "byoh-csr-worker-1-second" is denied`,
+			wantStatus: infrastructurev1beta1.BootstrapKubeconfigStatus{
+				TokenID:            admissionTokenID,
+				CSRApproval:        infrastructurev1beta1.CSRApproved,
+				ApprovedCSRName:    admissionCSRName,
+				ApprovedCommonName: admissionIdentity,
+			},
+		},
+		{
+			name:         "same CSR again after its status was written",
+			csrName:      admissionCSRName,
+			username:     admissionUsername,
+			commonName:   admissionIdentity,
+			objects:      []client.Object{approvedIssuer("worker-1-a1b2c", admissionTokenID, admissionCSRName, admissionIdentity)},
+			wantApproved: true,
+			wantStatus: infrastructurev1beta1.BootstrapKubeconfigStatus{
+				TokenID:            admissionTokenID,
+				CSRApproval:        infrastructurev1beta1.CSRApproved,
+				ApprovedCSRName:    admissionCSRName,
+				ApprovedCommonName: admissionIdentity,
+			},
+		},
+		{
+			name:       "CSR name recorded while the state is NotApproved",
+			csrName:    otherCSRName,
+			username:   admissionUsername,
+			commonName: admissionIdentity,
+			objects: []client.Object{
+				func() client.Object {
+					issuer := approvedIssuer("worker-1-a1b2c", admissionTokenID, admissionCSRName, admissionIdentity)
+					issuer.Status.CSRApproval = infrastructurev1beta1.CSRNotApproved
+					return issuer
+				}(),
+			},
+			wantApproved: true,
+			wantStatus: infrastructurev1beta1.BootstrapKubeconfigStatus{
+				TokenID:            admissionTokenID,
+				CSRApproval:        infrastructurev1beta1.CSRApproved,
+				ApprovedCSRName:    otherCSRName,
+				ApprovedCommonName: admissionIdentity,
+			},
+		},
+		{
+			name:       "common name held in another tenant",
+			csrName:    admissionCSRName,
+			username:   admissionUsername,
+			commonName: admissionIdentity,
+			objects: []client.Object{
+				admissionIssuer("worker-1-a1b2c", admissionNamespace, admissionTokenID),
+				func() client.Object {
+					other := approvedIssuer("worker-1-other", otherTokenID, otherCSRName, admissionIdentity)
+					other.Namespace = "dg-d-r1"
+					return other
+				}(),
+				&infrastructurev1beta1.ByoHost{
+					ObjectMeta: metav1.ObjectMeta{Name: "worker-1-a1b2c", Namespace: "dg-d-r1"},
+					Spec:       infrastructurev1beta1.ByoHostSpec{Identity: admissionIdentity},
+				},
+			},
+			wantApproved: true,
+			wantStatus: infrastructurev1beta1.BootstrapKubeconfigStatus{
+				TokenID:            admissionTokenID,
+				CSRApproval:        infrastructurev1beta1.CSRApproved,
+				ApprovedCSRName:    admissionCSRName,
+				ApprovedCommonName: admissionIdentity,
+			},
+		},
+		{
+			name:       "common name held by another token in the tenant",
+			csrName:    admissionCSRName,
+			username:   otherTokenUsr,
+			commonName: admissionIdentity,
+			objects: []client.Object{
+				admissionIssuer("worker-1-other", admissionNamespace, otherTokenID),
+				approvedIssuer("worker-1-a1b2c", admissionTokenID, otherCSRName, admissionIdentity),
+			},
+			wantDenied:  true,
+			wantMessage: `common name "` + admissionIdentity + `" is already held by BootstrapKubeconfig "worker-1-a1b2c"`,
+			wantStatus: infrastructurev1beta1.BootstrapKubeconfigStatus{
+				TokenID: otherTokenID,
+			},
+		},
+		{
+			name:       "common name held by a ByoHost in the tenant",
+			csrName:    admissionCSRName,
+			username:   admissionUsername,
+			commonName: admissionIdentity,
+			objects: []client.Object{
+				admissionIssuer("worker-1-a1b2c", admissionNamespace, admissionTokenID),
+				&infrastructurev1beta1.ByoHost{
+					ObjectMeta: metav1.ObjectMeta{Name: "worker-1-a1b2c", Namespace: admissionNamespace},
+					Spec:       infrastructurev1beta1.ByoHostSpec{Identity: admissionIdentity},
+				},
+			},
+			wantDenied:  true,
+			wantMessage: `common name "` + admissionIdentity + `" is already held by ByoHost "worker-1-a1b2c"`,
+			wantStatus: infrastructurev1beta1.BootstrapKubeconfigStatus{
+				TokenID: admissionTokenID,
+			},
+		},
+		{
+			name:       "new suffix for a host that has no ByoHost and no approved CSR",
+			csrName:    admissionCSRName,
+			username:   admissionUsername,
+			commonName: newSuffixCN,
+			objects: []client.Object{
+				admissionIssuer("worker-1-a1b2c", admissionNamespace, admissionTokenID),
+				&infrastructurev1beta1.ByoHost{
+					ObjectMeta: metav1.ObjectMeta{Name: "worker-1-a1b2c", Namespace: admissionNamespace},
+					Spec:       infrastructurev1beta1.ByoHostSpec{Identity: admissionIdentity},
+				},
+			},
+			wantApproved: true,
+			wantStatus: infrastructurev1beta1.BootstrapKubeconfigStatus{
+				TokenID:            admissionTokenID,
+				CSRApproval:        infrastructurev1beta1.CSRApproved,
+				ApprovedCSRName:    admissionCSRName,
+				ApprovedCommonName: newSuffixCN,
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			csr := admissionCSR(t, tc.username, tc.commonName)
+			csr.Name = tc.csrName
+			cl := newAdmissionClient(t, &interceptor.Funcs{}, tc.objects...)
+
+			_, conditions, err := reconcileAdmissionWith(t, fake.NewSimpleClientset(csr), cl, tc.csrName)
+			require.NoError(t, err)
+
+			if tc.wantDenied {
+				require.Len(t, conditions, 1)
+				assert.Equal(t, certv1.CertificateDenied, conditions[0].Type)
+				assert.Equal(t, tc.wantMessage, conditions[0].Message)
+			}
+			if tc.wantApproved {
+				require.Len(t, conditions, 1)
+				assert.Equal(t, certv1.CertificateApproved, conditions[0].Type)
+			}
+
+			list := &infrastructurev1beta1.BootstrapKubeconfigList{}
+			err = cl.List(t.Context(), list, client.MatchingFields{controllers.BootstrapKubeconfigTokenIDIndex: strings.TrimPrefix(tc.username, "system:bootstrap:")})
+			require.NoError(t, err)
+			require.Len(t, list.Items, 1)
+			assert.Equal(t, tc.wantStatus, list.Items[0].Status)
+		})
+	}
+}
+
+// TestByoAdmissionReconciler_Reconcile_ConcurrentCSRs makes a second CSR claim
+// the token between the first CSR's read of the issuer and its status write.
+// The write must fail on the stale resource version, so the first CSR is not
+// approved, and its retry is denied.
+func TestByoAdmissionReconciler_Reconcile_ConcurrentCSRs(t *testing.T) {
+	const rivalCSRName = "byoh-csr-worker-1-rival"
+
+	raced := false
+	funcs := interceptor.Funcs{
+		SubResourceUpdate: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+			if !raced {
+				raced = true
+				rival := &infrastructurev1beta1.BootstrapKubeconfig{}
+				err := cl.Get(ctx, client.ObjectKeyFromObject(obj), rival)
+				require.NoError(t, err)
+				rival.Status.CSRApproval = infrastructurev1beta1.CSRApproved
+				rival.Status.ApprovedCSRName = rivalCSRName
+				rival.Status.ApprovedCommonName = admissionIdentity
+				err = cl.Status().Update(ctx, rival)
+				require.NoError(t, err)
+			}
+
+			return cl.SubResource(subResourceName).Update(ctx, obj, opts...)
+		},
+	}
+	cl := newAdmissionClient(t, &funcs, admissionIssuer("worker-1-a1b2c", admissionNamespace, admissionTokenID))
+	csr := admissionCSR(t, admissionUsername, admissionIdentity)
+	clientSet := fake.NewSimpleClientset(csr)
+
+	_, conditions, err := reconcileAdmissionWith(t, clientSet, cl, csr.Name)
+	require.Error(t, err)
+	assert.True(t, apierrors.IsConflict(err))
+	assert.Empty(t, conditions)
+
+	_, conditions, err = reconcileAdmissionWith(t, clientSet, cl, csr.Name)
+	require.NoError(t, err)
+	require.Len(t, conditions, 1)
+	assert.Equal(t, certv1.CertificateDenied, conditions[0].Type)
+}
+
+func TestByoAdmissionReconciler_Reconcile_HolderListFails(t *testing.T) {
+	testCases := []struct {
+		name string
+		kind client.ObjectList
+	}{
+		{
+			name: "BootstrapKubeconfigs of the tenant",
+			kind: &infrastructurev1beta1.BootstrapKubeconfigList{},
+		},
+		{
+			name: "ByoHosts of the tenant",
+			kind: &infrastructurev1beta1.ByoHostList{},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			funcs := interceptor.Funcs{
+				List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					listOptions := &client.ListOptions{}
+					listOptions.ApplyOptions(opts)
+					isTenantList := listOptions.Namespace == admissionNamespace
+					if isTenantList && reflect.TypeOf(list) == reflect.TypeOf(tc.kind) {
+						return errors.New("cache not started")
+					}
+
+					return cl.List(ctx, list, opts...)
+				},
+			}
+			cl := newAdmissionClient(t, &funcs, admissionIssuer("worker-1-a1b2c", admissionNamespace, admissionTokenID))
+			csr := admissionCSR(t, admissionUsername, admissionIdentity)
+
+			_, conditions, err := reconcileAdmissionWith(t, fake.NewSimpleClientset(csr), cl, csr.Name)
+			require.Error(t, err)
+			assert.Empty(t, conditions)
+		})
+	}
+}
+
+// TestByoAdmissionReconciler_Reconcile_ApprovalFailsAfterClaim fails the
+// approval after the token was claimed. The retry must approve the CSR without
+// writing the issuer status again.
+func TestByoAdmissionReconciler_Reconcile_ApprovalFailsAfterClaim(t *testing.T) {
+	statusWrites := 0
+	funcs := interceptor.Funcs{
+		SubResourceUpdate: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+			statusWrites++
+
+			return cl.SubResource(subResourceName).Update(ctx, obj, opts...)
+		},
+	}
+	cl := newAdmissionClient(t, &funcs, admissionIssuer("worker-1-a1b2c", admissionNamespace, admissionTokenID))
+	csr := admissionCSR(t, admissionUsername, admissionIdentity)
+	clientSet := fake.NewSimpleClientset(csr)
+	approvalFails := true
+	clientSet.PrependReactor("update", "certificatesigningrequests", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if approvalFails && action.GetSubresource() == "approval" {
+			return true, nil, errors.New("api server unavailable")
+		}
+
+		return false, nil, nil
+	})
+
+	_, conditions, err := reconcileAdmissionWith(t, clientSet, cl, csr.Name)
+	require.Error(t, err)
+	assert.Empty(t, conditions)
+	assert.Equal(t, 1, statusWrites)
+
+	approvalFails = false
+	_, conditions, err = reconcileAdmissionWith(t, clientSet, cl, csr.Name)
+	require.NoError(t, err)
+	require.Len(t, conditions, 1)
+	assert.Equal(t, certv1.CertificateApproved, conditions[0].Type)
+	assert.Equal(t, 1, statusWrites)
 }
