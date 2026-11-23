@@ -54,11 +54,7 @@ EXISTING_CLUSTER_BYOHOSTCONFIG_PATH ?=
 GINKGO_NOCOLOR ?= false
 GITHASH=$(shell git rev-parse --short HEAD 2>/dev/null || echo 'unknown')
 BUILDNUM ?= $(if $(GITHUB_RUN_NUMBER),$(GITHUB_RUN_NUMBER),0)
-TOOLS_DIR := $(REPO_ROOT)/hack/tools
-BIN_DIR := bin
-TOOLS_BIN_DIR := $(TOOLS_DIR)/$(BIN_DIR)
-GINKGO := $(TOOLS_BIN_DIR)/ginkgo
-GINKGO_PKG := github.com/onsi/ginkgo/v2/ginkgo
+GINKGO := go tool ginkgo
 
 BYOH_TEMPLATES := $(REPO_ROOT)/test/e2e/data/infrastructure-provider-byoh
 
@@ -278,22 +274,22 @@ cluster-templates-v1beta1: kustomize ## Generate cluster templates for v1beta1
 ##@ Test
 
 # Run tests
-test: $(GINKGO) generate fmt vet manifests test-coverage cmd-test ## Run unit tests
+test: generate fmt vet manifests test-coverage cmd-test ## Run unit tests
 
-test-coverage: $(GINKGO) prepare-byoh-docker-host-image ## Run test-coverage
+test-coverage: prepare-byoh-docker-host-image ## Run test-coverage
 	find . -name "*.test" -not -path "./cmd/*" -delete
 	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; CGO_ENABLED=0 $(GINKGO) --randomize-all -r --cover --coverprofile=cover.out --output-dir=. --skip-package=test,cmd .
 
 cmd-test: ## Run cmd/byohctl tests
 	go test ./cmd/...
 
-agent-test: $(GINKGO) prepare-byoh-docker-host-image ## Run agent tests
+agent-test: prepare-byoh-docker-host-image ## Run agent tests
 	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; CGO_ENABLED=0 $(GINKGO) --randomize-all -r --coverprofile cover.out $(HOST_AGENT_DIR)
 
-controller-test: $(GINKGO) ## Run controller tests
+controller-test: ## Run controller tests
 	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; $(GINKGO) --randomize-all --coverprofile cover.out --vv controllers/infrastructure
 
-webhook-test: $(GINKGO) ## Run webhook tests
+webhook-test: ## Run webhook tests
 	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; $(GINKGO) --coverprofile cover.out apis/infrastructure/v1beta1
 
 # CI will download the agent bundle from the saved artifacts if SKIP_BUILD is set.
@@ -303,7 +299,7 @@ else
 BUILD_HOST_AGENT_DEB_PREREQ := build-host-agent-deb
 endif
 
-test-e2e: take-user-input docker-build prepare-byoh-docker-host-image $(GINKGO) kustomize cluster-templates-e2e $(BUILD_HOST_AGENT_DEB_PREREQ) ## Run the end-to-end tests
+test-e2e: take-user-input docker-build prepare-byoh-docker-host-image kustomize cluster-templates-e2e $(BUILD_HOST_AGENT_DEB_PREREQ) ## Run the end-to-end tests
 	PATH="$(shell pwd)/bin:$$PATH" $(GINKGO) -vv -trace -tags=e2e -focus="$(GINKGO_FOCUS)" $(_SKIP_ARGS) -nodes=$(GINKGO_NODES) --noColor=$(GINKGO_NOCOLOR) $(GINKGO_ARGS) test/e2e -- \
 	    -e2e.artifacts-folder="$(ARTIFACTS)" \
 	    -e2e.config="$(E2E_CONF_FILE)" \
@@ -365,9 +361,6 @@ take-user-input:
 	@echo "$$WARNING"
 	@read -p "Do you want to proceed [Y/n]?" REPLY; \
 	if [[ $$REPLY = "Y" || $$REPLY = "y" ]]; then echo starting e2e test; exit 0 ; else echo aborting; exit 1; fi
-
-$(GINKGO): # Build ginkgo from tools folder.
-	cd $(TOOLS_DIR); GOBIN=$(TOOLS_BIN_DIR) go install $(GINKGO_PKG)
 
 ##@ Deployment
 
