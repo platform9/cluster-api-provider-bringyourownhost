@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"go/build"
+	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -204,6 +206,35 @@ func TestValidateBootstrapAPIServerHostTemplate(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
+		})
+	}
+}
+
+func TestMaxCertificateLifetime(t *testing.T) {
+	testCases := []struct {
+		name    string
+		seconds int
+		want    int32
+		wantErr bool
+	}{
+		{name: "built-in default", seconds: defaultMaxCertificateLifetimeSeconds, want: 31536000, wantErr: false},
+		{name: "one second", seconds: 1, want: 1, wantErr: false},
+		{name: "largest int32", seconds: math.MaxInt32, want: math.MaxInt32, wantErr: false},
+		{name: "zero", seconds: 0, wantErr: true},
+		{name: "negative", seconds: -1, wantErr: true},
+		{name: "above int32", seconds: math.MaxInt32 + 1, wantErr: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := maxCertificateLifetime(tc.seconds)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), strconv.Itoa(tc.seconds))
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }

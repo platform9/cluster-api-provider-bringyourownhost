@@ -37,6 +37,11 @@ type ByoAdmissionReconciler struct {
 	// Client reads the BootstrapKubeconfig that issued the token a request
 	// authenticated with. The approval is decided from that object.
 	Client client.Client
+
+	// MaxCertificateLifetimeSeconds is the longest certificate lifetime a
+	// request may ask for in spec.expirationSeconds. It must be positive: the
+	// approver denies every request when it is not.
+	MaxCertificateLifetimeSeconds int32
 }
 
 const (
@@ -231,6 +236,21 @@ func (r *ByoAdmissionReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	return ctrl.Result{}, nil
 }
 
+// CheckCertificateLifetime returns why the requested lifetime in seconds is not
+// allowed under maximum, or nil. A request without a lifetime gets the signer's
+// default, which maximum does not bound, so it is not allowed.
+func CheckCertificateLifetime(requested *int32, maximum int32) error {
+	if requested == nil {
+		return fmt.Errorf("spec.expirationSeconds must be set to at most %d seconds", maximum)
+	}
+
+	if *requested > maximum {
+		return fmt.Errorf("requested certificate lifetime %d seconds is above the maximum of %d seconds", *requested, maximum)
+	}
+
+	return nil
+}
+
 // validateCSR returns why the request must be denied, or nil when it may be
 // approved. The host the request may act as comes from the BootstrapKubeconfig
 // that issued the requester's token, never from what the request asks for.
@@ -253,6 +273,11 @@ func (r *ByoAdmissionReconciler) validateCSR(ctx context.Context, csr *certv1.Ce
 
 	if !slices.Equal(csr.Spec.Usages, []certv1.KeyUsage{certv1.UsageClientAuth}) {
 		return nil, "", fmt.Errorf("usages must be exactly [%s], got %v", certv1.UsageClientAuth, csr.Spec.Usages)
+	}
+
+	err = CheckCertificateLifetime(csr.Spec.ExpirationSeconds, r.MaxCertificateLifetimeSeconds)
+	if err != nil {
+		return nil, "", err
 	}
 
 	if !slices.Equal(certificateRequest.Subject.Organization, []string{hostCertificateOrganization}) {

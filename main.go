@@ -8,6 +8,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"time"
@@ -29,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/certificate"
 	byohcontrollers "github.com/platform9/cluster-api-provider-bringyourownhost/controllers/infrastructure"
 
 	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
@@ -55,7 +57,12 @@ var (
 	bootstrapAPIServerURL        string
 	customerFQDNLabel            string
 	bootstrapAPIServerHostTmpl   string
+	maxCertificateLifetimeSecs   int
 )
+
+// defaultMaxCertificateLifetimeSeconds is the --max-certificate-lifetime-seconds
+// default. It is the lifetime the host agent asks for by default.
+const defaultMaxCertificateLifetimeSeconds = certificate.DefaultLifetimeSeconds
 
 // defaultBootstrapAPIServerHostTemplate is the apiserver host template used
 // when --bootstrap-apiserver-host-template is not set.
@@ -81,6 +88,10 @@ type controllerOptions struct {
 	// customer FQDN. When empty, no apiserver URL is derived.
 	customerFQDNLabel string
 
+	// maxCertificateLifetimeSeconds is the longest certificate lifetime the
+	// CSR approver accepts.
+	maxCertificateLifetimeSeconds int32
+
 	// bootstrapAPIServerHostTemplate is the host of the apiserver URL derived
 	// for a BootstrapKubeconfig, with {customerFqdn} standing for the customer
 	// FQDN. It holds a host only: no scheme, no port, no path.
@@ -95,6 +106,17 @@ func validateBootstrapAPIServerHostTemplate(template string) error {
 	}
 
 	return nil
+}
+
+// maxCertificateLifetime converts the flag value to the approver's maximum. A
+// lifetime that is not positive or does not fit an int32 is rejected, because
+// the approver compares it with the int32 spec.expirationSeconds.
+func maxCertificateLifetime(seconds int) (int32, error) {
+	if seconds < 1 || seconds > math.MaxInt32 {
+		return 0, fmt.Errorf("max certificate lifetime %d seconds must be between 1 and %d", seconds, math.MaxInt32)
+	}
+
+	return int32(seconds), nil
 }
 
 func init() {
@@ -122,6 +144,8 @@ func setFlags() {
 		"The key of the Namespace label that holds the customer FQDN, used to derive the apiserver URL. When empty, no URL is derived.")
 	flag.StringVar(&bootstrapAPIServerHostTmpl, "bootstrap-apiserver-host-template", defaultBootstrapAPIServerHostTemplate,
 		"The host of the apiserver URL derived for a BootstrapKubeconfig, with {customerFqdn} standing for the customer FQDN. A host only: no scheme, port or path.")
+	flag.IntVar(&maxCertificateLifetimeSecs, "max-certificate-lifetime-seconds", defaultMaxCertificateLifetimeSeconds,
+		"The longest certificate lifetime in seconds the CSR approver accepts. Raise it together with the host agent's --certExpiryDuration.")
 	flag.Parse()
 }
 
@@ -188,6 +212,8 @@ func setupControllers(ctx context.Context, mgr ctrl.Manager, opts *controllerOpt
 		if err := (&byohcontrollers.ByoAdmissionReconciler{
 			ClientSet: opts.csrClientSet,
 			Client:    mgr.GetClient(),
+
+			MaxCertificateLifetimeSeconds: opts.maxCertificateLifetimeSeconds,
 		}).SetupWithManager(mgr); err != nil {
 			return fmt.Errorf("create ByoAdmission controller: %w", err)
 		}
@@ -255,8 +281,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	maxLifetime, err := maxCertificateLifetime(maxCertificateLifetimeSecs)
+	if err != nil {
+		setupLog.Error(err, "invalid --max-certificate-lifetime-seconds")
+		os.Exit(1)
+	}
+
 	opts := &controllerOptions{
 		heartbeatTimeout:               byohostAgentHeartbeatTimeout,
+		maxCertificateLifetimeSeconds:  maxLifetime,
 		bootstrapAPIServerURL:          bootstrapAPIServerURL,
 		customerFQDNLabel:              customerFQDNLabel,
 		bootstrapAPIServerHostTemplate: bootstrapAPIServerHostTmpl,
