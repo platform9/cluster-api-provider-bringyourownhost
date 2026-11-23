@@ -60,12 +60,12 @@ changes it warns about land inside the disposable container, not on your Mac.
 
 ### Known gotchas
 
-- **Stale cross-arch tool binaries.** `hack/tools/bin/ginkgo` and `bin/kustomize` are built
-  once and reused by their Makefile targets — they don't get rebuilt just because you switched
-  between running natively and running via a `*-linux-vm` target. If you see `cannot execute
-  binary file` or `exec format error`, delete the stale binary (`rm hack/tools/bin/ginkgo` /
-  `rm bin/kustomize`) and re-run; the next `make` invocation rebuilds it for whichever
-  environment is running.
+- **Stale cross-arch tool binaries.** `bin/kustomize` is built once and reused by its Makefile
+  target — it doesn't get rebuilt just because you switched between running natively and running
+  via a `*-linux-vm` target. (The Ginkgo CLI is not a cached binary: `make` runs it through
+  `go tool ginkgo`, which builds it from the version pinned in `go.mod`.) If you see `cannot execute
+  binary file` or `exec format error`, delete the stale binary (`rm bin/kustomize`) and re-run; the
+  next `make` invocation rebuilds it for whichever environment is running.
 - **Killing a `*-linux-vm` run doesn't stop its container.** Interrupting the `make` command
   only kills the local `docker run` client; the container keeps running server-side. Check
   `docker ps` and `docker rm -f <name>` explicitly, or a later run can end up contending with
