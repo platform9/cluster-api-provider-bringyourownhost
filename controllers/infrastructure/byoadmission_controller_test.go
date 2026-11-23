@@ -27,6 +27,8 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	k8stesting "k8s.io/client-go/testing"
+	certcsr "k8s.io/client-go/util/certificate/csr"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -34,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/certificate"
 	controllers "github.com/platform9/cluster-api-provider-bringyourownhost/controllers/infrastructure"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/test/builder"
 )
@@ -45,6 +48,10 @@ const (
 	admissionCSRName   = "byoh-csr-worker-1"
 	admissionIdentity  = "byoh:host:dg-d-default-service:worker-1-a1b2c"
 	admissionUsername  = "system:bootstrap:abcdef"
+
+	// admissionMaxLifetime is the cap the tests set on the approver, and the
+	// lifetime admissionCSR requests.
+	admissionMaxLifetime int32 = 3600
 )
 
 // admissionIssuer returns a BootstrapKubeconfig that issued token tokenID for
@@ -65,6 +72,7 @@ func admissionCSR(t *testing.T, username, cn string) *certv1.CertificateSigningR
 	csr, err := builder.CertificateSigningRequest(admissionCSRName, cn, "byoh:hosts", 2048).WithUsername(username).Build()
 	require.NoError(t, err)
 	csr.Spec.Groups = []string{"system:bootstrappers", "system:bootstrappers:byoh", "system:authenticated"}
+	csr.Spec.ExpirationSeconds = ptr.To(admissionMaxLifetime)
 
 	return csr
 }
@@ -126,7 +134,11 @@ func newAdmissionClient(t *testing.T, funcs *interceptor.Funcs, objs ...client.O
 func reconcileAdmissionWith(t *testing.T, clientSet *fake.Clientset, cl client.Client, csrName string) (ctrl.Result, []certv1.CertificateSigningRequestCondition, error) {
 	t.Helper()
 
-	reconciler := &controllers.ByoAdmissionReconciler{ClientSet: clientSet, Client: cl}
+	reconciler := &controllers.ByoAdmissionReconciler{
+		ClientSet:                     clientSet,
+		Client:                        cl,
+		MaxCertificateLifetimeSeconds: admissionMaxLifetime,
+	}
 
 	result, err := reconciler.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{Name: csrName}})
 
@@ -899,4 +911,125 @@ func TestByoAdmissionReconciler_Reconcile_ApprovalFailsAfterClaim(t *testing.T) 
 	require.Len(t, conditions, 1)
 	assert.Equal(t, certv1.CertificateApproved, conditions[0].Type)
 	assert.Equal(t, 1, statusWrites)
+}
+
+func TestByoAdmissionReconciler_Reconcile_CertificateLifetime(t *testing.T) {
+	approved := certv1.CertificateSigningRequestCondition{
+		Type:   certv1.CertificateApproved,
+		Status: corev1.ConditionTrue,
+		Reason: "Approved by ByoAdmission Controller",
+	}
+	denied := func(message string) certv1.CertificateSigningRequestCondition {
+		return certv1.CertificateSigningRequestCondition{
+			Type:    certv1.CertificateDenied,
+			Status:  corev1.ConditionTrue,
+			Reason:  "DeniedByByoAdmissionController",
+			Message: message,
+		}
+	}
+
+	testCases := []struct {
+		name           string
+		expiration     *int32
+		wantConditions []certv1.CertificateSigningRequestCondition
+	}{
+		{
+			name:           "lifetime equal to the maximum",
+			expiration:     ptr.To(int32(3600)),
+			wantConditions: []certv1.CertificateSigningRequestCondition{approved},
+		},
+		{
+			name:       "lifetime one second above the maximum",
+			expiration: ptr.To(int32(3601)),
+			wantConditions: []certv1.CertificateSigningRequestCondition{
+				denied("requested certificate lifetime 3601 seconds is above the maximum of 3600 seconds"),
+			},
+		},
+		{
+			name:           "lifetime below the maximum",
+			expiration:     ptr.To(int32(600)),
+			wantConditions: []certv1.CertificateSigningRequestCondition{approved},
+		},
+		{
+			name:       "no lifetime requested",
+			expiration: nil,
+			wantConditions: []certv1.CertificateSigningRequestCondition{
+				denied("spec.expirationSeconds must be set to at most 3600 seconds"),
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			request := admissionCSR(t, admissionUsername, admissionIdentity)
+			request.Spec.ExpirationSeconds = tc.expiration
+			issuers := []client.Object{admissionIssuer("worker-1-a1b2c", admissionNamespace, admissionTokenID)}
+
+			_, conditions, err := reconcileAdmission(t, request, issuers, false)
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantConditions, conditions)
+		})
+	}
+}
+
+// TestByoAdmissionReconciler_Reconcile_AgentRequestLifetime sends the CSR the
+// agent creates, with the shared default lifetime, to an approver that has the
+// same maximum.
+func TestByoAdmissionReconciler_Reconcile_AgentRequestLifetime(t *testing.T) {
+	template := admissionCSR(t, admissionUsername, admissionIdentity)
+	clientSet := fake.NewSimpleClientset()
+	agentLifetime := time.Duration(certificate.DefaultLifetimeSeconds) * time.Second
+
+	_, _, err := certcsr.RequestCertificateWithContext(t.Context(), clientSet, template.Spec.Request, admissionCSRName,
+		certv1.KubeAPIServerClientSignerName, &agentLifetime, []certv1.KeyUsage{certv1.UsageClientAuth}, nil)
+	require.NoError(t, err)
+
+	created, err := clientSet.CertificatesV1().CertificateSigningRequests().Get(t.Context(), admissionCSRName, metav1.GetOptions{})
+	require.NoError(t, err)
+	created.Spec.Username = admissionUsername
+	created.Spec.Groups = template.Spec.Groups
+	_, err = clientSet.CertificatesV1().CertificateSigningRequests().Update(t.Context(), created, metav1.UpdateOptions{})
+	require.NoError(t, err)
+
+	cl := newAdmissionClient(t, &interceptor.Funcs{}, admissionIssuer("worker-1-a1b2c", admissionNamespace, admissionTokenID))
+	reconciler := &controllers.ByoAdmissionReconciler{
+		ClientSet:                     clientSet,
+		Client:                        cl,
+		MaxCertificateLifetimeSeconds: certificate.DefaultLifetimeSeconds,
+	}
+	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{Name: admissionCSRName}})
+	require.NoError(t, err)
+
+	got, err := clientSet.CertificatesV1().CertificateSigningRequests().Get(t.Context(), admissionCSRName, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, ptr.To(int32(certificate.DefaultLifetimeSeconds)), got.Spec.ExpirationSeconds)
+	require.Len(t, got.Status.Conditions, 1)
+	assert.Equal(t, certv1.CertificateApproved, got.Status.Conditions[0].Type)
+}
+
+func TestCheckCertificateLifetime(t *testing.T) {
+	testCases := []struct {
+		name       string
+		max        int32
+		expiration *int32
+		wantErr    string
+	}{
+		{name: "equal to the maximum", max: 3600, expiration: ptr.To(int32(3600)), wantErr: ""},
+		{name: "above the maximum", max: 3600, expiration: ptr.To(int32(3601)), wantErr: "above the maximum of 3600"},
+		{name: "unset", max: 3600, expiration: nil, wantErr: "must be set"},
+		{name: "zero maximum denies any lifetime", max: 0, expiration: ptr.To(int32(1)), wantErr: "above the maximum of 0"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := controllers.CheckCertificateLifetime(tc.expiration, tc.max)
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
 }

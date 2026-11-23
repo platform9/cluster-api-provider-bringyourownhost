@@ -23,6 +23,7 @@ import (
 	"github.com/platform9/cluster-api-provider-bringyourownhost/agent/registration"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/agent/version"
 	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/certificate"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/common/hostname"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/feature"
@@ -141,7 +142,7 @@ func setupflags() {
 	klog.ClearLogger()
 
 	flag.StringVar(&namespace, "namespace", "default", "Namespace in the management cluster where you would like to register this host")
-	flag.Int64Var(&certExpiryDuration, "certExpiryDuration", registration.ExpirationSeconds, "Duration (in seconds) for the expiration of the host certificates")
+	flag.Int64Var(&certExpiryDuration, "certExpiryDuration", certificate.DefaultLifetimeSeconds, "Duration (in seconds) for the expiration of the host certificates")
 	flag.Var(&labels, "label", "labels to attach to the ByoHost CR in the form labelname=labelVal for e.g. '--label site=apac --label cores=2'")
 	flag.StringVar(&metricsbindaddress, "metricsbindaddress", ":8080", "metricsbindaddress is the TCP address that the controller should bind to for serving prometheus metrics.It can be set to \"0\" to disable the metrics serving")
 	flag.StringVar(&downloadpath, "downloadpath", "/var/lib/byoh/bundles", "File System path to keep the downloads")

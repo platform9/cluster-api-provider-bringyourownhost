@@ -36,11 +36,8 @@ import (
 )
 
 const (
-	KeySize = 2048
-	// ExpirationSeconds defines the expiry time for Certificates
-	// which is currently set to 1 year aligned with kubeadm defaults.
-	ExpirationSeconds = 86400 * 365
-	ByohCSROrg        = "byoh:hosts"
+	KeySize    = 2048
+	ByohCSROrg = "byoh:hosts"
 	// ByohCSRNameFormat takes the tenant namespace, the normalized host name
 	// and a random part that is new for every CSR. The byoh-csr- prefix is what
 	// the approver filters on.
