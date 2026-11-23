@@ -58,6 +58,18 @@ type BootstrapKubeconfigSpec struct {
 	CreatedBy string `json:"createdBy,omitempty"`
 }
 
+// CSRApprovalState says whether a certificate request was approved for a
+// BootstrapKubeconfig's token.
+type CSRApprovalState string
+
+const (
+	// CSRNotApproved means no request was approved for the token.
+	CSRNotApproved CSRApprovalState = "NotApproved"
+
+	// CSRApproved means the request named by ApprovedCSRName was approved.
+	CSRApproved CSRApprovalState = "Approved"
+)
+
 // BootstrapKubeconfigStatus defines the observed state of BootstrapKubeconfig
 type BootstrapKubeconfigStatus struct {
 	// BootstrapKubeconfigData is an optional reference to a bootstrap kubeconfig info
@@ -86,6 +98,25 @@ type BootstrapKubeconfigStatus struct {
 	// working. It is written by the controller, so a caller cannot choose it.
 	// +optional
 	TokenExpiresAt *metav1.Time `json:"tokenExpiresAt,omitempty"`
+
+	// CSRApproval is whether the approver has approved a certificate request
+	// for this object's token. An object that never had a request approved
+	// has no value here, and is treated as NotApproved.
+	// +kubebuilder:validation:Enum=NotApproved;Approved
+	// +optional
+	CSRApproval CSRApprovalState `json:"csrApproval,omitempty"`
+
+	// ApprovedCSRName is the name of the one certificate request the approver
+	// approved for this object's token. It is set together with CSRApproval,
+	// and the token cannot get another request approved.
+	// +optional
+	ApprovedCSRName string `json:"approvedCSRName,omitempty"`
+
+	// ApprovedCommonName is the common name of the request named by
+	// ApprovedCSRName. The approver denies a request for a common name that
+	// another object in the tenant holds.
+	// +optional
+	ApprovedCommonName string `json:"approvedCommonName,omitempty"`
 }
 
 //+kubebuilder:object:root=true
