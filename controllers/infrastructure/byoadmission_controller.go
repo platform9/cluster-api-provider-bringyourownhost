@@ -161,14 +161,13 @@ func (r *ByoAdmissionReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// Check if the CSR is already approved or denied
 	csrApproved := checkCSRCondition(csr.Status.Conditions, certv1.CertificateApproved)
 	csrDenied := checkCSRCondition(csr.Status.Conditions, certv1.CertificateDenied)
-	if csrApproved || csrDenied {
-		if csrApproved {
-			logger.Info("CertificateSigningRequest is already approved", "CSR", csr.Name)
-		}
-		if csrDenied {
-			logger.Info("CertificateSigningRequest is already denied", "CSR", csr.Name)
-		}
+	if csrDenied {
+		logger.Info("CertificateSigningRequest is already denied", "CSR", csr.Name)
 		return ctrl.Result{}, nil
+	}
+	if csrApproved {
+		logger.Info("CertificateSigningRequest is already approved", "CSR", csr.Name)
+		return ctrl.Result{}, r.deleteApprovedCredential(ctx, csr)
 	}
 
 	issuer, commonName, denial := r.validateCSR(ctx, csr)
@@ -233,7 +232,50 @@ func (r *ByoAdmissionReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	logger.Info("CSR Approved", "object", req.NamespacedName)
 
-	return ctrl.Result{}, nil
+	// The approval stays when the delete fails. The retry reconciles the
+	// approved CSR and deletes the Secret then.
+	return ctrl.Result{}, r.deleteCredentialSecret(ctx, issuer)
+}
+
+// deleteApprovedCredential deletes the credential Secret of the issuer whose
+// token claimed the approved request csr. Requests that did not authenticate
+// with a bootstrap token, or that the issuer did not claim, are left alone.
+func (r *ByoAdmissionReconciler) deleteApprovedCredential(ctx context.Context, csr *certv1.CertificateSigningRequest) error {
+	tokenID, isBootstrapUser := strings.CutPrefix(csr.Spec.Username, bootstrapUserPrefix)
+	if !isBootstrapUser || tokenID == "" {
+		return nil
+	}
+
+	list := &infrastructurev1beta1.BootstrapKubeconfigList{}
+	err := r.Client.List(ctx, list, client.MatchingFields{BootstrapKubeconfigTokenIDIndex: tokenID})
+	if err != nil {
+		return &issuerLookupError{tokenID: tokenID, err: err}
+	}
+
+	if len(list.Items) != 1 || !approvedCSR(&list.Items[0], csr.Name) {
+		return nil
+	}
+
+	return r.deleteCredentialSecret(ctx, &list.Items[0])
+}
+
+// deleteCredentialSecret deletes the credential Secret of issuer, which has
+// no use once the request of its token is approved. A Secret that is already
+// gone is not an error, so the delete can run again on every reconcile.
+func (r *ByoAdmissionReconciler) deleteCredentialSecret(ctx context.Context, issuer *infrastructurev1beta1.BootstrapKubeconfig) error {
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      issuer.Name + credentialSecretSuffix,
+			Namespace: issuer.Namespace,
+		},
+	}
+
+	err := r.Client.Delete(ctx, secret)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("delete credential Secret %q: %w", client.ObjectKeyFromObject(secret), err)
+	}
+
+	return nil
 }
 
 // claimToken records on issuer that its token approved the request csrName for
