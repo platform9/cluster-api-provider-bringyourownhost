@@ -35,8 +35,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
-	"github.com/platform9/cluster-api-provider-bringyourownhost/agent/registration"
 	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/certificate"
 	controllers "github.com/platform9/cluster-api-provider-bringyourownhost/controllers/infrastructure"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/test/builder"
 )
@@ -960,13 +960,12 @@ func TestByoAdmissionReconciler_Reconcile_CertificateLifetime(t *testing.T) {
 }
 
 // TestByoAdmissionReconciler_Reconcile_AgentRequestLifetime sends the CSR the
-// agent creates, with the agent's default lifetime, to an approver that has
-// the same maximum. It fails when the agent default and the maximum drift
-// apart.
+// agent creates, with the shared default lifetime, to an approver that has the
+// same maximum.
 func TestByoAdmissionReconciler_Reconcile_AgentRequestLifetime(t *testing.T) {
 	template := admissionCSR(t, admissionUsername, admissionIdentity)
 	clientSet := fake.NewSimpleClientset()
-	agentLifetime := time.Duration(registration.ExpirationSeconds) * time.Second
+	agentLifetime := time.Duration(certificate.DefaultLifetimeSeconds) * time.Second
 
 	_, _, err := certcsr.RequestCertificateWithContext(t.Context(), clientSet, template.Spec.Request, admissionCSRName,
 		certv1.KubeAPIServerClientSignerName, &agentLifetime, []certv1.KeyUsage{certv1.UsageClientAuth}, nil)
@@ -983,14 +982,14 @@ func TestByoAdmissionReconciler_Reconcile_AgentRequestLifetime(t *testing.T) {
 	reconciler := &controllers.ByoAdmissionReconciler{
 		ClientSet:                     clientSet,
 		Client:                        cl,
-		MaxCertificateLifetimeSeconds: registration.ExpirationSeconds,
+		MaxCertificateLifetimeSeconds: certificate.DefaultLifetimeSeconds,
 	}
 	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{Name: admissionCSRName}})
 	require.NoError(t, err)
 
 	got, err := clientSet.CertificatesV1().CertificateSigningRequests().Get(t.Context(), admissionCSRName, metav1.GetOptions{})
 	require.NoError(t, err)
-	assert.Equal(t, ptr.To(int32(registration.ExpirationSeconds)), got.Spec.ExpirationSeconds)
+	assert.Equal(t, ptr.To(int32(certificate.DefaultLifetimeSeconds)), got.Spec.ExpirationSeconds)
 	require.Len(t, got.Status.Conditions, 1)
 	assert.Equal(t, certv1.CertificateApproved, got.Status.Conditions[0].Type)
 }

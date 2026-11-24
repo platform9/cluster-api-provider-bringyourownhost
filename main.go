@@ -30,7 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	"github.com/platform9/cluster-api-provider-bringyourownhost/agent/registration"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/certificate"
 	byohcontrollers "github.com/platform9/cluster-api-provider-bringyourownhost/controllers/infrastructure"
 
 	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
@@ -60,8 +60,8 @@ var (
 )
 
 // defaultMaxCertificateLifetimeSeconds is the --max-certificate-lifetime-seconds
-// default. It equals the lifetime the host agent asks for by default.
-const defaultMaxCertificateLifetimeSeconds = registration.ExpirationSeconds
+// default. It is the lifetime the host agent asks for by default.
+const defaultMaxCertificateLifetimeSeconds = certificate.DefaultLifetimeSeconds
 
 // defaultBootstrapAPIServerHostTemplate is the apiserver host template used
 // when --bootstrap-apiserver-host-template is not set.
