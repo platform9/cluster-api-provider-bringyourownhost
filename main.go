@@ -211,6 +211,13 @@ func setupControllers(ctx context.Context, mgr ctrl.Manager, opts controllerOpti
 		}).SetupWithManager(mgr); err != nil {
 			return fmt.Errorf("create ByoAdmission controller: %w", err)
 		}
+
+		if err := (&byohcontrollers.HostRBACReconciler{
+			Client:    mgr.GetClient(),
+			APIReader: mgr.GetAPIReader(),
+		}).SetupWithManager(mgr); err != nil {
+			return fmt.Errorf("create HostRBAC controller: %w", err)
+		}
 	}
 
 	if err := (&byohcontrollers.K8sInstallerConfigReconciler{
