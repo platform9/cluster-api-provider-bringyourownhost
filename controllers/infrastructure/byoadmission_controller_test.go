@@ -1283,7 +1283,10 @@ func TestByoAdmissionReconciler_Reconcile_HostRBAC(t *testing.T) {
 				return cl.Patch(ctx, obj, patch, opts...)
 			},
 			Delete: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
-				writes++
+				// The approval deletes the credential Secret, which is not a Role write.
+				if _, isSecret := obj.(*corev1.Secret); !isSecret {
+					writes++
+				}
 
 				return cl.Delete(ctx, obj, opts...)
 			},
@@ -1303,4 +1306,212 @@ func TestByoAdmissionReconciler_Reconcile_HostRBAC(t *testing.T) {
 		assert.Len(t, role.Rules, 3)
 		assert.Equal(t, 0, writes)
 	})
+}
+
+// admissionCredentialSecret returns the credential Secret of the issuer named
+// issuerName.
+func admissionCredentialSecret(issuerName string) *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: issuerName + "-cred", Namespace: admissionNamespace},
+	}
+}
+
+// credentialSecretExists reports whether the credential Secret of issuerName
+// is in cl.
+func credentialSecretExists(t *testing.T, cl client.Client, issuerName string) bool {
+	t.Helper()
+
+	err := cl.Get(t.Context(), client.ObjectKeyFromObject(admissionCredentialSecret(issuerName)), &corev1.Secret{})
+	if apierrors.IsNotFound(err) {
+		return false
+	}
+	require.NoError(t, err)
+
+	return true
+}
+
+func TestByoAdmissionReconciler_Reconcile_CredentialSecret(t *testing.T) {
+	const issuerName = "worker-1-a1b2c"
+
+	approved := []certv1.CertificateSigningRequestCondition{{Type: certv1.CertificateApproved, Status: corev1.ConditionTrue}}
+	denied := []certv1.CertificateSigningRequestCondition{{Type: certv1.CertificateDenied, Status: corev1.ConditionTrue}}
+
+	testCases := []struct {
+		name           string
+		username       string
+		commonName     string
+		conditions     []certv1.CertificateSigningRequestCondition
+		issuer         *infrastructurev1beta1.BootstrapKubeconfig
+		secretPresent  bool
+		wantConditions []certv1.RequestConditionType
+		wantSecret     bool
+	}{
+		{
+			name:           "pending CSR is approved",
+			username:       admissionUsername,
+			commonName:     admissionIdentity,
+			issuer:         admissionIssuer(issuerName, admissionNamespace, admissionTokenID),
+			secretPresent:  true,
+			wantConditions: []certv1.RequestConditionType{certv1.CertificateApproved},
+			wantSecret:     false,
+		},
+		{
+			name:           "pending CSR is denied for a common name that is not a host identity",
+			username:       admissionUsername,
+			commonName:     "worker-1",
+			issuer:         admissionIssuer(issuerName, admissionNamespace, admissionTokenID),
+			secretPresent:  true,
+			wantConditions: []certv1.RequestConditionType{certv1.CertificateDenied},
+			wantSecret:     true,
+		},
+		{
+			name:           "pending CSR is denied for a token that already approved another CSR",
+			username:       admissionUsername,
+			commonName:     admissionIdentity,
+			issuer:         approvedIssuer(issuerName, admissionTokenID, "byoh-csr-other", admissionIdentity),
+			secretPresent:  true,
+			wantConditions: []certv1.RequestConditionType{certv1.CertificateDenied},
+			wantSecret:     true,
+		},
+		{
+			name:           "approved CSR whose Secret delete failed earlier",
+			username:       admissionUsername,
+			commonName:     admissionIdentity,
+			conditions:     approved,
+			issuer:         approvedIssuer(issuerName, admissionTokenID, admissionCSRName, admissionIdentity),
+			secretPresent:  true,
+			wantConditions: []certv1.RequestConditionType{certv1.CertificateApproved},
+			wantSecret:     false,
+		},
+		{
+			name:           "approved CSR whose Secret is already gone",
+			username:       admissionUsername,
+			commonName:     admissionIdentity,
+			conditions:     approved,
+			issuer:         approvedIssuer(issuerName, admissionTokenID, admissionCSRName, admissionIdentity),
+			secretPresent:  false,
+			wantConditions: []certv1.RequestConditionType{certv1.CertificateApproved},
+			wantSecret:     false,
+		},
+		{
+			name:           "approved CSR that is not the one the token claimed",
+			username:       admissionUsername,
+			commonName:     admissionIdentity,
+			conditions:     approved,
+			issuer:         approvedIssuer(issuerName, admissionTokenID, "byoh-csr-other", admissionIdentity),
+			secretPresent:  true,
+			wantConditions: []certv1.RequestConditionType{certv1.CertificateApproved},
+			wantSecret:     true,
+		},
+		{
+			name:           "approved CSR of a requester named like the token ID but not a bootstrap user",
+			username:       admissionTokenID,
+			commonName:     admissionIdentity,
+			conditions:     approved,
+			issuer:         approvedIssuer(issuerName, admissionTokenID, admissionCSRName, admissionIdentity),
+			secretPresent:  true,
+			wantConditions: []certv1.RequestConditionType{certv1.CertificateApproved},
+			wantSecret:     true,
+		},
+		{
+			name:           "denied CSR",
+			username:       admissionUsername,
+			commonName:     admissionIdentity,
+			conditions:     denied,
+			issuer:         approvedIssuer(issuerName, admissionTokenID, admissionCSRName, admissionIdentity),
+			secretPresent:  true,
+			wantConditions: []certv1.RequestConditionType{certv1.CertificateDenied},
+			wantSecret:     true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			objs := []client.Object{tc.issuer}
+			if tc.secretPresent {
+				objs = append(objs, admissionCredentialSecret(issuerName))
+			}
+			cl := newAdmissionClient(t, &interceptor.Funcs{}, objs...)
+			csr := admissionCSR(t, tc.username, tc.commonName)
+			csr.Status.Conditions = tc.conditions
+			clientSet := fake.NewSimpleClientset(csr)
+
+			_, conditions, err := reconcileAdmissionWith(t, clientSet, cl, csr.Name)
+			require.NoError(t, err)
+
+			gotTypes := make([]certv1.RequestConditionType, 0, len(conditions))
+			for _, condition := range conditions {
+				gotTypes = append(gotTypes, condition.Type)
+			}
+			assert.Equal(t, tc.wantConditions, gotTypes)
+			assert.Equal(t, tc.wantSecret, credentialSecretExists(t, cl, issuerName))
+		})
+	}
+}
+
+// TestByoAdmissionReconciler_Reconcile_CredentialSecretApprovalFails fails the
+// approval after the token was claimed. The claim alone must not delete the
+// Secret, and the retry that approves the CSR must delete it.
+func TestByoAdmissionReconciler_Reconcile_CredentialSecretApprovalFails(t *testing.T) {
+	const issuerName = "worker-1-a1b2c"
+
+	cl := newAdmissionClient(t, &interceptor.Funcs{},
+		admissionIssuer(issuerName, admissionNamespace, admissionTokenID),
+		admissionCredentialSecret(issuerName))
+	csr := admissionCSR(t, admissionUsername, admissionIdentity)
+	clientSet := fake.NewSimpleClientset(csr)
+	approvalFails := true
+	clientSet.PrependReactor("update", "certificatesigningrequests", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if approvalFails && action.GetSubresource() == "approval" {
+			return true, nil, errors.New("api server unavailable")
+		}
+
+		return false, nil, nil
+	})
+
+	_, conditions, err := reconcileAdmissionWith(t, clientSet, cl, csr.Name)
+	require.Error(t, err)
+	assert.Empty(t, conditions)
+	assert.True(t, credentialSecretExists(t, cl, issuerName), "claimed but not approved")
+
+	approvalFails = false
+	_, conditions, err = reconcileAdmissionWith(t, clientSet, cl, csr.Name)
+	require.NoError(t, err)
+	require.Len(t, conditions, 1)
+	assert.Equal(t, certv1.CertificateApproved, conditions[0].Type)
+	assert.False(t, credentialSecretExists(t, cl, issuerName))
+}
+
+// TestByoAdmissionReconciler_Reconcile_CredentialSecretDeleteFails fails the
+// delete after the approval. The approval stays, and the retry deletes.
+func TestByoAdmissionReconciler_Reconcile_CredentialSecretDeleteFails(t *testing.T) {
+	const issuerName = "worker-1-a1b2c"
+
+	deleteFails := true
+	funcs := interceptor.Funcs{
+		Delete: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+			if deleteFails {
+				return errors.New("api server unavailable")
+			}
+
+			return cl.Delete(ctx, obj, opts...)
+		},
+	}
+	cl := newAdmissionClient(t, &funcs,
+		admissionIssuer(issuerName, admissionNamespace, admissionTokenID),
+		admissionCredentialSecret(issuerName))
+	csr := admissionCSR(t, admissionUsername, admissionIdentity)
+	clientSet := fake.NewSimpleClientset(csr)
+
+	_, conditions, err := reconcileAdmissionWith(t, clientSet, cl, csr.Name)
+	require.Error(t, err)
+	require.Len(t, conditions, 1)
+	assert.Equal(t, certv1.CertificateApproved, conditions[0].Type)
+	assert.True(t, credentialSecretExists(t, cl, issuerName))
+
+	deleteFails = false
+	_, conditions, err = reconcileAdmissionWith(t, clientSet, cl, csr.Name)
+	require.NoError(t, err)
+	require.Len(t, conditions, 1)
+	assert.False(t, credentialSecretExists(t, cl, issuerName))
 }
