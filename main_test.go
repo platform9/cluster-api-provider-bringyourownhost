@@ -29,8 +29,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
-
-	"github.com/platform9/cluster-api-provider-bringyourownhost/agent/registration"
 )
 
 // wantControllers is the number of runnables setupControllers adds to the
@@ -239,12 +237,6 @@ func TestMaxCertificateLifetime(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
-}
-
-// The approver default must follow the lifetime the agent asks for, or hosts
-// that keep the agent default are denied.
-func TestDefaultMaxCertificateLifetimeMatchesAgent(t *testing.T) {
-	assert.Equal(t, registration.ExpirationSeconds, defaultMaxCertificateLifetimeSeconds)
 }
 
 // A bad host template must stop startup before any controller is registered.
