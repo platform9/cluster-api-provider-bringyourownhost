@@ -89,4 +89,5 @@ webhooks:
     - DELETE
     resources:
     - byohosts
+    - byohosts/status
   sideEffects: None
