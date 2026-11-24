@@ -71,6 +71,7 @@ func admissionCSR(t *testing.T, username, cn string) *certv1.CertificateSigningR
 
 	csr, err := builder.CertificateSigningRequest(admissionCSRName, cn, "byoh:hosts", 2048).WithUsername(username).Build()
 	require.NoError(t, err)
+	csr.Spec.Request = certificateRequestPEM(t, cn, []string{"byoh:hosts", "byoh:hosts:dg-d-default-service"})
 	csr.Spec.Groups = []string{"system:bootstrappers", "system:bootstrappers:byoh", "system:authenticated"}
 	csr.Spec.ExpirationSeconds = ptr.To(admissionMaxLifetime)
 
@@ -336,32 +337,6 @@ func TestByoAdmissionReconciler_Reconcile(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "organization is system:masters",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				csr := admissionCSR(t, admissionUsername, admissionIdentity)
-				csr.Spec.Request = certificateRequestPEM(t, admissionIdentity, []string{"system:masters"})
-				return csr
-			},
-			issuers: []client.Object{admissionIssuer("worker-1-a1b2c", admissionNamespace, admissionTokenID)},
-			wantConditions: []certv1.CertificateSigningRequestCondition{
-				denied(`organization must be exactly [byoh:hosts], got [system:masters]`),
-			},
-			wantErr: false,
-		},
-		{
-			name: "two organizations",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				csr := admissionCSR(t, admissionUsername, admissionIdentity)
-				csr.Spec.Request = certificateRequestPEM(t, admissionIdentity, []string{"byoh:hosts", "system:masters"})
-				return csr
-			},
-			issuers: []client.Object{admissionIssuer("worker-1-a1b2c", admissionNamespace, admissionTokenID)},
-			wantConditions: []certv1.CertificateSigningRequestCondition{
-				denied(`organization must be exactly [byoh:hosts], got [byoh:hosts system:masters]`),
-			},
-			wantErr: false,
-		},
-		{
 			name: "common name is an email address",
 			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
 				return admissionCSR(t, admissionUsername, "user@example.com")
@@ -489,6 +464,88 @@ func TestByoAdmissionReconciler_Reconcile(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
+			assert.Equal(t, tc.wantConditions, conditions)
+		})
+	}
+}
+
+// TestByoAdmissionReconciler_Reconcile_Organization checks the organizations of
+// the request against the tenant of the issuer.
+func TestByoAdmissionReconciler_Reconcile_Organization(t *testing.T) {
+	approved := certv1.CertificateSigningRequestCondition{
+		Type:   certv1.CertificateApproved,
+		Status: corev1.ConditionTrue,
+		Reason: "Approved by ByoAdmission Controller",
+	}
+	denied := func(got string) certv1.CertificateSigningRequestCondition {
+		return certv1.CertificateSigningRequestCondition{
+			Type:    certv1.CertificateDenied,
+			Status:  corev1.ConditionTrue,
+			Reason:  "DeniedByByoAdmissionController",
+			Message: "organization must be exactly [byoh:hosts byoh:hosts:dg-d-default-service] in any order, got " + got,
+		}
+	}
+
+	testCases := []struct {
+		name           string
+		organization   []string
+		wantConditions []certv1.CertificateSigningRequestCondition
+	}{
+		{
+			name:           "hosts group and tenant group",
+			organization:   []string{"byoh:hosts", "byoh:hosts:dg-d-default-service"},
+			wantConditions: []certv1.CertificateSigningRequestCondition{approved},
+		},
+		{
+			name:           "tenant group of another tenant",
+			organization:   []string{"byoh:hosts", "byoh:hosts:dg-d-r1"},
+			wantConditions: []certv1.CertificateSigningRequestCondition{denied("[byoh:hosts byoh:hosts:dg-d-r1]")},
+		},
+		{
+			name:           "old organization only",
+			organization:   []string{"byoh:hosts"},
+			wantConditions: []certv1.CertificateSigningRequestCondition{denied("[byoh:hosts]")},
+		},
+		{
+			name:           "empty organization",
+			organization:   nil,
+			wantConditions: []certv1.CertificateSigningRequestCondition{denied("[]")},
+		},
+		{
+			name:           "extra organization",
+			organization:   []string{"byoh:hosts", "byoh:hosts:dg-d-default-service", "extra"},
+			wantConditions: []certv1.CertificateSigningRequestCondition{denied("[extra byoh:hosts byoh:hosts:dg-d-default-service]")},
+		},
+		{
+			name:           "duplicate hosts group",
+			organization:   []string{"byoh:hosts", "byoh:hosts"},
+			wantConditions: []certv1.CertificateSigningRequestCondition{denied("[byoh:hosts byoh:hosts]")},
+		},
+		{
+			name:           "tenant group only",
+			organization:   []string{"byoh:hosts:dg-d-default-service"},
+			wantConditions: []certv1.CertificateSigningRequestCondition{denied("[byoh:hosts:dg-d-default-service]")},
+		},
+		{
+			name:           "system:masters",
+			organization:   []string{"system:masters"},
+			wantConditions: []certv1.CertificateSigningRequestCondition{denied("[system:masters]")},
+		},
+		{
+			name:           "hosts group and system:masters",
+			organization:   []string{"byoh:hosts", "system:masters"},
+			wantConditions: []certv1.CertificateSigningRequestCondition{denied("[byoh:hosts system:masters]")},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			csr := admissionCSR(t, admissionUsername, admissionIdentity)
+			csr.Spec.Request = certificateRequestPEM(t, admissionIdentity, tc.organization)
+			issuers := []client.Object{admissionIssuer("worker-1-a1b2c", admissionNamespace, admissionTokenID)}
+
+			_, conditions, err := reconcileAdmission(t, csr, issuers, false)
+			require.NoError(t, err)
 			assert.Equal(t, tc.wantConditions, conditions)
 		})
 	}

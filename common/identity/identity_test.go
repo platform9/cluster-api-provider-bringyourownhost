@@ -399,3 +399,55 @@ func TestHasPrefix(t *testing.T) {
 		})
 	}
 }
+
+func TestOrganization(t *testing.T) {
+	testCases := []struct {
+		name            string
+		tenantNamespace string
+		want            []string
+	}{
+		{
+			name:            "tenant namespace with dashes",
+			tenantNamespace: "dg-d-default-service",
+			want:            []string{"byoh:hosts", "byoh:hosts:dg-d-default-service"},
+		},
+		{
+			name:            "short tenant namespace",
+			tenantNamespace: "a",
+			want:            []string{"byoh:hosts", "byoh:hosts:a"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := identity.Organization(tc.tenantNamespace)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestHasOrganization(t *testing.T) {
+	testCases := []struct {
+		name         string
+		organization []string
+		want         bool
+	}{
+		{name: "both entries", organization: []string{"byoh:hosts", "byoh:hosts:tenant-a"}, want: true},
+		{name: "both entries in reverse order", organization: []string{"byoh:hosts:tenant-a", "byoh:hosts"}, want: true},
+		{name: "tenant group of another tenant", organization: []string{"byoh:hosts", "byoh:hosts:tenant-b"}, want: false},
+		{name: "hosts group only", organization: []string{"byoh:hosts"}, want: false},
+		{name: "tenant group only", organization: []string{"byoh:hosts:tenant-a"}, want: false},
+		{name: "empty", organization: nil, want: false},
+		{name: "extra entry", organization: []string{"byoh:hosts", "byoh:hosts:tenant-a", "extra"}, want: false},
+		{name: "duplicate hosts group", organization: []string{"byoh:hosts", "byoh:hosts"}, want: false},
+		{name: "duplicate tenant group", organization: []string{"byoh:hosts:tenant-a", "byoh:hosts:tenant-a"}, want: false},
+		{name: "system:masters with hosts group", organization: []string{"byoh:hosts", "system:masters"}, want: false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := identity.HasOrganization(tc.organization, "tenant-a")
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
