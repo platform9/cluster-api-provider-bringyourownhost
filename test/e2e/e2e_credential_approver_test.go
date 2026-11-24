@@ -32,8 +32,6 @@ import (
 )
 
 const (
-	// credentialCSROrganization is the organization the agent puts in its certificate request.
-	credentialCSROrganization = "byoh:hosts"
 	// credentialCSRKeySize is the RSA key size of the certificate requests these specs create.
 	credentialCSRKeySize = 2048
 	// credentialDeniedReason is the reason the approver sets on the Denied condition.
@@ -120,9 +118,9 @@ var _ = Describe("When a BootstrapKubeconfig issues a credential [Credential]", 
 		Expect(err).NotTo(HaveOccurred())
 
 		// The credential only allows creating requests. Decisions are read with the admin client.
-		createCSR := func(identityOf identity.HostIdentity, expirationSeconds *int32) string {
+		createCSR := func(identityOf identity.HostIdentity, organization []string, expirationSeconds *int32) string {
 			csrName := fmt.Sprintf("byoh-csr-%s-%s", identityOf.TenantNamespace, util.RandomString(8))
-			csr, buildErr := builder.CertificateSigningRequest(csrName, identityOf.String(), credentialCSROrganization, credentialCSRKeySize).Build()
+			csr, buildErr := builder.CertificateSigningRequest(csrName, identityOf.String(), identity.HostsGroup, credentialCSRKeySize).WithOrganization(organization...).Build()
 			Expect(buildErr).NotTo(HaveOccurred())
 			csr.Spec.ExpirationSeconds = expirationSeconds
 			_, createErr := credentialClient.CertificatesV1().CertificateSigningRequests().Create(ctx, csr, metav1.CreateOptions{})
@@ -142,15 +140,25 @@ var _ = Describe("When a BootstrapKubeconfig issues a credential [Credential]", 
 		otherTenant.TenantNamespace = "other-" + namespace.Name
 
 		lifetime := ptr.To(int32(certificate.DefaultLifetimeSeconds))
-		ownCSR := createCSR(own, lifetime)
-		otherHostCSR := createCSR(otherHost, lifetime)
-		otherTenantCSR := createCSR(otherTenant, lifetime)
+		ownOrganization := identity.Organization(namespace.Name)
+		ownCSR := createCSR(own, ownOrganization, lifetime)
+		otherHostCSR := createCSR(otherHost, ownOrganization, lifetime)
+
+		// The other tenant's request carries that tenant's own organizations, so
+		// only the tenant check denies it.
+		otherTenantCSR := createCSR(otherTenant, identity.Organization(otherTenant.TenantNamespace), lifetime)
+
+		// A request for the own host with only the hosts group is denied for its
+		// organization, before the token's approved request matters.
+		hostsGroupOnly := own
+		hostsGroupOnly.Suffix = util.RandomString(identity.SuffixLength)
+		hostsGroupOnlyCSR := createCSR(hostsGroupOnly, []string{identity.HostsGroup}, lifetime)
 
 		// The approver denies a request without a lifetime before it looks at
 		// the issuer, so this request does not claim the token.
 		noLifetime := own
 		noLifetime.Suffix = util.RandomString(identity.SuffixLength)
-		noLifetimeCSR := createCSR(noLifetime, nil)
+		noLifetimeCSR := createCSR(noLifetime, ownOrganization, nil)
 
 		conditionTypeOf := func(csrName string) func() []certv1.RequestConditionType {
 			return func() []certv1.RequestConditionType {
@@ -171,8 +179,9 @@ var _ = Describe("When a BootstrapKubeconfig issues a credential [Credential]", 
 		Eventually(conditionTypeOf(otherHostCSR), intervals...).Should(ContainElement(certv1.CertificateDenied))
 		Eventually(conditionTypeOf(otherTenantCSR), intervals...).Should(ContainElement(certv1.CertificateDenied))
 		Eventually(conditionTypeOf(noLifetimeCSR), intervals...).Should(ContainElement(certv1.CertificateDenied))
+		Eventually(conditionTypeOf(hostsGroupOnlyCSR), intervals...).Should(ContainElement(certv1.CertificateDenied))
 
-		for _, csrName := range []string{otherHostCSR, otherTenantCSR, noLifetimeCSR} {
+		for _, csrName := range []string{otherHostCSR, otherTenantCSR, noLifetimeCSR, hostsGroupOnlyCSR} {
 			csr := &certv1.CertificateSigningRequest{}
 			err := bootstrapClusterProxy.GetClient().Get(ctx, client.ObjectKey{Name: csrName}, csr)
 			Expect(err).NotTo(HaveOccurred())
