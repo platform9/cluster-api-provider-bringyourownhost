@@ -289,3 +289,84 @@ func TestRBAC_ManagerCreatesHostRBAC(t *testing.T) {
 		})
 	}
 }
+
+// TestRBAC_ManagerGrantsHostSecrets updates the host Role as the manager
+// ServiceAccount against the shipped manager RBAC. The API server accepts the
+// Secret rule only while the manager itself holds get on Secrets.
+func TestRBAC_ManagerGrantsHostSecrets(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, clientgoscheme.AddToScheme(scheme))
+	require.NoError(t, infrastructurev1beta1.AddToScheme(scheme))
+
+	for _, source := range rbacharness.Sources() {
+		t.Run(string(source), func(t *testing.T) {
+			h, err := rbacharness.Start(t.Context(), source)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, h.Stop()) })
+
+			admin, err := kubernetes.NewForConfig(h.AdminConfig())
+			require.NoError(t, err)
+			adminClient, err := client.New(h.AdminConfig(), client.Options{Scheme: scheme})
+			require.NoError(t, err)
+
+			clusterRoleName, manager := managerIdentity(t, admin)
+			updateRoles := &authv1.ResourceAttributes{Verb: "update", Group: rbacAPIGroup, Resource: "roles", Namespace: rbacharness.TenantA}
+			require.Eventually(t, func() bool {
+				got, reviewErr := h.Allowed(t.Context(), manager, updateRoles)
+				return reviewErr == nil && got
+			}, 10*time.Second, 100*time.Millisecond)
+
+			host1 := identity.HostIdentity{TenantNamespace: rbacharness.TenantA, NormalizedHostName: "h1", Suffix: "abc12"}
+			startOnboarding(t, h, adminClient, &hostOnboarding{host: host1, tokenID: "abcdef", csrName: "byoh-csr-h1"})
+			err = reconcileAsManager(t.Context(), h, scheme, manager, "byoh-csr-h1")
+			require.NoError(t, err)
+
+			managerCfg, err := h.ClientConfig(manager)
+			require.NoError(t, err)
+			managerKube, err := kubernetes.NewForConfig(managerCfg)
+			require.NoError(t, err)
+
+			setSecrets := func(names []string) error {
+				role, getErr := managerKube.RbacV1().Roles(rbacharness.TenantA).Get(t.Context(), "byoh-host-h1-abc12", metav1.GetOptions{})
+				require.NoError(t, getErr)
+				role.Rules = controllers.HostSecretRules(role.Rules, names)
+				_, updateErr := managerKube.RbacV1().Roles(rbacharness.TenantA).Update(t.Context(), role, metav1.UpdateOptions{})
+
+				return updateErr
+			}
+
+			err = setSecrets([]string{"m1-bootstrap", "byoh-install-m1", "byoh-uninstall-m1"})
+			require.NoError(t, err)
+
+			subject := tenantGroupSubject(host1.String())
+			getBootstrap := &authv1.ResourceAttributes{Verb: "get", Resource: "secrets", Namespace: rbacharness.TenantA, Name: "m1-bootstrap"}
+			require.Eventually(t, func() bool {
+				got, reviewErr := h.Allowed(t.Context(), subject, getBootstrap)
+				return reviewErr == nil && got
+			}, 10*time.Second, 100*time.Millisecond)
+
+			// Take get on Secrets away from the manager. The rule grants it, so
+			// the API server must now refuse the new names as an escalation.
+			clusterRole, err := admin.RbacV1().ClusterRoles().Get(t.Context(), clusterRoleName, metav1.GetOptions{})
+			require.NoError(t, err)
+			for i := range clusterRole.Rules {
+				if slices.Contains(clusterRole.Rules[i].Resources, "secrets") {
+					clusterRole.Rules[i].Verbs = slices.DeleteFunc(clusterRole.Rules[i].Verbs, func(verb string) bool { return verb == "get" })
+				}
+			}
+			_, err = admin.RbacV1().ClusterRoles().Update(t.Context(), clusterRole, metav1.UpdateOptions{})
+			require.NoError(t, err)
+
+			getSecrets := &authv1.ResourceAttributes{Verb: "get", Resource: "secrets", Namespace: rbacharness.TenantA}
+			require.Eventually(t, func() bool {
+				got, reviewErr := h.Allowed(t.Context(), manager, getSecrets)
+				return reviewErr == nil && !got
+			}, 10*time.Second, 100*time.Millisecond)
+
+			err = setSecrets([]string{"m2-bootstrap"})
+			require.Error(t, err)
+			assert.True(t, apierrors.IsForbidden(err), "want a forbidden error, got %v", err)
+			assert.Contains(t, err.Error(), "attempting to grant RBAC permissions not currently held")
+		})
+	}
+}

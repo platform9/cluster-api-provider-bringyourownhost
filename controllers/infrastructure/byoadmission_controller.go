@@ -281,13 +281,13 @@ func HostScopedRBAC(host identity.HostIdentity) (*rbacv1.Role, *rbacv1.RoleBindi
 				APIGroups:     []string{group},
 				Resources:     []string{"byohosts"},
 				ResourceNames: []string{byoHostName},
-				Verbs:         []string{"get", "list", "watch", "update", "patch", "delete"},
+				Verbs:         []string{verbGet, "list", "watch", "update", "patch", "delete"},
 			},
 			{
 				APIGroups:     []string{group},
 				Resources:     []string{"byohosts/status"},
 				ResourceNames: []string{byoHostName},
-				Verbs:         []string{"get", "patch", "update"},
+				Verbs:         []string{verbGet, "patch", "update"},
 			},
 		},
 	}
