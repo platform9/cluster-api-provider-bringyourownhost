@@ -443,7 +443,7 @@ func (n *NamespaceBuilder) Build() *corev1.Namespace {
 type CertificateSigningRequestBuilder struct {
 	name        string
 	cn          string
-	org         string
+	orgs        []string
 	privKeySize int
 	username    string
 }
@@ -453,9 +453,15 @@ func CertificateSigningRequest(name, cn, org string, privKeySize int) *Certifica
 	return &CertificateSigningRequestBuilder{
 		name:        name,
 		cn:          cn,
-		org:         org,
+		orgs:        []string{org},
 		privKeySize: privKeySize,
 	}
+}
+
+// WithOrganization sets the organizations of the request, replacing the org given to the constructor.
+func (csrb *CertificateSigningRequestBuilder) WithOrganization(orgs ...string) *CertificateSigningRequestBuilder {
+	csrb.orgs = orgs
+	return csrb
 }
 
 // WithUsername sets the requester username the API server would record on the CSR.
@@ -473,7 +479,7 @@ func (csrb *CertificateSigningRequestBuilder) Build() (*certv1.CertificateSignin
 	// Generate a new *x509.CertificateRequest template
 	csrTemplate := x509.CertificateRequest{
 		Subject: pkix.Name{
-			Organization: []string{csrb.org},
+			Organization: csrb.orgs,
 			CommonName:   csrb.cn,
 		},
 	}

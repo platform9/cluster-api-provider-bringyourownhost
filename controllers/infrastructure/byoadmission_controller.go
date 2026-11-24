@@ -54,11 +54,6 @@ const (
 	// in the username of a request that authenticated with a bootstrap token.
 	bootstrapUserPrefix = "system:bootstrap:"
 
-	// hostCertificateOrganization is the only organization a host certificate
-	// may have. The API server derives group membership from it, so an
-	// unchecked value would let a token holder request system:masters.
-	hostCertificateOrganization = "byoh:hosts"
-
 	// deniedReason is the reason of the Denied condition this controller sets.
 	deniedReason = "DeniedByByoAdmissionController"
 
@@ -280,10 +275,6 @@ func (r *ByoAdmissionReconciler) validateCSR(ctx context.Context, csr *certv1.Ce
 		return nil, "", err
 	}
 
-	if !slices.Equal(certificateRequest.Subject.Organization, []string{hostCertificateOrganization}) {
-		return nil, "", fmt.Errorf("organization must be exactly [%s], got %v", hostCertificateOrganization, certificateRequest.Subject.Organization)
-	}
-
 	requested, err := identity.Parse(certificateRequest.Subject.CommonName)
 	if err != nil {
 		return nil, "", fmt.Errorf("common name is not a host identity: %w", err)
@@ -312,6 +303,13 @@ func (r *ByoAdmissionReconciler) validateCSR(ctx context.Context, csr *certv1.Ce
 	if requested.TenantNamespace != issuer.Namespace {
 		return nil, "", fmt.Errorf("token %q was issued in namespace %q, but the request asks for tenant %q",
 			tokenID, issuer.Namespace, requested.TenantNamespace)
+	}
+
+	// Organizations become groups of the certificate, so the tenant comes from
+	// the issuer, not from the request.
+	if !identity.HasOrganization(certificateRequest.Subject.Organization, issuer.Namespace) {
+		return nil, "", fmt.Errorf("organization must be exactly %v in any order, got %v",
+			identity.Organization(issuer.Namespace), certificateRequest.Subject.Organization)
 	}
 
 	if requested.NormalizedHostName != issuer.Spec.HostName {
