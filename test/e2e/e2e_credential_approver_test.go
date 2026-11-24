@@ -13,6 +13,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/certificate"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/test/builder"
 	certv1 "k8s.io/api/certificates/v1"
@@ -22,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -112,10 +114,11 @@ var _ = Describe("When a BootstrapKubeconfig issues a credential [Credential]", 
 		Expect(err).NotTo(HaveOccurred())
 
 		// The credential only allows creating requests. Decisions are read with the admin client.
-		createCSR := func(identityOf identity.HostIdentity) string {
+		createCSR := func(identityOf identity.HostIdentity, expirationSeconds *int32) string {
 			csrName := fmt.Sprintf("byoh-csr-%s-%s", identityOf.TenantNamespace, util.RandomString(8))
 			csr, buildErr := builder.CertificateSigningRequest(csrName, identityOf.String(), credentialCSROrganization, credentialCSRKeySize).Build()
 			Expect(buildErr).NotTo(HaveOccurred())
+			csr.Spec.ExpirationSeconds = expirationSeconds
 			_, createErr := credentialClient.CertificatesV1().CertificateSigningRequests().Create(ctx, csr, metav1.CreateOptions{})
 			Expect(createErr).NotTo(HaveOccurred())
 			csrNames = append(csrNames, csrName)
@@ -132,9 +135,16 @@ var _ = Describe("When a BootstrapKubeconfig issues a credential [Credential]", 
 		otherTenant := own
 		otherTenant.TenantNamespace = "other-" + namespace.Name
 
-		ownCSR := createCSR(own)
-		otherHostCSR := createCSR(otherHost)
-		otherTenantCSR := createCSR(otherTenant)
+		lifetime := ptr.To(int32(certificate.DefaultLifetimeSeconds))
+		ownCSR := createCSR(own, lifetime)
+		otherHostCSR := createCSR(otherHost, lifetime)
+		otherTenantCSR := createCSR(otherTenant, lifetime)
+
+		// The approver denies a request without a lifetime before it looks at
+		// the issuer, so this request does not claim the token.
+		noLifetime := own
+		noLifetime.Suffix = util.RandomString(identity.SuffixLength)
+		noLifetimeCSR := createCSR(noLifetime, nil)
 
 		conditionTypeOf := func(csrName string) func() []certv1.RequestConditionType {
 			return func() []certv1.RequestConditionType {
@@ -154,8 +164,9 @@ var _ = Describe("When a BootstrapKubeconfig issues a credential [Credential]", 
 		Eventually(conditionTypeOf(ownCSR), intervals...).Should(ContainElement(certv1.CertificateApproved))
 		Eventually(conditionTypeOf(otherHostCSR), intervals...).Should(ContainElement(certv1.CertificateDenied))
 		Eventually(conditionTypeOf(otherTenantCSR), intervals...).Should(ContainElement(certv1.CertificateDenied))
+		Eventually(conditionTypeOf(noLifetimeCSR), intervals...).Should(ContainElement(certv1.CertificateDenied))
 
-		for _, csrName := range []string{otherHostCSR, otherTenantCSR} {
+		for _, csrName := range []string{otherHostCSR, otherTenantCSR, noLifetimeCSR} {
 			csr := &certv1.CertificateSigningRequest{}
 			err := bootstrapClusterProxy.GetClient().Get(ctx, client.ObjectKey{Name: csrName}, csr)
 			Expect(err).NotTo(HaveOccurred())
