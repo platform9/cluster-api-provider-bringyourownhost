@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -107,6 +108,7 @@ func TestByohostController_UninstallSecretNamespace(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			scheme := runtime.NewScheme()
 			require.NoError(t, corev1.AddToScheme(scheme))
+			require.NoError(t, rbacv1.AddToScheme(scheme))
 			require.NoError(t, infrastructurev1beta1.AddToScheme(scheme))
 
 			byoHost := &infrastructurev1beta1.ByoHost{
@@ -137,6 +139,7 @@ func TestByohostController_UninstallSecretNamespace(t *testing.T) {
 				Build()
 			reconciler := &controllers.ByoHostReconciler{
 				Client:                 fakeClient,
+				APIReader:              fakeClient,
 				Scheme:                 scheme,
 				HeartbeatTimeoutPeriod: time.Minute,
 				Recorder:               record.NewFakeRecorder(32),
