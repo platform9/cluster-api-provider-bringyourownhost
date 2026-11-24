@@ -14,9 +14,11 @@ import (
 
 	authv1 "k8s.io/api/authorization/v1"
 	certv1 "k8s.io/api/certificates/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -461,5 +463,118 @@ func checkHostInformer(t *testing.T, h *rbacharness.Harness, host1 rbacharness.S
 
 			assert.Equal(t, tc.wantSync, c.WaitForCacheSync(ctx))
 		})
+	}
+}
+
+// setHostSecretNames sets the Secret rule of the host-scoped Role of h1-abc12 to
+// names, through the builder the manager uses, and creates the Role first when
+// no other test has. It returns once the authorizer reflects the change: the
+// host may get sentinel exactly when wantSentinel says so.
+func setHostSecretNames(t *testing.T, h *rbacharness.Harness, host1 rbacharness.Subject, names []string, sentinel string, wantSentinel bool) {
+	t.Helper()
+
+	admin, err := kubernetes.NewForConfig(h.AdminConfig())
+	require.NoError(t, err)
+
+	roles := admin.RbacV1().Roles(rbacharness.TenantA)
+	role, err := roles.Get(t.Context(), "byoh-host-"+ownHost, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		hostIdentity := identity.HostIdentity{TenantNamespace: rbacharness.TenantA, NormalizedHostName: "h1", Suffix: "abc12"}
+		newRole, binding := controllers.HostScopedRBAC(hostIdentity)
+		require.NoError(t, h.CreateRBAC(t.Context(), newRole, binding))
+		role, err = roles.Get(t.Context(), newRole.Name, metav1.GetOptions{})
+	}
+	require.NoError(t, err)
+
+	role.Rules = controllers.HostSecretRules(role.Rules, names)
+	_, err = roles.Update(t.Context(), role, metav1.UpdateOptions{})
+	require.NoError(t, err)
+
+	attrs := &authv1.ResourceAttributes{Verb: "get", Resource: "secrets", Namespace: rbacharness.TenantA, Name: sentinel}
+	require.Eventually(t, func() bool {
+		got, reviewErr := h.Allowed(t.Context(), host1, attrs)
+		return reviewErr == nil && got == wantSentinel
+	}, 10*time.Second, 100*time.Millisecond, "authorizer did not reflect the Secret rule")
+}
+
+// TestRBAC_HostSecrets checks the Secrets a host may read once the manager sets
+// the Secret rule of its Role to the Secrets of its binding.
+func TestRBAC_HostSecrets(t *testing.T) {
+	host1 := tenantGroupSubject("byoh:host:tenant-a:h1-abc12")
+	secret := func(verb, namespace, name string) authv1.ResourceAttributes {
+		return authv1.ResourceAttributes{Verb: verb, Resource: "secrets", Namespace: namespace, Name: name}
+	}
+	ownByoHost := authv1.ResourceAttributes{
+		Verb:      "get",
+		Group:     byohGroup,
+		Resource:  "byohosts",
+		Namespace: rbacharness.TenantA,
+		Name:      ownHost,
+	}
+
+	type row struct {
+		name  string
+		attrs authv1.ResourceAttributes
+		want  bool
+	}
+	bound := []row{
+		{name: "gets the bootstrap Secret", attrs: secret("get", rbacharness.TenantA, "m1-bootstrap"), want: true},
+		{name: "gets the installation Secret", attrs: secret("get", rbacharness.TenantA, "byoh-install-m1"), want: true},
+		{name: "gets the uninstallation Secret", attrs: secret("get", rbacharness.TenantA, "byoh-uninstall-m1"), want: true},
+		{name: "still gets its ByoHost", attrs: ownByoHost, want: true},
+		{name: "does not get byoh-token", attrs: secret("get", rbacharness.TenantA, "byoh-token"), want: false},
+		{name: "does not get a credential Secret", attrs: secret("get", rbacharness.TenantA, "h1-abc12-cred"), want: false},
+		{name: "does not get byoh-bootstrap-kc", attrs: secret("get", rbacharness.TenantA, "byoh-bootstrap-kc"), want: false},
+		{name: "does not get the Secrets of host 2", attrs: secret("get", rbacharness.TenantA, "m2-bootstrap"), want: false},
+		{name: "does not get host 2's installation Secret", attrs: secret("get", rbacharness.TenantA, "byoh-install-m2"), want: false},
+		{name: "does not get host 2's uninstallation Secret", attrs: secret("get", rbacharness.TenantA, "byoh-uninstall-m2"), want: false},
+		{name: "does not get its Secret name in tenant-b", attrs: secret("get", rbacharness.TenantB, "m1-bootstrap"), want: false},
+		{name: "does not list Secrets in tenant-a", attrs: secret("list", rbacharness.TenantA, ""), want: false},
+		{name: "does not watch Secrets in tenant-a", attrs: secret("watch", rbacharness.TenantA, ""), want: false},
+		{name: "does not list Secrets in tenant-b", attrs: secret("list", rbacharness.TenantB, ""), want: false},
+		{name: "does not list Secrets in kube-system", attrs: secret("list", "kube-system", ""), want: false},
+		{name: "does not list Secrets in kaapi", attrs: secret("list", "kaapi", ""), want: false},
+		{name: "does not update its bootstrap Secret", attrs: secret("update", rbacharness.TenantA, "m1-bootstrap"), want: false},
+	}
+	released := []row{
+		{name: "released host does not get the bootstrap Secret", attrs: secret("get", rbacharness.TenantA, "m1-bootstrap"), want: false},
+		{name: "released host does not get the installation Secret", attrs: secret("get", rbacharness.TenantA, "byoh-install-m1"), want: false},
+		{name: "released host does not get the uninstallation Secret", attrs: secret("get", rbacharness.TenantA, "byoh-uninstall-m1"), want: false},
+		{name: "released host still gets its ByoHost", attrs: ownByoHost, want: true},
+	}
+	rebound := []row{
+		{name: "second machine: gets the new bootstrap Secret", attrs: secret("get", rbacharness.TenantA, "m3-bootstrap"), want: true},
+		{name: "second machine: gets the new installation Secret", attrs: secret("get", rbacharness.TenantA, "byoh-install-m3"), want: true},
+		{name: "second machine: gets the new uninstallation Secret", attrs: secret("get", rbacharness.TenantA, "byoh-uninstall-m3"), want: true},
+		{name: "second machine: does not get the old bootstrap Secret", attrs: secret("get", rbacharness.TenantA, "m1-bootstrap"), want: false},
+		{name: "second machine: does not get the old installation Secret", attrs: secret("get", rbacharness.TenantA, "byoh-install-m1"), want: false},
+		{name: "second machine: does not get the old uninstallation Secret", attrs: secret("get", rbacharness.TenantA, "byoh-uninstall-m1"), want: false},
+	}
+
+	phases := []struct {
+		name     string
+		names    []string
+		sentinel string
+		want     bool
+		rows     []row
+	}{
+		{name: "bound", names: []string{"m1-bootstrap", "byoh-install-m1", "byoh-uninstall-m1"}, sentinel: "m1-bootstrap", want: true, rows: bound},
+		{name: "released", names: nil, sentinel: "m1-bootstrap", want: false, rows: released},
+		{name: "rebound", names: []string{"m3-bootstrap", "byoh-install-m3", "byoh-uninstall-m3"}, sentinel: "m3-bootstrap", want: true, rows: rebound},
+	}
+
+	for _, source := range rbacharness.Sources() {
+		h := harnesses[source]
+		for _, phase := range phases {
+			setHostSecretNames(t, h, host1, phase.names, phase.sentinel, phase.want)
+
+			for _, tc := range phase.rows {
+				t.Run(fmt.Sprintf("%s/%s/%s", source, phase.name, tc.name), func(t *testing.T) {
+					got, err := h.Allowed(t.Context(), host1, &tc.attrs)
+					require.NoError(t, err)
+					assert.Equal(t, tc.want, got)
+				})
+			}
+		}
 	}
 }

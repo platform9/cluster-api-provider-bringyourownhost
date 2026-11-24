@@ -166,6 +166,7 @@ func setupControllers(ctx context.Context, mgr ctrl.Manager, opts controllerOpti
 		Scheme:       mgr.GetScheme(),
 		ClusterCache: clusterCache,
 		Recorder:     mgr.GetEventRecorderFor("byomachine-controller"),
+		APIReader:    mgr.GetAPIReader(),
 	}).SetupWithManager(ctx, mgr); err != nil {
 		return fmt.Errorf("create ByoMachine controller: %w", err)
 	}
@@ -175,6 +176,7 @@ func setupControllers(ctx context.Context, mgr ctrl.Manager, opts controllerOpti
 		Scheme:                 mgr.GetScheme(),
 		HeartbeatTimeoutPeriod: opts.heartbeatTimeout,
 		Recorder:               mgr.GetEventRecorderFor("byohost-controller"),
+		APIReader:              mgr.GetAPIReader(),
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("create ByoHost controller: %w", err)
 	}
