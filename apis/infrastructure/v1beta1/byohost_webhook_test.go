@@ -127,10 +127,12 @@ func TestByoHostValidator_Handle_statusSubresource(t *testing.T) {
 	}
 }
 
-// TestByoHostWebhook_statusPatchWithHostCertificate sends status patches
-// through a real API server. The webhook registration decides whether the
-// validator sees them.
-func TestByoHostWebhook_statusPatchWithHostCertificate(t *testing.T) {
+// startByoHostWebhookEnv starts an API server with the ByoHost webhooks
+// registered and returns it with the scheme of its clients. The Namespace
+// statusTenant exists.
+func startByoHostWebhookEnv(t *testing.T) (*envtest.Environment, *runtime.Scheme) {
+	t.Helper()
+
 	testEnv := &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "..", "config", "crd", "bases")},
 		ErrorIfCRDPathMissing: true,
@@ -201,24 +203,35 @@ func TestByoHostWebhook_statusPatchWithHostCertificate(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// The users are in system:masters, so RBAC allows every request and only
-	// admission can deny one.
-	newHostClient := func(hostIdentity identity.HostIdentity) client.Client {
-		t.Helper()
+	return testEnv, testScheme
+}
 
-		user, addErr := testEnv.AddUser(envtest.User{
-			Name:   hostIdentity.String(),
-			Groups: []string{"system:masters"},
-		}, nil)
-		require.NoError(t, addErr)
+// newWebhookUserClient returns a client that authenticates as userName. The
+// user is in system:masters, so RBAC allows every request and only admission
+// can deny one.
+func newWebhookUserClient(t *testing.T, testEnv *envtest.Environment, testScheme *runtime.Scheme, userName string) client.Client {
+	t.Helper()
 
-		hostClient, newErr := client.New(user.Config(), client.Options{Scheme: testScheme})
-		require.NoError(t, newErr)
+	user, err := testEnv.AddUser(envtest.User{
+		Name:   userName,
+		Groups: []string{"system:masters"},
+	}, nil)
+	require.NoError(t, err)
 
-		return hostClient
-	}
-	hostOneClient := newHostClient(statusHostOne)
-	hostTwoClient := newHostClient(statusHostTwo)
+	userClient, err := client.New(user.Config(), client.Options{Scheme: testScheme})
+	require.NoError(t, err)
+
+	return userClient
+}
+
+// TestByoHostWebhook_statusPatchWithHostCertificate sends status patches
+// through a real API server. The webhook registration decides whether the
+// validator sees them.
+func TestByoHostWebhook_statusPatchWithHostCertificate(t *testing.T) {
+	testEnv, testScheme := startByoHostWebhookEnv(t)
+
+	hostOneClient := newWebhookUserClient(t, testEnv, testScheme, statusHostOne.String())
+	hostTwoClient := newWebhookUserClient(t, testEnv, testScheme, statusHostTwo.String())
 
 	// Each host creates its own ByoHost, so the stamper records its identity.
 	for hostClient, hostIdentity := range map[client.Client]identity.HostIdentity{
@@ -276,4 +289,313 @@ func TestByoHostWebhook_statusPatchWithHostCertificate(t *testing.T) {
 			assert.True(t, apierrors.IsForbidden(err), "want a forbidden error, got %v", err)
 		})
 	}
+}
+
+// secretRefs holds the three Secret references of a ByoHost spec.
+type secretRefs struct {
+	bootstrap      *corev1.ObjectReference
+	installation   *corev1.ObjectReference
+	uninstallation *corev1.ObjectReference
+}
+
+func secretRef(namespace, name string) *corev1.ObjectReference {
+	return &corev1.ObjectReference{
+		Namespace: namespace,
+		Name:      name,
+	}
+}
+
+func TestByoHostValidator_Handle_secretReferences(t *testing.T) {
+	hostName := statusHostOne.ByoHostName()
+	hostUser := statusHostOne.String()
+	managerUser := kaapiManagerServiceAccount
+	tokenUser := "system:serviceaccount:" + statusTenant + ":byoh"
+
+	existing := secretRefs{
+		bootstrap:      secretRef("", "m1-bootstrap"),
+		installation:   secretRef("", "byoh-install-m1"),
+		uninstallation: secretRef(statusTenant, "byoh-uninstall-m1"),
+	}
+	withBootstrap := func(refs secretRefs, ref *corev1.ObjectReference) secretRefs {
+		refs.bootstrap = ref
+		return refs
+	}
+	withInstallation := func(refs secretRefs, ref *corev1.ObjectReference) secretRefs {
+		refs.installation = ref
+		return refs
+	}
+	withUninstallation := func(refs secretRefs, ref *corev1.ObjectReference) secretRefs {
+		refs.uninstallation = ref
+		return refs
+	}
+
+	testCases := []struct {
+		name      string
+		operation admissionv1.Operation
+		userName  string
+		oldRefs   secretRefs
+		newRefs   secretRefs
+		newLabels map[string]string
+		wantAllow bool
+		wantMsg   string
+	}{
+		{
+			name:      "host changes uninstallationSecret to another Secret",
+			operation: admissionv1.Update,
+			userName:  hostUser,
+			oldRefs:   existing,
+			newRefs:   withUninstallation(existing, secretRef(statusTenant, "byoh-token")),
+			wantAllow: false,
+			wantMsg:   hostUser + " cannot change spec.uninstallationSecret of resource " + hostName,
+		},
+		{
+			name:      "host changes bootstrapSecret to another Secret",
+			operation: admissionv1.Update,
+			userName:  hostUser,
+			oldRefs:   existing,
+			newRefs:   withBootstrap(existing, secretRef("", "byoh-token")),
+			wantAllow: false,
+			wantMsg:   hostUser + " cannot change spec.bootstrapSecret of resource " + hostName,
+		},
+		{
+			name:      "host changes installationSecret to another Secret",
+			operation: admissionv1.Update,
+			userName:  hostUser,
+			oldRefs:   existing,
+			newRefs:   withInstallation(existing, secretRef("", "byoh-token")),
+			wantAllow: false,
+			wantMsg:   hostUser + " cannot change spec.installationSecret of resource " + hostName,
+		},
+		{
+			name:      "host sets an unset reference",
+			operation: admissionv1.Update,
+			userName:  hostUser,
+			oldRefs:   withUninstallation(existing, nil),
+			newRefs:   existing,
+			wantAllow: false,
+			wantMsg:   hostUser + " cannot change spec.uninstallationSecret of resource " + hostName,
+		},
+		{
+			name:      "host clears installationSecret",
+			operation: admissionv1.Update,
+			userName:  hostUser,
+			oldRefs:   existing,
+			newRefs:   withInstallation(existing, nil),
+			wantAllow: true,
+			wantMsg:   "",
+		},
+		{
+			name:      "host clears bootstrapSecret",
+			operation: admissionv1.Update,
+			userName:  hostUser,
+			oldRefs:   existing,
+			newRefs:   withBootstrap(existing, nil),
+			wantAllow: true,
+			wantMsg:   "",
+		},
+		{
+			name:      "host changes labels and keeps the references",
+			operation: admissionv1.Update,
+			userName:  hostUser,
+			oldRefs:   existing,
+			newRefs:   existing,
+			newLabels: map[string]string{"zone": "a"},
+			wantAllow: true,
+			wantMsg:   "",
+		},
+		{
+			name:      "host updates a ByoHost that has no references",
+			operation: admissionv1.Update,
+			userName:  hostUser,
+			oldRefs:   secretRefs{},
+			newRefs:   secretRefs{},
+			wantAllow: true,
+			wantMsg:   "",
+		},
+		{
+			name:      "manager changes the references",
+			operation: admissionv1.Update,
+			userName:  managerUser,
+			oldRefs:   existing,
+			newRefs:   withUninstallation(existing, secretRef(statusTenant, "byoh-uninstall-m2")),
+			wantAllow: true,
+			wantMsg:   "",
+		},
+		{
+			name:      "token ServiceAccount changes the references",
+			operation: admissionv1.Update,
+			userName:  tokenUser,
+			oldRefs:   existing,
+			newRefs:   withUninstallation(existing, secretRef(statusTenant, "byoh-uninstall-m2")),
+			wantAllow: true,
+			wantMsg:   "",
+		},
+		{
+			name:      "host creates its ByoHost with uninstallationSecret",
+			operation: admissionv1.Create,
+			userName:  hostUser,
+			newRefs:   secretRefs{uninstallation: secretRef(statusTenant, "byoh-token")},
+			wantAllow: false,
+			wantMsg:   hostUser + " cannot set spec.uninstallationSecret on create of resource " + hostName,
+		},
+		{
+			name:      "host creates its ByoHost with bootstrapSecret",
+			operation: admissionv1.Create,
+			userName:  hostUser,
+			newRefs:   secretRefs{bootstrap: secretRef("", "byoh-token")},
+			wantAllow: false,
+			wantMsg:   hostUser + " cannot set spec.bootstrapSecret on create of resource " + hostName,
+		},
+		{
+			name:      "host creates its ByoHost with installationSecret",
+			operation: admissionv1.Create,
+			userName:  hostUser,
+			newRefs:   secretRefs{installation: secretRef("", "byoh-token")},
+			wantAllow: false,
+			wantMsg:   hostUser + " cannot set spec.installationSecret on create of resource " + hostName,
+		},
+		{
+			name:      "host creates its ByoHost with an empty spec",
+			operation: admissionv1.Create,
+			userName:  hostUser,
+			newRefs:   secretRefs{},
+			wantAllow: true,
+			wantMsg:   "",
+		},
+		{
+			name:      "manager creates a ByoHost with references",
+			operation: admissionv1.Create,
+			userName:  managerUser,
+			newRefs:   existing,
+			wantAllow: true,
+			wantMsg:   "",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			v := newFakeByoHostValidator(t, nil)
+
+			newHost := &ByoHost{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       testByoHostKind,
+					APIVersion: testAPIVersion,
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      hostName,
+					Namespace: statusTenant,
+					Labels:    tc.newLabels,
+				},
+				Spec: ByoHostSpec{
+					Identity:             hostUser,
+					BootstrapSecret:      tc.newRefs.bootstrap,
+					InstallationSecret:   tc.newRefs.installation,
+					UninstallationSecret: tc.newRefs.uninstallation,
+				},
+			}
+			oldHost := newHost.DeepCopy()
+			oldHost.Labels = nil
+			oldHost.Spec.BootstrapSecret = tc.oldRefs.bootstrap
+			oldHost.Spec.InstallationSecret = tc.oldRefs.installation
+			oldHost.Spec.UninstallationSecret = tc.oldRefs.uninstallation
+
+			newRaw, err := json.Marshal(newHost)
+			require.NoError(t, err)
+			oldRaw, err := json.Marshal(oldHost)
+			require.NoError(t, err)
+
+			req := admission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Operation: tc.operation,
+					Namespace: statusTenant,
+					UserInfo:  authenticationv1.UserInfo{Username: tc.userName},
+					Object:    runtime.RawExtension{Raw: newRaw},
+				},
+			}
+			if tc.operation == admissionv1.Update {
+				req.OldObject = runtime.RawExtension{Raw: oldRaw}
+			}
+
+			resp := v.Handle(t.Context(), req)
+
+			assert.Equal(t, tc.wantAllow, resp.Allowed)
+			assert.Equal(t, tc.wantMsg, resp.Result.Message)
+		})
+	}
+}
+
+// TestByoHostWebhook_secretReferencesWithHostCertificate sends writes of the
+// Secret references through a real API server.
+func TestByoHostWebhook_secretReferencesWithHostCertificate(t *testing.T) {
+	testEnv, testScheme := startByoHostWebhookEnv(t)
+
+	hostOneClient := newWebhookUserClient(t, testEnv, testScheme, statusHostOne.String())
+	hostTwoClient := newWebhookUserClient(t, testEnv, testScheme, statusHostTwo.String())
+	managerClient := newWebhookUserClient(t, testEnv, testScheme, kaapiManagerServiceAccount)
+
+	// Creating with a reference set is denied, so the host creates an empty
+	// ByoHost and the manager sets the references afterwards.
+	hostName := statusHostOne.ByoHostName()
+	err := hostOneClient.Create(t.Context(), &ByoHost{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      hostName,
+			Namespace: statusTenant,
+		},
+	})
+	require.NoError(t, err)
+
+	hostKey := client.ObjectKey{
+		Namespace: statusTenant,
+		Name:      hostName,
+	}
+	managerSets := &ByoHost{}
+	err = managerClient.Get(t.Context(), hostKey, managerSets)
+	require.NoError(t, err)
+	managerSets.Spec.InstallationSecret = secretRef("", "byoh-install-m1")
+	managerSets.Spec.UninstallationSecret = secretRef(statusTenant, "byoh-uninstall-m1")
+	err = managerClient.Update(t.Context(), managerSets)
+	require.NoError(t, err)
+
+	hostPatch := func(c client.Client, patch string) error {
+		host := &ByoHost{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      hostName,
+				Namespace: statusTenant,
+			},
+		}
+		return c.Patch(t.Context(), host, client.RawPatch(types.MergePatchType, []byte(patch)))
+	}
+
+	t.Run("host changes uninstallationSecret to byoh-token", func(t *testing.T) {
+		err := hostPatch(hostOneClient, `{"spec":{"uninstallationSecret":{"namespace":"tenant-a","name":"byoh-token"}}}`)
+
+		require.Error(t, err)
+		assert.True(t, apierrors.IsForbidden(err), "want a forbidden error, got %v", err)
+	})
+
+	t.Run("host creates a ByoHost with uninstallationSecret set", func(t *testing.T) {
+		err := hostTwoClient.Create(t.Context(), &ByoHost{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      statusHostTwo.ByoHostName(),
+				Namespace: statusTenant,
+			},
+			Spec: ByoHostSpec{
+				UninstallationSecret: secretRef(statusTenant, "byoh-token"),
+			},
+		})
+
+		require.Error(t, err)
+		assert.True(t, apierrors.IsForbidden(err), "want a forbidden error, got %v", err)
+	})
+
+	t.Run("host clears installationSecret", func(t *testing.T) {
+		err := hostPatch(hostOneClient, `{"spec":{"installationSecret":null}}`)
+		require.NoError(t, err)
+
+		got := &ByoHost{}
+		err = managerClient.Get(t.Context(), hostKey, got)
+		require.NoError(t, err)
+		assert.Nil(t, got.Spec.InstallationSecret)
+		assert.Equal(t, secretRef(statusTenant, "byoh-uninstall-m1"), got.Spec.UninstallationSecret)
+	})
 }
