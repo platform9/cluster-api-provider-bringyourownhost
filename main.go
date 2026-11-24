@@ -205,6 +205,7 @@ func setupControllers(ctx context.Context, mgr ctrl.Manager, opts controllerOpti
 		if err := (&byohcontrollers.ByoAdmissionReconciler{
 			ClientSet: opts.csrClientSet,
 			Client:    mgr.GetClient(),
+			APIReader: mgr.GetAPIReader(),
 
 			MaxCertificateLifetimeSeconds: opts.maxCertificateLifetimeSeconds,
 		}).SetupWithManager(mgr); err != nil {
