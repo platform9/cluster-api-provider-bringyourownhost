@@ -104,6 +104,7 @@ func setupReconcilers() {
 		Client:       cl,
 		ClusterCache: clustercache.NewFakeClusterCache(clientFake, client.ObjectKey{Name: capiCluster.Name, Namespace: capiCluster.Namespace}),
 		Recorder:     recorder,
+		APIReader:    k8sManager.GetAPIReader(),
 	}
 	if err := reconciler.SetupWithManager(ctx, k8sManager); err != nil {
 		panic(err)
@@ -143,8 +144,9 @@ func setupReconcilers() {
 		panic(err)
 	}
 	byoHostReconciler = &controllers.ByoHostReconciler{
-		Client: directClient,
-		Scheme: scheme.Scheme,
+		Client:    directClient,
+		Scheme:    scheme.Scheme,
+		APIReader: directClient,
 		// Long enough that this controller's own safety-net RequeueAfter
 		// never fires during a test run — heartbeat-specific tests in
 		// byohost_controller_test.go set their own short value directly on

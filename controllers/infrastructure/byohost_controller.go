@@ -35,6 +35,9 @@ type ByoHostReconciler struct {
 	// via the --byohostagent-heartbeat-timeout flag in main.go.
 	HeartbeatTimeoutPeriod time.Duration
 	Recorder               record.EventRecorder
+
+	// APIReader reads host-scoped Roles straight from the API server.
+	APIReader client.Reader
 }
 
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=byohosts,verbs=get;list;watch;create;update;patch;delete
@@ -88,8 +91,24 @@ func (r *ByoHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ 
 			logger.Info("deleted uninstallation secret", "secret", secret.Name)
 		}
 
+		// The host is released, so it may no longer read the Secrets of its binding.
+		err = setHostSecretAccess(ctx, r.APIReader, r.Client, byoHost, nil)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
 		byoHost.Spec.UninstallationSecret = nil
 		logger.Info("cleared uninstallationSecret reference on ByoHost")
+	}
+
+	// A host without an installer config has no uninstallation Secret, so the
+	// branch above skips it. A released host has no machine reference and no
+	// bootstrap Secret reference.
+	if byoHost.Status.MachineRef == nil && byoHost.Spec.BootstrapSecret == nil && !hasCleanupAnnotation {
+		setErr := setHostSecretAccess(ctx, r.APIReader, r.Client, byoHost, nil)
+		if setErr != nil {
+			return ctrl.Result{}, setErr
+		}
 	}
 
 	r.reconcileHeartbeat(ctx, byoHost)
