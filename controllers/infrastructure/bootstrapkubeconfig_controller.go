@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	b64 "encoding/base64"
+	"errors"
 	"fmt"
 	"maps"
 	"strings"
@@ -40,14 +41,6 @@ const (
 	// credentialSecretKubeconfigKey is the key in the credential Secret that
 	// holds the rendered kubeconfig.
 	credentialSecretKubeconfigKey = "kubeconfig"
-
-	// kaapiConfigName is the name of the ConfigMap, in the customer namespace,
-	// that names the customer's FQDN.
-	kaapiConfigName = "kaapi-config"
-
-	// kaapiConfigFQDNKey is the key in the kaapi-config ConfigMap that holds
-	// the customer FQDN.
-	kaapiConfigFQDNKey = "customerFqdn"
 
 	// customerFQDNPlaceholder marks where the customer FQDN goes in the
 	// apiserver host template.
@@ -90,6 +83,10 @@ type BootstrapKubeconfigReconciler struct {
 	// APIServerURL, when set, is the apiserver URL for every object that does
 	// not name one in its spec.
 	APIServerURL string
+
+	// CustomerFQDNLabel is the key of the Namespace label that holds the
+	// customer FQDN. When empty, no URL is derived.
+	CustomerFQDNLabel string
 
 	// APIServerHostTemplate is the apiserver host for derived URLs, with
 	// {customerFqdn} standing for the customer FQDN.
@@ -304,7 +301,7 @@ func tokenFromSecret(tokenID string, secret *corev1.Secret) (string, time.Time, 
 
 // resolveEndpoint returns the apiserver URL, the TLS server name and the base64
 // encoded CA for the rendered kubeconfig. The spec wins, then the controller
-// override, then a URL derived from the namespace. The CA falls back to the
+// override, then a URL derived from the namespace label. The CA falls back to the
 // cluster root CA. Only a derived URL gets a TLS server name, the others are
 // dialed as written.
 func (r *BootstrapKubeconfigReconciler) resolveEndpoint(ctx context.Context, bootstrapKubeconfig *infrastructurev1beta1.BootstrapKubeconfig) (apiServer, tlsServerName, caData string, err error) {
@@ -312,12 +309,15 @@ func (r *BootstrapKubeconfigReconciler) resolveEndpoint(ctx context.Context, boo
 	if apiServer == "" {
 		apiServer = r.APIServerURL
 	}
-	if apiServer == "" {
+	if apiServer == "" && r.CustomerFQDNLabel != "" {
 		apiServer, err = r.deriveAPIServerURL(ctx, bootstrapKubeconfig.Namespace)
 		if err != nil {
 			return "", "", "", err
 		}
 		tlsServerName = derivedAPIServerTLSServerName
+	}
+	if apiServer == "" {
+		return "", "", "", errors.New("no apiserver URL: set spec.apiServer, --bootstrap-apiserver-url or --customer-fqdn-label")
 	}
 
 	caData = bootstrapKubeconfig.Spec.CertificateAuthorityData
@@ -338,40 +338,30 @@ func (r *BootstrapKubeconfigReconciler) resolveEndpoint(ctx context.Context, boo
 	return apiServer, tlsServerName, caData, nil
 }
 
-// deriveAPIServerURL builds the apiserver URL from the customer FQDN. The
-// customer namespace is the longest proper prefix of the namespace, cut at
-// dashes, that holds a kaapi-config ConfigMap. The namespace itself is never a
-// candidate, so a tenant cannot choose the URL with a ConfigMap of its own.
+// deriveAPIServerURL builds the apiserver URL from the customer FQDN held in
+// the CustomerFQDNLabel label of the namespace. The FQDN comes from the
+// Namespace object, never from objects created inside the namespace.
 func (r *BootstrapKubeconfigReconciler) deriveAPIServerURL(ctx context.Context, namespace string) (string, error) {
-	segments := strings.Split(namespace, "-")
-	for n := len(segments) - 1; n >= 1; n-- {
-		customerNamespace := strings.Join(segments[:n], "-")
-		config := &corev1.ConfigMap{}
-		err := r.APIReader.Get(ctx, types.NamespacedName{Namespace: customerNamespace, Name: kaapiConfigName}, config)
-		if apierrors.IsNotFound(err) {
-			continue
-		}
-		if err != nil {
-			return "", fmt.Errorf("get configmap %q in namespace %q: %w", kaapiConfigName, customerNamespace, err)
-		}
-
-		fqdn := config.Data[kaapiConfigFQDNKey]
-		if fqdn == "" {
-			return "", fmt.Errorf("configmap %q in namespace %q has no %q", kaapiConfigName, customerNamespace, kaapiConfigFQDNKey)
-		}
-
-		// The FQDN is read from a ConfigMap, so it is checked before it can
-		// shape the URL the agent connects to.
-		fqdnErrs := validation.IsDNS1123Subdomain(fqdn)
-		if len(fqdnErrs) > 0 {
-			return "", fmt.Errorf("configmap %q in namespace %q has an invalid %q %q: %s", kaapiConfigName, customerNamespace, kaapiConfigFQDNKey, fqdn, strings.Join(fqdnErrs, "; "))
-		}
-
-		host := strings.ReplaceAll(r.APIServerHostTemplate, customerFQDNPlaceholder, fqdn)
-		return fmt.Sprintf("%s://%s:%d", infrastructurev1beta1.APIServerURLScheme, host, apiServerPort), nil
+	ns := &corev1.Namespace{}
+	err := r.APIReader.Get(ctx, types.NamespacedName{Name: namespace}, ns)
+	if err != nil {
+		return "", fmt.Errorf("get namespace %q: %w", namespace, err)
 	}
 
-	return "", fmt.Errorf("no configmap %q found for namespace %q or any dash-separated prefix of it", kaapiConfigName, namespace)
+	fqdn := ns.Labels[r.CustomerFQDNLabel]
+	if fqdn == "" {
+		return "", fmt.Errorf("namespace %q has no value for the label %q", namespace, r.CustomerFQDNLabel)
+	}
+
+	// The FQDN is read from a label, so it is checked before it can shape the
+	// URL the agent connects to.
+	fqdnErrs := validation.IsDNS1123Subdomain(fqdn)
+	if len(fqdnErrs) > 0 {
+		return "", fmt.Errorf("namespace %q has an invalid value %q for the label %q: %s", namespace, fqdn, r.CustomerFQDNLabel, strings.Join(fqdnErrs, "; "))
+	}
+
+	host := strings.ReplaceAll(r.APIServerHostTemplate, customerFQDNPlaceholder, fqdn)
+	return fmt.Sprintf("%s://%s:%d", infrastructurev1beta1.APIServerURLScheme, host, apiServerPort), nil
 }
 
 // renderBootstrapKubeconfig turns a bootstrap token into the kubeconfig bytes a

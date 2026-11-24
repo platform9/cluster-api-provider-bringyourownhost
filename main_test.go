@@ -140,8 +140,8 @@ func newTestManager(t *testing.T) ctrl.Manager {
 	return mgr
 }
 
-func testOptions() controllerOptions {
-	return controllerOptions{
+func testOptions() *controllerOptions {
+	return &controllerOptions{
 		heartbeatTimeout: DefaultHeartbeatTimeout,
 		csrClientSet:     fake.NewSimpleClientset(),
 	}

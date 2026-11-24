@@ -53,6 +53,7 @@ var (
 	probeAddr                    string
 	byohostAgentHeartbeatTimeout time.Duration
 	bootstrapAPIServerURL        string
+	customerFQDNLabel            string
 	bootstrapAPIServerHostTmpl   string
 )
 
@@ -75,6 +76,10 @@ type controllerOptions struct {
 	// bootstrapAPIServerURL, when set, is the apiserver URL written into every
 	// BootstrapKubeconfig that does not name one.
 	bootstrapAPIServerURL string
+
+	// customerFQDNLabel is the key of the Namespace label that holds the
+	// customer FQDN. When empty, no apiserver URL is derived.
+	customerFQDNLabel string
 
 	// bootstrapAPIServerHostTemplate is the host of the apiserver URL derived
 	// for a BootstrapKubeconfig, with {customerFqdn} standing for the customer
@@ -112,7 +117,9 @@ func setFlags() {
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.DurationVar(&byohostAgentHeartbeatTimeout, "byohostagent-heartbeat-timeout", DefaultHeartbeatTimeout, "The duration after which the agent is considered to be disconnected.")
 	flag.StringVar(&bootstrapAPIServerURL, "bootstrap-apiserver-url", "",
-		"The apiserver URL written into every BootstrapKubeconfig that does not name one. When empty, the URL is derived from the namespace.")
+		"The apiserver URL written into every BootstrapKubeconfig that does not name one. When empty, the URL is derived from the customer FQDN label of the namespace, if --customer-fqdn-label is set.")
+	flag.StringVar(&customerFQDNLabel, "customer-fqdn-label", "",
+		"The key of the Namespace label that holds the customer FQDN, used to derive the apiserver URL. When empty, no URL is derived.")
 	flag.StringVar(&bootstrapAPIServerHostTmpl, "bootstrap-apiserver-host-template", defaultBootstrapAPIServerHostTemplate,
 		"The host of the apiserver URL derived for a BootstrapKubeconfig, with {customerFqdn} standing for the customer FQDN. A host only: no scheme, port or path.")
 	flag.Parse()
@@ -122,7 +129,7 @@ func setFlags() {
 // the context that also stops mgr: the controllers built here capture it for
 // their watches and map functions, so one with a different lifetime leaves
 // those watches running past the manager, or dead before it.
-func setupControllers(ctx context.Context, mgr ctrl.Manager, opts controllerOptions) error {
+func setupControllers(ctx context.Context, mgr ctrl.Manager, opts *controllerOptions) error {
 	if err := validateBootstrapAPIServerHostTemplate(opts.bootstrapAPIServerHostTemplate); err != nil {
 		return err
 	}
@@ -208,6 +215,7 @@ func setupControllers(ctx context.Context, mgr ctrl.Manager, opts controllerOpti
 		Scheme:                mgr.GetScheme(),
 		Recorder:              mgr.GetEventRecorderFor("bootstrapkubeconfig-controller"),
 		APIServerURL:          opts.bootstrapAPIServerURL,
+		CustomerFQDNLabel:     opts.customerFQDNLabel,
 		APIServerHostTemplate: opts.bootstrapAPIServerHostTemplate,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("create BootstrapKubeconfig controller: %w", err)
@@ -246,9 +254,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	opts := controllerOptions{
+	opts := &controllerOptions{
 		heartbeatTimeout:               byohostAgentHeartbeatTimeout,
 		bootstrapAPIServerURL:          bootstrapAPIServerURL,
+		customerFQDNLabel:              customerFQDNLabel,
 		bootstrapAPIServerHostTemplate: bootstrapAPIServerHostTmpl,
 		// Set 'BYOH_SKIP_KERNEL_MODULE_CLEANUP=enable' to skip unloading overlay/br_netfilter kernel
 		// modules during uninstall. Real BYO hosts own their kernel and must unload these modules;

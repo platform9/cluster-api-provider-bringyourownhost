@@ -1732,6 +1732,7 @@ spec:
             - --enable-leader-election
             - --byohostagent-heartbeat-timeout={{ .Values.byohostAgentHeartbeatTimeout | default "120s" }}
             - --bootstrap-apiserver-url={{ .Values.bootstrapAPIServerURL | default "" }}
+            - --customer-fqdn-label={{ .Values.customerFQDNLabel | default "" }}
             - --bootstrap-apiserver-host-template={{ .Values.bootstrapAPIServerHostTemplate | default "byoh.k8s.{customerFqdn}" }}
           command:
             - /manager

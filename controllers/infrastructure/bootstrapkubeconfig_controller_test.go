@@ -35,6 +35,7 @@ const (
 	bkTestName         = "host-a1b2c"
 	bkTestHostTemplate = "byoh.k8s.{customerFqdn}"
 	bkTestFQDN         = "dg-d.platform9.horse"
+	bkTestFQDNLabel    = "example.test/customer-fqdn"
 	bkTestServer       = "https://byoh.k8s.dg-d.platform9.horse:443"
 	bkTestRootCA       = "-----BEGIN CERTIFICATE-----\nroot\n-----END CERTIFICATE-----\n"
 	bkTestSpecCA       = "spec-ca-pem"
@@ -90,6 +91,7 @@ func newBKHarness(t *testing.T, apiServerURL string, funcs *interceptor.Funcs, o
 			Scheme:                testScheme,
 			Recorder:              events,
 			APIServerURL:          apiServerURL,
+			CustomerFQDNLabel:     bkTestFQDNLabel,
 			APIServerHostTemplate: bkTestHostTemplate,
 		},
 		client: fakeClient,
@@ -164,8 +166,13 @@ func newBKConfigMap(namespace, name string, data map[string]string) *corev1.Conf
 	}
 }
 
-func newBKKaapiConfig(namespace, fqdn string) *corev1.ConfigMap {
-	return newBKConfigMap(namespace, "kaapi-config", map[string]string{"customerFqdn": fqdn})
+func newBKNamespace(name, fqdn string) *corev1.Namespace {
+	return &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   name,
+			Labels: map[string]string{bkTestFQDNLabel: fqdn},
+		},
+	}
 }
 
 func newBKRootCA() *corev1.ConfigMap {
@@ -197,31 +204,18 @@ func TestBootstrapKubeconfigReconciler_Endpoint(t *testing.T) {
 		{
 			name:           "derive the URL and the server name from the customer namespace",
 			namespace:      "dg-d-default-service",
-			objects:        []client.Object{newBKKaapiConfig("dg-d", bkTestFQDN), newBKRootCA()},
+			objects:        []client.Object{newBKNamespace(bkTestNamespace, bkTestFQDN), newBKRootCA()},
 			wantServer:     bkTestServer,
 			wantServerName: "kubernetes.default",
 			wantCA:         bkTestRootCA,
 		},
 		{
-			name:      "longest prefix wins",
+			name:      "labels of other namespaces are ignored",
 			namespace: "dg-d-default-service",
 			objects: []client.Object{
-				newBKKaapiConfig("dg", "other.example.com"),
-				newBKKaapiConfig("dg-d", bkTestFQDN),
-				newBKRootCA(),
-			},
-			wantServer:     bkTestServer,
-			wantServerName: "kubernetes.default",
-			wantCA:         bkTestRootCA,
-		},
-		{
-			name:      "sibling tenants and partial segments are ignored",
-			namespace: "dg-d-default-dev",
-			objects: []client.Object{
-				newBKKaapiConfig("dg-d", bkTestFQDN),
-				newBKKaapiConfig("dg-d-default-service", "service.example.com"),
-				newBKKaapiConfig("dg-d-default-admin", "admin.example.com"),
-				newBKKaapiConfig("dg-d-default-de", "partial.example.com"),
+				newBKNamespace("dg-d", "other.example.com"),
+				newBKNamespace("dg-d-default-admin", "admin.example.com"),
+				newBKNamespace(bkTestNamespace, bkTestFQDN),
 				newBKRootCA(),
 			},
 			wantServer:     bkTestServer,
@@ -231,7 +225,7 @@ func TestBootstrapKubeconfigReconciler_Endpoint(t *testing.T) {
 		{
 			name:           "ID-based namespace",
 			namespace:      "dg-d-1a2b3c4d",
-			objects:        []client.Object{newBKKaapiConfig("dg-d", bkTestFQDN), newBKRootCA()},
+			objects:        []client.Object{newBKNamespace("dg-d-1a2b3c4d", bkTestFQDN), newBKRootCA()},
 			wantServer:     bkTestServer,
 			wantServerName: "kubernetes.default",
 			wantCA:         bkTestRootCA,
@@ -261,7 +255,7 @@ func TestBootstrapKubeconfigReconciler_Endpoint(t *testing.T) {
 			spec: infrastructurev1beta1.BootstrapKubeconfigSpec{
 				CertificateAuthorityData: specCA,
 			},
-			objects:        []client.Object{newBKKaapiConfig("dg-d", bkTestFQDN), newBKRootCA()},
+			objects:        []client.Object{newBKNamespace(bkTestNamespace, bkTestFQDN), newBKRootCA()},
 			wantServer:     bkTestServer,
 			wantServerName: "kubernetes.default",
 			wantCA:         bkTestSpecCA,
@@ -303,59 +297,61 @@ func TestBootstrapKubeconfigReconciler_EndpointFailure(t *testing.T) {
 	testCases := []struct {
 		name        string
 		objects     []client.Object
+		noLabelFlag bool
 		wantMessage string
 	}{
 		{
-			name:        "no kaapi-config in any prefix",
+			name:        "label flag not set and no URL",
+			objects:     []client.Object{newBKNamespace(bkTestNamespace, bkTestFQDN), newBKRootCA()},
+			noLabelFlag: true,
+			wantMessage: "set spec.apiServer, --bootstrap-apiserver-url or --customer-fqdn-label",
+		},
+		{
+			name:        "namespace does not exist",
 			objects:     []client.Object{newBKRootCA()},
-			wantMessage: `no configmap "kaapi-config" found for namespace "dg-d-default-service"`,
+			wantMessage: `get namespace "dg-d-default-service"`,
 		},
 		{
-			name:        "kaapi-config only in the object's own namespace",
-			objects:     []client.Object{newBKKaapiConfig(bkTestNamespace, "tenant.example.com"), newBKRootCA()},
-			wantMessage: `no configmap "kaapi-config" found for namespace "dg-d-default-service"`,
-		},
-		{
-			name: "kaapi-config without customerFqdn",
+			name: "namespace without the label",
 			objects: []client.Object{
-				newBKConfigMap("dg-d", "kaapi-config", map[string]string{"other": "value"}),
+				&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: bkTestNamespace}},
 				newBKRootCA(),
 			},
-			wantMessage: `has no "customerFqdn"`,
+			wantMessage: `namespace "dg-d-default-service" has no value for the label "example.test/customer-fqdn"`,
 		},
 		{
-			name: "kaapi-config with an empty customerFqdn",
+			name: "namespace with an empty label",
 			objects: []client.Object{
-				newBKKaapiConfig("dg-d", ""),
+				newBKNamespace(bkTestNamespace, ""),
 				newBKRootCA(),
 			},
-			wantMessage: `has no "customerFqdn"`,
+			wantMessage: `namespace "dg-d-default-service" has no value for the label "example.test/customer-fqdn"`,
 		},
 		{
-			name: "customerFqdn with a path",
+			name: "label with a path",
 			objects: []client.Object{
-				newBKKaapiConfig("dg-d", "evil.com/x"),
+				newBKNamespace(bkTestNamespace, "evil.com/x"),
 				newBKRootCA(),
 			},
-			wantMessage: `configmap "kaapi-config" in namespace "dg-d" has an invalid "customerFqdn" "evil.com/x"`,
+			wantMessage: `namespace "dg-d-default-service" has an invalid value "evil.com/x" for the label "example.test/customer-fqdn"`,
 		},
 		{
-			name: "customerFqdn with user info",
+			name: "label with user info",
 			objects: []client.Object{
-				newBKKaapiConfig("dg-d", "user@evil.com"),
+				newBKNamespace(bkTestNamespace, "user@evil.com"),
 				newBKRootCA(),
 			},
-			wantMessage: `configmap "kaapi-config" in namespace "dg-d" has an invalid "customerFqdn" "user@evil.com"`,
+			wantMessage: `namespace "dg-d-default-service" has an invalid value "user@evil.com" for the label "example.test/customer-fqdn"`,
 		},
 		{
 			name:        "no cluster CA",
-			objects:     []client.Object{newBKKaapiConfig("dg-d", bkTestFQDN)},
+			objects:     []client.Object{newBKNamespace(bkTestNamespace, bkTestFQDN)},
 			wantMessage: "kube-root-ca.crt",
 		},
 		{
 			name: "cluster CA ConfigMap without ca.crt",
 			objects: []client.Object{
-				newBKKaapiConfig("dg-d", bkTestFQDN),
+				newBKNamespace(bkTestNamespace, bkTestFQDN),
 				newBKConfigMap(metav1.NamespaceSystem, "kube-root-ca.crt", map[string]string{"other": "value"}),
 			},
 			wantMessage: `has no "ca.crt"`,
@@ -366,7 +362,9 @@ func TestBootstrapKubeconfigReconciler_EndpointFailure(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, infrastructurev1beta1.BootstrapKubeconfigStatus{})
 			h := newBKHarness(t, "", nil, append(tc.objects, bk)...)
-
+			if tc.noLabelFlag {
+				h.reconciler.CustomerFQDNLabel = ""
+			}
 			result, err := h.reconcile(t)
 			require.NoError(t, err)
 			assert.Equal(t, ctrl.Result{RequeueAfter: 30 * time.Second}, result)
@@ -385,7 +383,7 @@ func TestBootstrapKubeconfigReconciler_EndpointFailure(t *testing.T) {
 
 func TestBootstrapKubeconfigReconciler_FreshObject(t *testing.T) {
 	bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, infrastructurev1beta1.BootstrapKubeconfigStatus{})
-	h := newBKHarness(t, "", nil, newBKKaapiConfig("dg-d", bkTestFQDN), newBKRootCA(), bk)
+	h := newBKHarness(t, "", nil, newBKNamespace(bkTestNamespace, bkTestFQDN), newBKRootCA(), bk)
 
 	result, err := h.reconcile(t)
 	require.NoError(t, err)
@@ -431,7 +429,7 @@ func TestBootstrapKubeconfigReconciler_FreshObject(t *testing.T) {
 
 func TestBootstrapKubeconfigReconciler_SecondReconcile(t *testing.T) {
 	bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, infrastructurev1beta1.BootstrapKubeconfigStatus{})
-	h := newBKHarness(t, "", nil, newBKKaapiConfig("dg-d", bkTestFQDN), newBKRootCA(), bk)
+	h := newBKHarness(t, "", nil, newBKNamespace(bkTestNamespace, bkTestFQDN), newBKRootCA(), bk)
 
 	_, err := h.reconcile(t)
 	require.NoError(t, err)
@@ -464,7 +462,7 @@ func TestBootstrapKubeconfigReconciler_DeprecatedDataDoesNotSkipReconcile(t *tes
 	existing := "already present"
 	status := infrastructurev1beta1.BootstrapKubeconfigStatus{BootstrapKubeconfigData: &existing} //nolint: staticcheck // SA1019: deprecated field, the guard on it is gone
 	bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, status)
-	h := newBKHarness(t, "", nil, newBKKaapiConfig("dg-d", bkTestFQDN), newBKRootCA(), bk)
+	h := newBKHarness(t, "", nil, newBKNamespace(bkTestNamespace, bkTestFQDN), newBKRootCA(), bk)
 
 	_, err := h.reconcile(t)
 	require.NoError(t, err)
@@ -484,7 +482,7 @@ func TestBootstrapKubeconfigReconciler_TokenIDRecordedFirst(t *testing.T) {
 		},
 	}
 	bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, infrastructurev1beta1.BootstrapKubeconfigStatus{})
-	h := newBKHarness(t, "", funcs, newBKKaapiConfig("dg-d", bkTestFQDN), newBKRootCA(), bk)
+	h := newBKHarness(t, "", funcs, newBKNamespace(bkTestNamespace, bkTestFQDN), newBKRootCA(), bk)
 
 	_, err := h.reconcile(t)
 	require.ErrorIs(t, err, errCreate)
@@ -499,7 +497,7 @@ func TestBootstrapKubeconfigReconciler_ResumeWithExistingToken(t *testing.T) {
 	expiresAt := time.Now().UTC().Add(10 * time.Minute).Truncate(time.Second)
 	status := infrastructurev1beta1.BootstrapKubeconfigStatus{TokenID: bkTestTokenID}
 	bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, status)
-	h := newBKHarness(t, "", nil, newBKKaapiConfig("dg-d", bkTestFQDN), newBKRootCA(), newBKTokenSecret(t, expiresAt), bk)
+	h := newBKHarness(t, "", nil, newBKNamespace(bkTestNamespace, bkTestFQDN), newBKRootCA(), newBKTokenSecret(t, expiresAt), bk)
 
 	_, err := h.reconcile(t)
 	require.NoError(t, err)
@@ -522,7 +520,7 @@ func TestBootstrapKubeconfigReconciler_ResumeWithExistingToken(t *testing.T) {
 func TestBootstrapKubeconfigReconciler_ResumeWithoutToken(t *testing.T) {
 	status := infrastructurev1beta1.BootstrapKubeconfigStatus{TokenID: bkTestTokenID}
 	bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, status)
-	h := newBKHarness(t, "", nil, newBKKaapiConfig("dg-d", bkTestFQDN), newBKRootCA(), bk)
+	h := newBKHarness(t, "", nil, newBKNamespace(bkTestNamespace, bkTestFQDN), newBKRootCA(), bk)
 
 	_, err := h.reconcile(t)
 	require.NoError(t, err)
@@ -543,7 +541,7 @@ func TestBootstrapKubeconfigReconciler_ResumeWithExpiredToken(t *testing.T) {
 	expiredAt := time.Now().UTC().Add(-10 * time.Minute).Truncate(time.Second)
 	status := infrastructurev1beta1.BootstrapKubeconfigStatus{TokenID: bkTestTokenID}
 	bk := newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, status)
-	h := newBKHarness(t, "", nil, newBKKaapiConfig("dg-d", bkTestFQDN), newBKRootCA(), newBKTokenSecret(t, expiredAt), bk)
+	h := newBKHarness(t, "", nil, newBKNamespace(bkTestNamespace, bkTestFQDN), newBKRootCA(), newBKTokenSecret(t, expiredAt), bk)
 
 	_, err := h.reconcile(t)
 	require.NoError(t, err)
@@ -588,7 +586,7 @@ func resumableBKObjects(t *testing.T, extra ...client.Object) []client.Object {
 	status := infrastructurev1beta1.BootstrapKubeconfigStatus{TokenID: bkTestTokenID}
 	expiresAt := time.Date(2099, time.January, 1, 0, 0, 0, 0, time.UTC)
 	objects := []client.Object{
-		newBKKaapiConfig("dg-d", bkTestFQDN),
+		newBKNamespace(bkTestNamespace, bkTestFQDN),
 		newBKRootCA(),
 		newBKTokenSecret(t, expiresAt),
 		newBKObject(infrastructurev1beta1.BootstrapKubeconfigSpec{}, status),
