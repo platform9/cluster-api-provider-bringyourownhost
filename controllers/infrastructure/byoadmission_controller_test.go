@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 	certv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -37,6 +38,7 @@ import (
 
 	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/common/certificate"
+	"github.com/platform9/cluster-api-provider-bringyourownhost/common/identity"
 	controllers "github.com/platform9/cluster-api-provider-bringyourownhost/controllers/infrastructure"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/test/builder"
 )
@@ -138,6 +140,7 @@ func reconcileAdmissionWith(t *testing.T, clientSet *fake.Clientset, cl client.C
 	reconciler := &controllers.ByoAdmissionReconciler{
 		ClientSet:                     clientSet,
 		Client:                        cl,
+		APIReader:                     cl,
 		MaxCertificateLifetimeSeconds: admissionMaxLifetime,
 	}
 
@@ -1053,6 +1056,7 @@ func TestByoAdmissionReconciler_Reconcile_AgentRequestLifetime(t *testing.T) {
 	reconciler := &controllers.ByoAdmissionReconciler{
 		ClientSet:                     clientSet,
 		Client:                        cl,
+		APIReader:                     cl,
 		MaxCertificateLifetimeSeconds: certificate.DefaultLifetimeSeconds,
 	}
 	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{Name: admissionCSRName}})
@@ -1089,4 +1093,214 @@ func TestCheckCertificateLifetime(t *testing.T) {
 			assert.Contains(t, err.Error(), tc.wantErr)
 		})
 	}
+}
+
+// hostRBACName is the name of the Role and RoleBinding the approver creates for
+// the host admissionIdentity.
+const hostRBACName = "byoh-host-worker-1-a1b2c"
+
+// wantHostRole returns the Role the approver creates for admissionIdentity.
+func wantHostRole() *rbacv1.Role {
+	return &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            hostRBACName,
+			Namespace:       admissionNamespace,
+			Labels:          map[string]string{identity.TenantLabel: admissionNamespace},
+			OwnerReferences: []metav1.OwnerReference{wantIssuerOwner()},
+			ResourceVersion: "1",
+		},
+		Rules: []rbacv1.PolicyRule{
+			{
+				APIGroups:     []string{"infrastructure.cluster.x-k8s.io"},
+				Resources:     []string{"byohosts"},
+				ResourceNames: []string{"worker-1-a1b2c"},
+				Verbs:         []string{"get", "list", "watch", "update", "patch", "delete"},
+			},
+			{
+				APIGroups:     []string{"infrastructure.cluster.x-k8s.io"},
+				Resources:     []string{"byohosts/status"},
+				ResourceNames: []string{"worker-1-a1b2c"},
+				Verbs:         []string{"get", "patch", "update"},
+			},
+		},
+	}
+}
+
+// wantHostRoleBinding returns the RoleBinding the approver creates for
+// admissionIdentity.
+func wantHostRoleBinding() *rbacv1.RoleBinding {
+	return &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            hostRBACName,
+			Namespace:       admissionNamespace,
+			Labels:          map[string]string{identity.TenantLabel: admissionNamespace},
+			OwnerReferences: []metav1.OwnerReference{wantIssuerOwner()},
+			ResourceVersion: "1",
+		},
+		Subjects: []rbacv1.Subject{
+			{
+				Kind:     rbacv1.UserKind,
+				APIGroup: rbacv1.GroupName,
+				Name:     admissionIdentity,
+			},
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: rbacv1.GroupName,
+			Kind:     "Role",
+			Name:     hostRBACName,
+		},
+	}
+}
+
+func wantIssuerOwner() metav1.OwnerReference {
+	return metav1.OwnerReference{
+		APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
+		Kind:       "BootstrapKubeconfig",
+		Name:       "worker-1-a1b2c",
+	}
+}
+
+// TestByoAdmissionReconciler_Reconcile_HostRBAC checks the Role and RoleBinding
+// that the approver creates for the host before it approves the request.
+func TestByoAdmissionReconciler_Reconcile_HostRBAC(t *testing.T) {
+	key := client.ObjectKey{Namespace: admissionNamespace, Name: hostRBACName}
+
+	t.Run("approval creates the Role and RoleBinding", func(t *testing.T) {
+		cl := newAdmissionClient(t, &interceptor.Funcs{}, admissionIssuer("worker-1-a1b2c", admissionNamespace, admissionTokenID))
+		csr := admissionCSR(t, admissionUsername, admissionIdentity)
+
+		_, conditions, err := reconcileAdmissionWith(t, fake.NewSimpleClientset(csr), cl, csr.Name)
+		require.NoError(t, err)
+		require.Len(t, conditions, 1)
+		assert.Equal(t, certv1.CertificateApproved, conditions[0].Type)
+
+		role := &rbacv1.Role{}
+		err = cl.Get(t.Context(), key, role)
+		require.NoError(t, err)
+		role.TypeMeta = metav1.TypeMeta{}
+		assert.Equal(t, wantHostRole(), role)
+
+		binding := &rbacv1.RoleBinding{}
+		err = cl.Get(t.Context(), key, binding)
+		require.NoError(t, err)
+		binding.TypeMeta = metav1.TypeMeta{}
+		assert.Equal(t, wantHostRoleBinding(), binding)
+	})
+
+	t.Run("denied request creates nothing", func(t *testing.T) {
+		cl := newAdmissionClient(t, &interceptor.Funcs{}, admissionIssuer("worker-1-a1b2c", admissionNamespace, "zzzzzz"))
+		csr := admissionCSR(t, admissionUsername, admissionIdentity)
+
+		_, conditions, err := reconcileAdmissionWith(t, fake.NewSimpleClientset(csr), cl, csr.Name)
+		require.NoError(t, err)
+		require.Len(t, conditions, 1)
+		assert.Equal(t, certv1.CertificateDenied, conditions[0].Type)
+
+		roles := &rbacv1.RoleList{}
+		err = cl.List(t.Context(), roles)
+		require.NoError(t, err)
+		assert.Empty(t, roles.Items)
+
+		bindings := &rbacv1.RoleBindingList{}
+		err = cl.List(t.Context(), bindings)
+		require.NoError(t, err)
+		assert.Empty(t, bindings.Items)
+	})
+
+	failures := []struct {
+		name string
+		kind client.Object
+	}{
+		{
+			name: "Role create fails",
+			kind: &rbacv1.Role{},
+		},
+		{
+			name: "RoleBinding create fails",
+			kind: &rbacv1.RoleBinding{},
+		},
+	}
+	for _, tc := range failures {
+		t.Run(tc.name+" and the retry approves", func(t *testing.T) {
+			createFails := true
+			funcs := interceptor.Funcs{
+				Create: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+					if createFails && reflect.TypeOf(obj) == reflect.TypeOf(tc.kind) {
+						return errors.New("api server unavailable")
+					}
+
+					return cl.Create(ctx, obj, opts...)
+				},
+			}
+			cl := newAdmissionClient(t, &funcs, admissionIssuer("worker-1-a1b2c", admissionNamespace, admissionTokenID))
+			csr := admissionCSR(t, admissionUsername, admissionIdentity)
+			clientSet := fake.NewSimpleClientset(csr)
+
+			_, conditions, err := reconcileAdmissionWith(t, clientSet, cl, csr.Name)
+			require.Error(t, err)
+			assert.Empty(t, conditions)
+
+			issuer := &infrastructurev1beta1.BootstrapKubeconfig{}
+			err = cl.Get(t.Context(), client.ObjectKey{Namespace: admissionNamespace, Name: "worker-1-a1b2c"}, issuer)
+			require.NoError(t, err)
+			assert.Equal(t, csr.Name, issuer.Status.ApprovedCSRName, "the claim is written before the Role")
+
+			createFails = false
+			_, conditions, err = reconcileAdmissionWith(t, clientSet, cl, csr.Name)
+			require.NoError(t, err)
+			require.Len(t, conditions, 1)
+			assert.Equal(t, certv1.CertificateApproved, conditions[0].Type)
+
+			err = cl.Get(t.Context(), key, &rbacv1.Role{})
+			require.NoError(t, err)
+			err = cl.Get(t.Context(), key, &rbacv1.RoleBinding{})
+			require.NoError(t, err)
+		})
+	}
+
+	t.Run("existing Role and RoleBinding are not rewritten", func(t *testing.T) {
+		existingRole := wantHostRole()
+		existingRole.ResourceVersion = ""
+		existingRole.Rules = append(existingRole.Rules, rbacv1.PolicyRule{
+			APIGroups:     []string{""},
+			Resources:     []string{"secrets"},
+			ResourceNames: []string{"byoh-install-m1"},
+			Verbs:         []string{"get"},
+		})
+		existingBinding := wantHostRoleBinding()
+		existingBinding.ResourceVersion = ""
+
+		writes := 0
+		funcs := interceptor.Funcs{
+			Update: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+				writes++
+
+				return cl.Update(ctx, obj, opts...)
+			},
+			Patch: func(ctx context.Context, cl client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+				writes++
+
+				return cl.Patch(ctx, obj, patch, opts...)
+			},
+			Delete: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+				writes++
+
+				return cl.Delete(ctx, obj, opts...)
+			},
+		}
+		cl := newAdmissionClient(t, &funcs, admissionIssuer("worker-1-a1b2c", admissionNamespace, admissionTokenID), existingRole, existingBinding)
+		csr := admissionCSR(t, admissionUsername, admissionIdentity)
+
+		_, conditions, err := reconcileAdmissionWith(t, fake.NewSimpleClientset(csr), cl, csr.Name)
+		require.NoError(t, err)
+		require.Len(t, conditions, 1)
+		assert.Equal(t, certv1.CertificateApproved, conditions[0].Type)
+
+		role := &rbacv1.Role{}
+		err = cl.Get(t.Context(), key, role)
+		require.NoError(t, err)
+		assert.Equal(t, "999", role.ResourceVersion)
+		assert.Len(t, role.Rules, 3)
+		assert.Equal(t, 0, writes)
+	})
 }

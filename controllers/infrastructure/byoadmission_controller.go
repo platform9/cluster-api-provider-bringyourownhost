@@ -16,11 +16,13 @@ import (
 
 	certv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientset "k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -37,6 +39,10 @@ type ByoAdmissionReconciler struct {
 	// Client reads the BootstrapKubeconfig that issued the token a request
 	// authenticated with. The approval is decided from that object.
 	Client client.Client
+
+	// APIReader reads the host-scoped Role and RoleBinding straight from the
+	// API server, so a stale cache cannot hide one that already exists.
+	APIReader client.Reader
 
 	// MaxCertificateLifetimeSeconds is the longest certificate lifetime a
 	// request may ask for in spec.expirationSeconds. It must be positive: the
@@ -134,6 +140,7 @@ func IndexBootstrapKubeconfigByTokenID(obj client.Object) []string {
 //+kubebuilder:rbac:groups=certificates.k8s.io,resources=certificatesigningrequests,verbs=create;get;list;watch
 //+kubebuilder:rbac:groups=certificates.k8s.io,resources=certificatesigningrequests/approval,verbs=update
 //+kubebuilder:rbac:groups=certificates.k8s.io,resources=signers,resourceNames=kubernetes.io/kube-apiserver-client,verbs=approve
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=create;delete;get;update
 
 // Reconcile continuosuly checks for CSRs and approves them
 func (r *ByoAdmissionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -198,18 +205,16 @@ func (r *ByoAdmissionReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
-	// Claim the token for this CSR before approving it. The write fails on a
-	// stale resource version, so two CSRs of one token cannot both pass. When
-	// the status already names this CSR, an earlier reconcile wrote it and
-	// stopped before the approval.
-	if !approvedCSR(issuer, csr.Name) {
-		issuer.Status.CSRApproval = infrastructurev1beta1.CSRApproved
-		issuer.Status.ApprovedCSRName = csr.Name
-		issuer.Status.ApprovedCommonName = commonName
-		err = r.Client.Status().Update(ctx, issuer)
-		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("record CSR %q on BootstrapKubeconfig %q: %w", csr.Name, issuer.Name, err)
-		}
+	err = r.claimToken(ctx, issuer, csr.Name, commonName)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+
+	// No approval means no certificate, so a host never holds a certificate
+	// without its Role. A failure here leaves the CSR pending for the retry.
+	err = r.ensureHostRBAC(ctx, issuer, commonName)
+	if err != nil {
+		return reconcile.Result{}, err
 	}
 
 	// Update the CSR to the "Approved" condition
@@ -229,6 +234,120 @@ func (r *ByoAdmissionReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	logger.Info("CSR Approved", "object", req.NamespacedName)
 
 	return ctrl.Result{}, nil
+}
+
+// claimToken records on issuer that its token approved the request csrName for
+// commonName, before the approval. The write fails on a stale resource version,
+// so two CSRs of one token cannot both pass. When the status already names this
+// CSR, an earlier reconcile wrote it and stopped before the approval.
+func (r *ByoAdmissionReconciler) claimToken(ctx context.Context, issuer *infrastructurev1beta1.BootstrapKubeconfig, csrName, commonName string) error {
+	if approvedCSR(issuer, csrName) {
+		return nil
+	}
+
+	issuer.Status.CSRApproval = infrastructurev1beta1.CSRApproved
+	issuer.Status.ApprovedCSRName = csrName
+	issuer.Status.ApprovedCommonName = commonName
+	err := r.Client.Status().Update(ctx, issuer)
+	if err != nil {
+		return fmt.Errorf("record CSR %q on BootstrapKubeconfig %q: %w", csrName, issuer.Name, err)
+	}
+
+	return nil
+}
+
+// hostRBACName returns the name of the Role and RoleBinding of the host.
+func hostRBACName(host identity.HostIdentity) string {
+	return "byoh-host-" + host.ByoHostName()
+}
+
+// HostScopedRBAC returns the Role and RoleBinding that let the certificate
+// user of host act on its own ByoHost and no other. The RoleBinding names the
+// user, not the tenant group, because every host of the tenant is in that
+// group.
+func HostScopedRBAC(host identity.HostIdentity) (*rbacv1.Role, *rbacv1.RoleBinding) {
+	name := hostRBACName(host)
+	byoHostName := host.ByoHostName()
+	group := infrastructurev1beta1.GroupVersion.Group
+
+	role := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: host.TenantNamespace,
+			Labels:    map[string]string{identity.TenantLabel: host.TenantNamespace},
+		},
+		Rules: []rbacv1.PolicyRule{
+			{
+				APIGroups:     []string{group},
+				Resources:     []string{"byohosts"},
+				ResourceNames: []string{byoHostName},
+				Verbs:         []string{"get", "list", "watch", "update", "patch", "delete"},
+			},
+			{
+				APIGroups:     []string{group},
+				Resources:     []string{"byohosts/status"},
+				ResourceNames: []string{byoHostName},
+				Verbs:         []string{"get", "patch", "update"},
+			},
+		},
+	}
+
+	binding := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: host.TenantNamespace,
+			Labels:    map[string]string{identity.TenantLabel: host.TenantNamespace},
+		},
+		Subjects: []rbacv1.Subject{
+			{
+				Kind:     rbacv1.UserKind,
+				APIGroup: rbacv1.GroupName,
+				Name:     host.String(),
+			},
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: rbacv1.GroupName,
+			Kind:     "Role",
+			Name:     name,
+		},
+	}
+
+	return role, binding
+}
+
+// ensureHostRBAC creates the Role and RoleBinding of the host named by
+// commonName in the tenant of issuer, each owned by issuer. An object that
+// exists is left as it is, so rules that others added to the Role are kept.
+func (r *ByoAdmissionReconciler) ensureHostRBAC(ctx context.Context, issuer *infrastructurev1beta1.BootstrapKubeconfig, commonName string) error {
+	host, err := identity.Parse(commonName)
+	if err != nil {
+		return fmt.Errorf("parse approved common name: %w", err)
+	}
+
+	role, binding := HostScopedRBAC(host)
+
+	for _, obj := range []client.Object{role, binding} {
+		err = controllerutil.SetOwnerReference(issuer, obj, r.Client.Scheme())
+		if err != nil {
+			return fmt.Errorf("set BootstrapKubeconfig %q as owner of %T %q: %w", issuer.Name, obj, obj.GetName(), err)
+		}
+
+		existing := obj.DeepCopyObject().(client.Object)
+		err = r.APIReader.Get(ctx, client.ObjectKeyFromObject(obj), existing)
+		if err == nil {
+			continue
+		}
+		if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("get %T %q: %w", obj, obj.GetName(), err)
+		}
+
+		err = r.Client.Create(ctx, obj)
+		if err != nil && !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("create %T %q: %w", obj, obj.GetName(), err)
+		}
+	}
+
+	return nil
 }
 
 // CheckCertificateLifetime returns why the requested lifetime in seconds is not
