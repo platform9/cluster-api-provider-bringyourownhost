@@ -301,9 +301,9 @@ func tokenFromSecret(tokenID string, secret *corev1.Secret) (string, time.Time, 
 
 // resolveEndpoint returns the apiserver URL, the TLS server name and the base64
 // encoded CA for the rendered kubeconfig. The spec wins, then the controller
-// override, then a URL derived from the namespace label. The CA falls back to the
-// cluster root CA. Only a derived URL gets a TLS server name, the others are
-// dialed as written.
+// override, then a URL derived from the namespace label. The CA falls back to
+// the cluster root CA. Only a derived URL gets a TLS server name, the others
+// are dialed as written.
 func (r *BootstrapKubeconfigReconciler) resolveEndpoint(ctx context.Context, bootstrapKubeconfig *infrastructurev1beta1.BootstrapKubeconfig) (apiServer, tlsServerName, caData string, err error) {
 	apiServer = bootstrapKubeconfig.Spec.APIServer
 	if apiServer == "" {
@@ -338,9 +338,10 @@ func (r *BootstrapKubeconfigReconciler) resolveEndpoint(ctx context.Context, boo
 	return apiServer, tlsServerName, caData, nil
 }
 
-// deriveAPIServerURL builds the apiserver URL from the customer FQDN held in
-// the CustomerFQDNLabel label of the namespace. The FQDN comes from the
-// Namespace object, never from objects created inside the namespace.
+// deriveAPIServerURL builds the apiserver URL from the customer FQDN in the
+// CustomerFQDNLabel label of the namespace. The FQDN is read from the
+// Namespace object only, since a tenant can create objects inside its own
+// namespace.
 func (r *BootstrapKubeconfigReconciler) deriveAPIServerURL(ctx context.Context, namespace string) (string, error) {
 	ns := &corev1.Namespace{}
 	err := r.APIReader.Get(ctx, types.NamespacedName{Name: namespace}, ns)
