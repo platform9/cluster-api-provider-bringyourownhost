@@ -28,6 +28,11 @@ const (
 	// tenant organization of a host certificate.
 	TenantGroupPrefix = HostsGroup + ":"
 
+	// TenantLabel is the label the manager sets on the objects it creates for
+	// one host. Its value is the tenant namespace, so the objects of every
+	// host of a tenant can be selected by it.
+	TenantLabel = "byoh.platform9.io/tenant"
+
 	// SuffixLength is the length of the random suffix that makes each issued
 	// certificate a distinct identity.
 	SuffixLength = 5

@@ -114,7 +114,7 @@ func setupReconcilers() {
 		panic(err)
 	}
 
-	byoAdmissionReconciler = &controllers.ByoAdmissionReconciler{ClientSet: clientSetFake, Client: cl}
+	byoAdmissionReconciler = &controllers.ByoAdmissionReconciler{ClientSet: clientSetFake, Client: cl, APIReader: k8sManager.GetAPIReader()}
 	if err := byoAdmissionReconciler.SetupWithManager(k8sManager); err != nil {
 		panic(err)
 	}
