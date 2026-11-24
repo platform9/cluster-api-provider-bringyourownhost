@@ -62,6 +62,10 @@ type ByoMachineReconciler struct {
 	Scheme       *runtime.Scheme
 	ClusterCache clustercache.ClusterCache
 	Recorder     record.EventRecorder
+
+	// APIReader reads host-scoped Roles straight from the API server. A cached
+	// client would start an informer on every Role in the cluster.
+	APIReader client.Reader
 }
 
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=byomachines,verbs=get;list;watch;create;update;patch;delete
@@ -234,6 +238,7 @@ func (r *ByoMachineReconciler) reconcileDelete(ctx context.Context, machineScope
 	return reconcile.Result{}, nil
 }
 
+// nolint: gocyclo
 func (r *ByoMachineReconciler) reconcileNormal(ctx context.Context, machineScope *byoMachineScope) (reconcile.Result, error) {
 	logger := log.FromContext(ctx).WithValues("cluster", machineScope.Cluster.Name)
 	logger.Info("Reconciling ByoMachine")
@@ -277,6 +282,14 @@ func (r *ByoMachineReconciler) reconcileNormal(ctx context.Context, machineScope
 		conditions.MarkFalse(machineScope.ByoMachine, infrav1.BYOHostReady, infrav1.InstallationSecretNotAvailableReason, clusterv1.ConditionSeverityInfo, "")
 		r.Recorder.Eventf(machineScope.ByoHost, corev1.EventTypeNormal, "ByoHostAttachSucceeded", "Attached to ByoMachine %s", machineScope.ByoMachine.Name)
 		r.Recorder.Eventf(machineScope.ByoMachine, corev1.EventTypeNormal, "ByoHostAttachSucceeded", "Attached ByoHost %s", machineScope.ByoHost.Name)
+	}
+
+	// The Role names the Secrets before the ByoHost spec does, so the agent never
+	// reads a name it may not get. Running on every reconcile restores a rule that
+	// someone removed.
+	if err := r.setHostSecretAccess(ctx, machineScope, machineScope.ByoHost); err != nil {
+		logger.Error(err, "failed to set Secret access for the host")
+		return ctrl.Result{}, err
 	}
 
 	if machineScope.ByoMachine.Status.HostInfo == (infrav1.HostInfo{}) {
@@ -483,6 +496,47 @@ func (r *ByoMachineReconciler) getInstallerConfigAndHelper(ctx context.Context, 
 	return installerConfig, helper, ctrl.Result{}, nil
 }
 
+// hostSecretNames returns the Secrets the agent of the host reads for this
+// machine: the bootstrap Secret of the Machine, and the installation and
+// uninstallation Secrets that the installer config reports. The names never come
+// from the ByoHost spec, which the host can write.
+func (r *ByoMachineReconciler) hostSecretNames(ctx context.Context, machineScope *byoMachineScope) ([]string, error) {
+	names := []string{*machineScope.Machine.Spec.Bootstrap.DataSecretName}
+	if machineScope.ByoMachine.Spec.InstallerRef == nil {
+		return names, nil
+	}
+
+	installerConfig, err := r.getInstallerConfig(ctx, machineScope.ByoMachine)
+	if apierrors.IsNotFound(err) {
+		return names, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	for _, field := range []string{"installationSecret", "uninstallationSecret"} {
+		name, found, err := unstructured.NestedString(installerConfig.Object, "status", field, "name")
+		if err != nil {
+			return nil, fmt.Errorf("read status.%s of installer config %s: %w", field, installerConfig.GetName(), err)
+		}
+		if found {
+			names = append(names, name)
+		}
+	}
+
+	return names, nil
+}
+
+// setHostSecretAccess lets host read the Secrets of machineScope and no other.
+func (r *ByoMachineReconciler) setHostSecretAccess(ctx context.Context, machineScope *byoMachineScope, host *infrav1.ByoHost) error {
+	names, err := r.hostSecretNames(ctx, machineScope)
+	if err != nil {
+		return err
+	}
+
+	return setHostSecretAccess(ctx, r.APIReader, r.Client, host, names)
+}
+
 func (r *ByoMachineReconciler) setInstallationSecretForByoHost(ctx context.Context, machineScope *byoMachineScope) (ctrl.Result, error) {
 	installerConfig, helper, result, err := r.getInstallerConfigAndHelper(ctx, machineScope)
 	if (err != nil || result != ctrl.Result{}) {
@@ -608,6 +662,11 @@ func (r *ByoMachineReconciler) attachByoHost(ctx context.Context, machineScope *
 	host.Annotations[infrav1.EndPointIPAnnotation] = machineScope.Cluster.Spec.ControlPlaneEndpoint.Host
 	host.Annotations[infrav1.K8sVersionAnnotation] = strings.Split(machineScope.Machine.Spec.Version, "+")[0]
 	host.Annotations[infrav1.BundleLookupBaseRegistryAnnotation] = machineScope.ByoCluster.Spec.BundleLookupBaseRegistry
+
+	err = r.setHostSecretAccess(ctx, machineScope, &host)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("set Secret access of byohost %q: %w", host.Name, err)
+	}
 
 	err = byohostHelper.Patch(ctx, &host)
 	if err != nil {
