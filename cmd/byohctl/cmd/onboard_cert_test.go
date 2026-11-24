@@ -181,18 +181,18 @@ func TestBootstrapKubeconfigName(t *testing.T) {
 func TestSelectOnboardFlow(t *testing.T) {
 	testCases := []struct {
 		name                string
-		tokenAuth           bool
+		certAuth            bool
 		bootstrapKubeconfig string
 		want                onboardFlow
 	}{
 		{
-			name: "default is the certificate flow",
-			want: flowCertificate,
+			name: "default is the token flow",
+			want: flowTokenAuth,
 		},
 		{
-			name:      "token auth flag",
-			tokenAuth: true,
-			want:      flowTokenAuth,
+			name:     "cert auth flag",
+			certAuth: true,
+			want:     flowCertificate,
 		},
 		{
 			name:                "bootstrap kubeconfig path",
@@ -202,36 +202,36 @@ func TestSelectOnboardFlow(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := selectOnboardFlow(tc.tokenAuth, tc.bootstrapKubeconfig)
+			got := selectOnboardFlow(tc.certAuth, tc.bootstrapKubeconfig)
 			assert.Equal(t, tc.want, got)
 		})
 	}
 }
 
-func TestOnboardTokenAuthFlag(t *testing.T) {
+func TestOnboardCertAuthFlag(t *testing.T) {
 	testCases := []struct {
-		name          string
-		args          []string
-		wantTokenAuth bool
-		wantErr       bool
+		name         string
+		args         []string
+		wantCertAuth bool
+		wantErr      bool
 	}{
 		{
-			name:          "absent",
-			args:          []string{"-u", "fqdn", "-e", "user", "-c", "token", "-r", "region"},
-			wantTokenAuth: false,
-			wantErr:       false,
+			name:         "absent",
+			args:         []string{"-u", "fqdn", "-e", "user", "-c", "token", "-r", "region"},
+			wantCertAuth: false,
+			wantErr:      false,
 		},
 		{
-			name:          "present",
-			args:          []string{"--token-auth", "-u", "fqdn", "-e", "user", "-c", "token", "-r", "region"},
-			wantTokenAuth: true,
-			wantErr:       false,
+			name:         "present",
+			args:         []string{"--cert-auth", "-u", "fqdn", "-e", "user", "-c", "token", "-r", "region"},
+			wantCertAuth: true,
+			wantErr:      false,
 		},
 		{
-			name:          "with bootstrap kubeconfig",
-			args:          []string{"--token-auth", "--bootstrap-kubeconfig", "x", "-r", "region"},
-			wantTokenAuth: true,
-			wantErr:       true,
+			name:         "with bootstrap kubeconfig",
+			args:         []string{"--cert-auth", "--bootstrap-kubeconfig", "x", "-r", "region"},
+			wantCertAuth: true,
+			wantErr:      true,
 		},
 	}
 	for _, tc := range testCases {
@@ -250,7 +250,7 @@ func TestOnboardTokenAuthFlag(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
-			assert.Equal(t, tc.wantTokenAuth, tokenAuth)
+			assert.Equal(t, tc.wantCertAuth, certAuth)
 		})
 	}
 }

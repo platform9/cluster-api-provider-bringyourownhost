@@ -29,8 +29,8 @@ const (
 	bootstrapKubeconfigSuffixLen = 5
 )
 
-// tokenAuth selects the legacy token flow instead of the certificate flow.
-var tokenAuth bool
+// certAuth selects the certificate flow instead of the default token flow.
+var certAuth bool
 
 // onboardFlow names the way onboarding gets the host's bootstrap credential.
 type onboardFlow int
@@ -38,22 +38,22 @@ type onboardFlow int
 const (
 	// flowCertificate creates a BootstrapKubeconfig and reads the credential the controller issues.
 	flowCertificate onboardFlow = iota
-	// flowTokenAuth is the legacy flow that reads the shared bootstrap Secret.
+	// flowTokenAuth reads the shared bootstrap Secret. It is the default.
 	flowTokenAuth
 	// flowBootstrapKubeconfig uses a bootstrap kubeconfig file given by path.
 	flowBootstrapKubeconfig
 )
 
 // selectOnboardFlow picks the onboarding flow. The flags are mutually exclusive, and the
-// certificate flow is the default.
-func selectOnboardFlow(tokenAuth bool, bootstrapKubeconfigPath string) onboardFlow {
+// token flow is the default.
+func selectOnboardFlow(certAuth bool, bootstrapKubeconfigPath string) onboardFlow {
 	switch {
 	case bootstrapKubeconfigPath != "":
 		return flowBootstrapKubeconfig
-	case tokenAuth:
-		return flowTokenAuth
-	default:
+	case certAuth:
 		return flowCertificate
+	default:
+		return flowTokenAuth
 	}
 }
 

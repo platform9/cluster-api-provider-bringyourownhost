@@ -51,18 +51,18 @@ var onboardCmd = &cobra.Command{
 	Long: `Onboard a host to Platform9 management plane.
 This command will:
 1. Authenticate with Platform9
-2. Request a certificate-based identity for this host
+2. Get required configuration
 3. Setup the host for management
 
-By default the host gets a certificate. The command asks Platform9 for a short-lived
-bootstrap credential and the host agent exchanges it for its own certificate.
-Use --token-auth to run the legacy flow instead, which reads the shared bootstrap
-secret of the tenant.
+By default the command reads the shared bootstrap secret of the tenant.
+Use --cert-auth to give the host its own certificate instead. The command asks
+Platform9 for a short-lived bootstrap credential and the host agent exchanges it
+for its own certificate.
 
 You can provide input values via CLI flags or a YAML config file using --config/-f, or a combination of both..
 CLI flags take precedence over config file values.`,
 	Example: `  byohctl onboard -u your-fqdn.platform9.com -e admin@platform9.com -c client-token -r region-name
-  byohctl onboard -u your-fqdn.platform9.com -e admin@platform9.com -c client-token -r region-name --token-auth
+  byohctl onboard -u your-fqdn.platform9.com -e admin@platform9.com -c client-token -r region-name --cert-auth
   byohctl onboard -u your-fqdn.platform9.com -e admin@platform9.com -c client-token -r region-name -d custom-domain -t custom-tenant
   byohctl onboard --config onboard-config.yaml
   byohctl onboard --config onboard-config.yaml --username overrideuser`,
@@ -99,8 +99,8 @@ func AddOnboardFlags(cmd *cobra.Command,
 	cmd.Flags().StringVarP(configFile, "config", "f", "", "Path to onboarding config YAML file")
 	cmd.Flags().StringVar(bootstrapKubeconfigPath, "bootstrap-kubeconfig", "", "Path to a bootstrap kubeconfig")
 	cmd.Flags().StringVar(hostNamespace, "namespace", "default", "Namespace to register this host in (only used with --bootstrap-kubeconfig)")
-	cmd.Flags().BoolVar(&tokenAuth, "token-auth", false, "Use the legacy token flow instead of a certificate")
-	cmd.MarkFlagsMutuallyExclusive("token-auth", "bootstrap-kubeconfig")
+	cmd.Flags().BoolVar(&certAuth, "cert-auth", false, "Give the host its own certificate instead of the shared bootstrap secret")
+	cmd.MarkFlagsMutuallyExclusive("cert-auth", "bootstrap-kubeconfig")
 	cmd.MarkFlagsMutuallyExclusive("bootstrap-kubeconfig", "username")
 	cmd.MarkFlagsMutuallyExclusive("bootstrap-kubeconfig", "client-token")
 	cmd.MarkFlagsMutuallyExclusive("bootstrap-kubeconfig", "url")
@@ -343,7 +343,7 @@ func runOnboard(cmd *cobra.Command, args []string) {
 		mergeConfigWithFlags(cfg)
 	}
 
-	flow := selectOnboardFlow(tokenAuth, bootstrapKubeconfigPath)
+	flow := selectOnboardFlow(certAuth, bootstrapKubeconfigPath)
 	usingBootstrapKubeconfig := flow == flowBootstrapKubeconfig
 	if flow == flowCertificate {
 		if err := checkCertFlowFlags(cmd); err != nil {
