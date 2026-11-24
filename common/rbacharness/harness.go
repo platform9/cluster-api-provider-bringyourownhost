@@ -12,12 +12,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 
 	authv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/yaml"
 )
@@ -27,6 +29,10 @@ const (
 	TenantA = "tenant-a"
 	TenantB = "tenant-b"
 )
+
+// authenticatedGroup is the group the API server adds to every authenticated
+// identity.
+const authenticatedGroup = "system:authenticated"
 
 // Subject is the identity a SubjectAccessReview is asked about. The API server
 // adds no groups of its own to a review, so list system:authenticated when the
@@ -40,7 +46,7 @@ type Subject struct {
 func BootstrapSubject() Subject {
 	return Subject{
 		User:   "system:bootstrap:abcdef",
-		Groups: []string{"system:bootstrappers", "system:bootstrappers:byoh", "system:authenticated"},
+		Groups: []string{"system:bootstrappers", "system:bootstrappers:byoh", authenticatedGroup},
 	}
 }
 
@@ -48,11 +54,12 @@ func BootstrapSubject() Subject {
 func HostSubject() Subject {
 	return Subject{
 		User:   "byoh:host:tenant-a:h1-abc12",
-		Groups: []string{"byoh:hosts", "system:authenticated"},
+		Groups: []string{"byoh:hosts", authenticatedGroup},
 	}
 }
 
-// Harness is a running API server that holds the RBAC of one source.
+// Harness is a running API server that holds the RBAC of one source and the
+// ByoHost and BootstrapKubeconfig CRDs.
 type Harness struct {
 	env     *envtest.Environment
 	clients kubernetes.Interface
@@ -66,7 +73,13 @@ func Start(ctx context.Context, source Source) (*Harness, error) {
 		return nil, fmt.Errorf("load RBAC from %s: %w", source, err)
 	}
 
-	env := &envtest.Environment{}
+	env := &envtest.Environment{
+		CRDDirectoryPaths: []string{
+			filepath.Join(repoRoot(), "config", "crd", "bases", "infrastructure.cluster.x-k8s.io_byohosts.yaml"),
+			filepath.Join(repoRoot(), "config", "crd", "bases", "infrastructure.cluster.x-k8s.io_bootstrapkubeconfigs.yaml"),
+		},
+		ErrorIfCRDPathMissing: true,
+	}
 	cfg, err := env.Start()
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("start envtest: %w", err), env.Stop())
@@ -114,6 +127,49 @@ func (h *Harness) Allowed(ctx context.Context, subject Subject, attrs *authv1.Re
 		return false, fmt.Errorf("create SubjectAccessReview for %q: %w", subject.User, err)
 	}
 	return result.Status.Allowed, nil
+}
+
+// CreateRBAC creates role and binding in the API server. Use it for the
+// objects the manager creates at runtime, which no shipped file holds.
+func (h *Harness) CreateRBAC(ctx context.Context, role *rbacv1.Role, binding *rbacv1.RoleBinding) error {
+	rbac := h.clients.RbacV1()
+
+	_, err := rbac.Roles(role.Namespace).Create(ctx, role, metav1.CreateOptions{})
+	if err != nil {
+		return fmt.Errorf("create Role %q: %w", role.Name, err)
+	}
+
+	_, err = rbac.RoleBindings(binding.Namespace).Create(ctx, binding, metav1.CreateOptions{})
+	if err != nil {
+		return fmt.Errorf("create RoleBinding %q: %w", binding.Name, err)
+	}
+
+	return nil
+}
+
+// AdminConfig returns a config with full access to the API server, for setting
+// up the objects a test acts on.
+func (h *Harness) AdminConfig() *rest.Config {
+	return h.env.Config
+}
+
+// ClientConfig returns a config that authenticates to the API server as
+// subject, with a client certificate that has the user and groups of subject.
+// system:authenticated is left out, because the API server adds it.
+func (h *Harness) ClientConfig(subject Subject) (*rest.Config, error) {
+	groups := make([]string, 0, len(subject.Groups))
+	for _, group := range subject.Groups {
+		if group != authenticatedGroup {
+			groups = append(groups, group)
+		}
+	}
+
+	user, err := h.env.AddUser(envtest.User{Name: subject.User, Groups: groups}, h.env.Config)
+	if err != nil {
+		return nil, fmt.Errorf("add user %q: %w", subject.User, err)
+	}
+
+	return user.Config(), nil
 }
 
 // apply creates the Role, ClusterRole, RoleBinding or ClusterRoleBinding in doc.
