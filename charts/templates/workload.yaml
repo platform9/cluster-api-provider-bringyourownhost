@@ -1953,6 +1953,7 @@ webhooks:
           - DELETE
         resources:
           - byohosts
+          - byohosts/status
     sideEffects: None
 ---
 apiVersion: admissionregistration.k8s.io/v1
