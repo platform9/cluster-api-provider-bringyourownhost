@@ -390,7 +390,7 @@ func TestByohCSR_EnsureCSR_Fresh(t *testing.T) {
 	request, err := x509.ParseCertificateRequest(block.Bytes)
 	require.NoError(t, err)
 	assert.Equal(t, st.Identity, request.Subject.CommonName)
-	assert.Equal(t, []string{ByohCSROrg}, request.Subject.Organization)
+	assert.Equal(t, []string{"byoh:hosts", "byoh:hosts:example-tenant"}, request.Subject.Organization)
 }
 
 func TestByohCSR_EnsureCSR_Resume(t *testing.T) {
