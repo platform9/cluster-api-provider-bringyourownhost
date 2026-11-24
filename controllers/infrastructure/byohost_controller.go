@@ -73,8 +73,10 @@ func (r *ByoHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ 
 		!hasCleanupAnnotation {
 		secret := &corev1.Secret{}
 		err := r.Get(ctx, types.NamespacedName{
-			Name:      byoHost.Spec.UninstallationSecret.Name,
-			Namespace: byoHost.Spec.UninstallationSecret.Namespace,
+			Name: byoHost.Spec.UninstallationSecret.Name,
+			// The host can write this reference, so only its name is used. The
+			// Secret is looked up in the ByoHost namespace.
+			Namespace: byoHost.Namespace,
 		}, secret)
 		if err != nil && !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, err

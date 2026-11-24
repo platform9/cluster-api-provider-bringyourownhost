@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	controllers "github.com/platform9/cluster-api-provider-bringyourownhost/controllers/infrastructure"
 	infrastructurev1beta1 "github.com/platform9/cluster-api-provider-bringyourownhost/apis/infrastructure/v1beta1"
 	"github.com/platform9/cluster-api-provider-bringyourownhost/test/builder"
 	eventutils "github.com/platform9/cluster-api-provider-bringyourownhost/test/utils/events"
@@ -17,12 +18,14 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	conditions "sigs.k8s.io/cluster-api/util/conditions/deprecated/v1beta1"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
@@ -76,6 +79,84 @@ func TestByohostController_UninstallSecretCleanup(t *testing.T) {
 		require.NoError(t, k8sManager.GetClient().Get(context.Background(), byoHostLookupKey, updated))
 		assert.Nil(t, updated.Spec.UninstallationSecret)
 	})
+}
+
+func TestByohostController_UninstallSecretNamespace(t *testing.T) {
+	testCases := []struct {
+		name string
+		// ref is the uninstallationSecret reference set on the ByoHost.
+		ref corev1.ObjectReference
+	}{
+		{
+			name: "reference in the ByoHost namespace",
+			ref: corev1.ObjectReference{
+				Name:      "x",
+				Namespace: "tenant-a",
+			},
+		},
+		{
+			name: "reference in another namespace",
+			ref: corev1.ObjectReference{
+				Name:      "x",
+				Namespace: "kaapi",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			require.NoError(t, corev1.AddToScheme(scheme))
+			require.NoError(t, infrastructurev1beta1.AddToScheme(scheme))
+
+			byoHost := &infrastructurev1beta1.ByoHost{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "h1-abc12",
+					Namespace: "tenant-a",
+				},
+				Spec: infrastructurev1beta1.ByoHostSpec{
+					UninstallationSecret: &tc.ref,
+				},
+			}
+			ownSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "x",
+					Namespace: "tenant-a",
+				},
+			}
+			otherSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "x",
+					Namespace: "kaapi",
+				},
+			}
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(byoHost, ownSecret, otherSecret).
+				WithStatusSubresource(byoHost).
+				Build()
+			reconciler := &controllers.ByoHostReconciler{
+				Client:                 fakeClient,
+				Scheme:                 scheme,
+				HeartbeatTimeoutPeriod: time.Minute,
+				Recorder:               record.NewFakeRecorder(32),
+			}
+
+			_, err := reconciler.Reconcile(context.Background(), reconcile.Request{
+				NamespacedName: client.ObjectKeyFromObject(byoHost),
+			})
+			require.NoError(t, err)
+
+			// The manager resolves the name in the ByoHost namespace, whatever
+			// namespace the reference names.
+			err = fakeClient.Get(context.Background(), client.ObjectKeyFromObject(ownSecret), &corev1.Secret{})
+			assert.True(t, apierrors.IsNotFound(err), "Secret in the ByoHost namespace should be deleted")
+
+			// The Secret in the other namespace must never be deleted.
+			err = fakeClient.Get(context.Background(), client.ObjectKeyFromObject(otherSecret), &corev1.Secret{})
+			assert.NoError(t, err)
+		})
+	}
 }
 
 // setupHeartbeatReconciler sets HeartbeatTimeoutPeriod=3s and a fresh
