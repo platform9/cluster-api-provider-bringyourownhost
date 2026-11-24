@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	v1 "k8s.io/api/admission/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -110,6 +111,12 @@ func (v *ByoHostValidator) handleCreateUpdate(req *admission.Request) admission.
 		if hostIdentity.ByoHostName() != byoHost.Name {
 			return admission.Denied(fmt.Sprintf("%s cannot create resource %s", userName, byoHost.Name))
 		}
+
+		// The manager reads and deletes the Secrets these name, so a host must
+		// not choose them.
+		if field := firstSecretReference(&byoHost.Spec); field != "" {
+			return admission.Denied(fmt.Sprintf("%s cannot set %s on create of resource %s", userName, field, byoHost.Name))
+		}
 	case v1.Update:
 		// The requester controls the new object, so authorize against the
 		// identity stored on the existing host instead.
@@ -121,9 +128,52 @@ func (v *ByoHostValidator) handleCreateUpdate(req *admission.Request) admission.
 		if oldHost.Spec.Identity != userName {
 			return admission.Denied(fmt.Sprintf("%s cannot update resource %s", userName, byoHost.Name))
 		}
+
+		if field := firstChangedSecretReference(&oldHost.Spec, &byoHost.Spec); field != "" {
+			return admission.Denied(fmt.Sprintf("%s cannot change %s of resource %s", userName, field, byoHost.Name))
+		}
 	}
 
 	return admission.Allowed("")
+}
+
+// firstSecretReference returns the path of the first Secret reference that is
+// set in spec, or an empty string when none is set.
+func firstSecretReference(spec *ByoHostSpec) string {
+	switch {
+	case spec.BootstrapSecret != nil:
+		return "spec.bootstrapSecret"
+	case spec.InstallationSecret != nil:
+		return "spec.installationSecret"
+	case spec.UninstallationSecret != nil:
+		return "spec.uninstallationSecret"
+	}
+
+	return ""
+}
+
+// firstChangedSecretReference returns the path of the first Secret reference
+// that newSpec sets to a value other than the one in oldSpec. Clearing a
+// reference is not a change, because the agent clears them itself.
+func firstChangedSecretReference(oldSpec, newSpec *ByoHostSpec) string {
+	switch {
+	case secretReferenceChanged(oldSpec.BootstrapSecret, newSpec.BootstrapSecret):
+		return "spec.bootstrapSecret"
+	case secretReferenceChanged(oldSpec.InstallationSecret, newSpec.InstallationSecret):
+		return "spec.installationSecret"
+	case secretReferenceChanged(oldSpec.UninstallationSecret, newSpec.UninstallationSecret):
+		return "spec.uninstallationSecret"
+	}
+
+	return ""
+}
+
+func secretReferenceChanged(oldRef, newRef *corev1.ObjectReference) bool {
+	if newRef == nil {
+		return false
+	}
+
+	return oldRef == nil || *oldRef != *newRef
 }
 
 // isByohServiceAccountIn reports whether userName is the "byoh" ServiceAccount
