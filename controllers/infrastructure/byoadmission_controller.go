@@ -256,9 +256,9 @@ func (r *ByoAdmissionReconciler) claimToken(ctx context.Context, issuer *infrast
 	return nil
 }
 
-// hostRBACName returns the name of the Role and RoleBinding of the host.
-func hostRBACName(host identity.HostIdentity) string {
-	return "byoh-host-" + host.ByoHostName()
+// hostRBACName returns the name of the Role and RoleBinding of the ByoHost.
+func hostRBACName(byoHostName string) string {
+	return "byoh-host-" + byoHostName
 }
 
 // HostScopedRBAC returns the Role and RoleBinding that let the certificate
@@ -266,7 +266,7 @@ func hostRBACName(host identity.HostIdentity) string {
 // user, not the tenant group, because every host of the tenant is in that
 // group.
 func HostScopedRBAC(host identity.HostIdentity) (*rbacv1.Role, *rbacv1.RoleBinding) {
-	name := hostRBACName(host)
+	name := hostRBACName(host.ByoHostName())
 	byoHostName := host.ByoHostName()
 	group := infrastructurev1beta1.GroupVersion.Group
 
