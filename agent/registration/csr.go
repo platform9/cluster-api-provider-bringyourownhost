@@ -40,7 +40,6 @@ const (
 	// ExpirationSeconds defines the expiry time for Certificates
 	// which is currently set to 1 year aligned with kubeadm defaults.
 	ExpirationSeconds = 86400 * 365
-	ByohCSROrg        = "byoh:hosts"
 	// ByohCSRNameFormat takes the tenant namespace, the normalized host name
 	// and a random part that is new for every CSR. The byoh-csr- prefix is what
 	// the approver filters on.
@@ -259,7 +258,7 @@ func (bcsr *ByohCSR) ensureCSR(ctx context.Context, dir string, st *State, tenan
 		}
 	}
 
-	csrData, err := generateCSR(st.Identity, privateKey)
+	csrData, err := generateCSR(st.Identity, tenantNamespace, privateKey)
 	if err != nil {
 		return "", "", fmt.Errorf("error generating csr %s: %w", st.Identity, err)
 	}
@@ -313,12 +312,12 @@ func (bcsr *ByohCSR) reusableCSR(ctx context.Context, st *State) (types.UID, boo
 	return existing.UID, true, nil
 }
 
-func generateCSR(commonName string, privKey any) ([]byte, error) {
+func generateCSR(commonName, tenantNamespace string, privKey any) ([]byte, error) {
 	// Generate a new *x509.CertificateRequest template
 	csrTemplate := x509.CertificateRequest{
 		Subject: pkix.Name{
 			CommonName:   commonName,
-			Organization: []string{ByohCSROrg},
+			Organization: identity.Organization(tenantNamespace),
 		},
 	}
 	// Generate the CSR bytes

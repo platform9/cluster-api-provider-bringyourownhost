@@ -1,4 +1,5 @@
 // Copyright 2022 VMware, Inc. All Rights Reserved.
+// Copyright 2026 Platform9, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package registration
@@ -18,14 +19,14 @@ var _ = Describe("Registration", func() {
 			hostName = "test-host"
 		)
 		It("should return error if Private Key is not valid", func() {
-			certData, err := generateCSR(hostName, &rsa.PrivateKey{})
+			certData, err := generateCSR(hostName, "example-tenant", &rsa.PrivateKey{})
 			Expect(err).Should(HaveOccurred())
 			Expect(certData).To(BeNil())
 		})
 		It("should return csrData with the correct arguments", func() {
 			privateKeyData, err := rsa.GenerateKey(rand.Reader, 2048)
 			Expect(err).Should(Not(HaveOccurred()))
-			certData, err := generateCSR(hostName, privateKeyData)
+			certData, err := generateCSR(hostName, "example-tenant", privateKeyData)
 			Expect(err).Should(Not(HaveOccurred()))
 			Expect(certData).ToNot(BeNil())
 		})

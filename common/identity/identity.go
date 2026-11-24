@@ -8,6 +8,7 @@ package identity
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -20,6 +21,13 @@ import (
 const Prefix = "byoh:host:"
 
 const (
+	// HostsGroup is the organization every host certificate has.
+	HostsGroup = "byoh:hosts"
+
+	// TenantGroupPrefix is followed by the tenant namespace to name the
+	// tenant organization of a host certificate.
+	TenantGroupPrefix = HostsGroup + ":"
+
 	// SuffixLength is the length of the random suffix that makes each issued
 	// certificate a distinct identity.
 	SuffixLength = 5
@@ -40,6 +48,23 @@ type HostIdentity struct {
 	NormalizedHostName string
 	// Suffix is the random suffix that is distinct for each issued certificate.
 	Suffix string
+}
+
+// Organization returns the organizations of a host certificate in the tenant
+// namespace: HostsGroup and the group of that tenant. The agent requests this
+// set and the approver requires it.
+func Organization(tenantNamespace string) []string {
+	return []string{HostsGroup, TenantGroupPrefix + tenantNamespace}
+}
+
+// HasOrganization reports whether organization is exactly the set
+// Organization returns for the tenant namespace, in any order. The set has two
+// entries, so an organization with both of them and the same length has no
+// duplicate and no extra entry.
+func HasOrganization(organization []string, tenantNamespace string) bool {
+	want := Organization(tenantNamespace)
+
+	return len(organization) == len(want) && slices.Contains(organization, want[0]) && slices.Contains(organization, want[1])
 }
 
 // HasPrefix reports whether s starts with Prefix, which is true of every host
