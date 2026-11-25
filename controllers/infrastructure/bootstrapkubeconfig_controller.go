@@ -98,6 +98,7 @@ type BootstrapKubeconfigReconciler struct {
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=bootstrapkubeconfigs/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;create;update
 //+kubebuilder:rbac:groups="",resources=configmaps,verbs=get
+//+kubebuilder:rbac:groups="",resources=namespaces,verbs=get
 //+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
