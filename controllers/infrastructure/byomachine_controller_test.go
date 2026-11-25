@@ -224,8 +224,11 @@ func (f *hostCleanupFixture) byoMachine(annotations map[string]string) *infrav1.
 	return &infrav1.ByoMachine{ObjectMeta: metav1.ObjectMeta{Name: "bm", Namespace: hcNamespace, Annotations: annotations}}
 }
 
-func (f *hostCleanupFixture) upgradeInProgress() map[string]string {
-	return map[string]string{upgradeInProgressAnnotation: "true"}
+// leftoverUpgradeMarker is the annotation barista's upgrade flow puts on
+// ByoMachines. The controller ignores it, so a marker left behind by a failed
+// or still-running upgrade must not keep a released host reserved.
+func (f *hostCleanupFixture) leftoverUpgradeMarker() map[string]string {
+	return map[string]string{"barista.platform9.io/upgrade-in-progress": "true"}
 }
 
 func (f *hostCleanupFixture) markDeleting(obj client.Object) {
@@ -294,9 +297,10 @@ func (f *hostCleanupFixture) deletingMachine(owner client.Object, upToDate metav
 	return m
 }
 
-// keepsLabel runs markHostForCleanup for machine and reports whether the
-// persisted ByoHost still carries its cluster reservation label(s).
-func (f *hostCleanupFixture) keepsLabel(t *testing.T, cluster *clusterv1.Cluster, byoMachine *infrav1.ByoMachine, machine *clusterv1.Machine, others ...client.Object) bool {
+// expect checks the decision for machine, then runs markHostForCleanup and
+// checks the persisted ByoHost kept or lost its cluster reservation label(s)
+// to match.
+func (f *hostCleanupFixture) expect(t *testing.T, want hostDecision, cluster *clusterv1.Cluster, byoMachine *infrav1.ByoMachine, machine *clusterv1.Machine, others ...client.Object) {
 	t.Helper()
 	_, cp := machine.Labels[clusterv1.MachineControlPlaneLabel]
 	hostLabels := map[string]string{infrav1.ClusterLabel: hcClusterName}
@@ -314,17 +318,21 @@ func (f *hostCleanupFixture) keepsLabel(t *testing.T, cluster *clusterv1.Cluster
 	})
 	require.NoError(t, err)
 
+	got, err := r.decideHost(context.Background(), scope)
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+
 	require.NoError(t, r.markHostForCleanup(context.Background(), scope))
 
 	updated := &infrav1.ByoHost{}
 	require.NoError(t, fakeClient.Get(context.Background(), client.ObjectKey{Name: host.Name, Namespace: hcNamespace}, updated))
 	assert.Contains(t, updated.Annotations, infrav1.HostCleanupAnnotation)
 	_, hasLabel := updated.Labels[infrav1.ClusterLabel]
+	assert.Equal(t, want.keep, hasLabel, "cluster-name label kept")
 	if cp {
 		_, hasCPLabel := updated.Labels[infrav1.ClusterLabelCP]
 		assert.Equal(t, hasLabel, hasCPLabel, "cluster-name and cluster-name-cp labels must be kept or stripped together")
 	}
-	return hasLabel
 }
 
 func TestByoMachineReconciler_markHostForCleanup_releasesHost(t *testing.T) {
@@ -334,7 +342,7 @@ func TestByoMachineReconciler_markHostForCleanup_releasesHost(t *testing.T) {
 		kcp := f.kcp(3)
 		machine := f.deletingMachine(kcp, metav1.ConditionFalse)
 
-		assert.False(t, f.keepsLabel(t, f.cluster(true), f.byoMachine(f.upgradeInProgress()), machine, kcp))
+		f.expect(t, releaseHost(reasonClusterDeleting), f.cluster(true), f.byoMachine(f.leftoverUpgradeMarker()), machine, kcp)
 	})
 
 	t.Run("MachineDeployment delete strips the label", func(t *testing.T) {
@@ -342,14 +350,14 @@ func TestByoMachineReconciler_markHostForCleanup_releasesHost(t *testing.T) {
 		f.markDeleting(md)
 		machine := f.deletingMachine(ms, metav1.ConditionTrue)
 
-		assert.False(t, f.keepsLabel(t, f.cluster(false), f.byoMachine(nil), machine, md, ms))
+		f.expect(t, releaseHost(reasonMachineDeploymentDeleted), f.cluster(false), f.byoMachine(nil), machine, md, ms)
 	})
 
 	t.Run("MachineDeployment already gone strips the label", func(t *testing.T) {
 		ms := f.ms("ms-1", "1", 2)
 		machine := f.deletingMachine(ms, metav1.ConditionTrue)
 
-		assert.False(t, f.keepsLabel(t, f.cluster(false), f.byoMachine(nil), machine, ms))
+		f.expect(t, releaseHost(reasonMachineDeploymentDeleted), f.cluster(false), f.byoMachine(nil), machine, ms)
 	})
 
 	t.Run("worker scale-down strips the label even when a newer sibling exists", func(t *testing.T) {
@@ -358,7 +366,7 @@ func TestByoMachineReconciler_markHostForCleanup_releasesHost(t *testing.T) {
 		older := f.machine("m-older", f.at(-time.Minute), ms, metav1.ConditionTrue)
 		newer := f.machine("m-newer", f.at(time.Minute), ms, metav1.ConditionTrue)
 
-		assert.False(t, f.keepsLabel(t, f.cluster(false), f.byoMachine(nil), machine, md, ms, older, newer))
+		f.expect(t, releaseHost(reasonOwnerScaledDown), f.cluster(false), f.byoMachine(nil), machine, md, ms, older, newer)
 	})
 
 	t.Run("control-plane scale-down strips the label when KCP deletes the oldest machine", func(t *testing.T) {
@@ -366,13 +374,21 @@ func TestByoMachineReconciler_markHostForCleanup_releasesHost(t *testing.T) {
 		machine := f.deletingMachine(kcp, metav1.ConditionTrue)
 		newer := f.machine("m-newer", f.at(time.Minute), kcp, metav1.ConditionTrue)
 
-		assert.False(t, f.keepsLabel(t, f.cluster(false), f.byoMachine(nil), machine, kcp, newer))
+		f.expect(t, releaseHost(reasonOwnerScaledDown), f.cluster(false), f.byoMachine(nil), machine, kcp, newer)
+	})
+
+	t.Run("leftover upgrade marker does not stop a scale-down release", func(t *testing.T) {
+		md, ms := f.md("1"), f.ms("ms-1", "1", 1)
+		machine := f.deletingMachine(ms, metav1.ConditionTrue)
+		other := f.machine("m-other", f.at(time.Minute), ms, metav1.ConditionTrue)
+
+		f.expect(t, releaseHost(reasonOwnerScaledDown), f.cluster(false), f.byoMachine(f.leftoverUpgradeMarker()), machine, md, ms, other)
 	})
 
 	t.Run("standalone machine with no owner strips the label", func(t *testing.T) {
 		machine := f.deletingMachine(nil, "")
 
-		assert.False(t, f.keepsLabel(t, f.cluster(false), f.byoMachine(nil), machine))
+		f.expect(t, releaseHost(reasonNoControllingOwner), f.cluster(false), f.byoMachine(nil), machine)
 	})
 
 	t.Run("owning MachineSet deleted strips the label", func(t *testing.T) {
@@ -380,7 +396,7 @@ func TestByoMachineReconciler_markHostForCleanup_releasesHost(t *testing.T) {
 		f.markDeleting(ms)
 		machine := f.deletingMachine(ms, metav1.ConditionTrue)
 
-		assert.False(t, f.keepsLabel(t, f.cluster(false), f.byoMachine(nil), machine, md, ms))
+		f.expect(t, releaseHost(reasonOwnerDeleted), f.cluster(false), f.byoMachine(nil), machine, md, ms)
 	})
 }
 
@@ -392,7 +408,7 @@ func TestByoMachineReconciler_markHostForCleanup_keepsHostOnReplacement(t *testi
 		machine := f.deletingMachine(kcp, metav1.ConditionFalse)
 		surged := f.machine("m-new", f.at(10*time.Minute), kcp, metav1.ConditionTrue)
 
-		assert.True(t, f.keepsLabel(t, f.cluster(false), f.byoMachine(nil), machine, kcp, surged))
+		f.expect(t, keepHost(reasonNotUpToDate), f.cluster(false), f.byoMachine(nil), machine, kcp, surged)
 	})
 
 	t.Run("KCP rollout with maxSurge=0", func(t *testing.T) {
@@ -401,7 +417,7 @@ func TestByoMachineReconciler_markHostForCleanup_keepsHostOnReplacement(t *testi
 		old1 := f.machine("m-old-1", f.at(time.Minute), kcp, metav1.ConditionFalse)
 		old2 := f.machine("m-old-2", f.at(2*time.Minute), kcp, metav1.ConditionFalse)
 
-		assert.True(t, f.keepsLabel(t, f.cluster(false), f.byoMachine(nil), machine, kcp, old1, old2))
+		f.expect(t, keepHost(reasonNotUpToDate), f.cluster(false), f.byoMachine(nil), machine, kcp, old1, old2)
 	})
 
 	t.Run("MachineDeployment rollout with maxSurge>=1", func(t *testing.T) {
@@ -409,7 +425,7 @@ func TestByoMachineReconciler_markHostForCleanup_keepsHostOnReplacement(t *testi
 		machine := f.deletingMachine(oldMS, metav1.ConditionFalse)
 		surged := f.machine("m-new", f.at(10*time.Minute), newMS, metav1.ConditionTrue)
 
-		assert.True(t, f.keepsLabel(t, f.cluster(false), f.byoMachine(nil), machine, md, oldMS, newMS, surged))
+		f.expect(t, keepHost(reasonNotUpToDate), f.cluster(false), f.byoMachine(nil), machine, md, oldMS, newMS, surged)
 	})
 
 	t.Run("MachineDeployment rollout with maxSurge=0", func(t *testing.T) {
@@ -417,7 +433,7 @@ func TestByoMachineReconciler_markHostForCleanup_keepsHostOnReplacement(t *testi
 		md, oldMS, newMS := f.md("2"), f.ms("ms-old", "1", 0), f.ms("ms-new", "2", 0)
 		machine := f.deletingMachine(oldMS, metav1.ConditionFalse)
 
-		assert.True(t, f.keepsLabel(t, f.cluster(false), f.byoMachine(nil), machine, md, oldMS, newMS))
+		f.expect(t, keepHost(reasonNotUpToDate), f.cluster(false), f.byoMachine(nil), machine, md, oldMS, newMS)
 	})
 
 	t.Run("MachineDeployment rollout with a stale UpToDate condition", func(t *testing.T) {
@@ -425,7 +441,7 @@ func TestByoMachineReconciler_markHostForCleanup_keepsHostOnReplacement(t *testi
 		machine := f.deletingMachine(oldMS, metav1.ConditionTrue)
 		remaining := f.machine("m-old-2", f.at(time.Minute), oldMS, metav1.ConditionTrue)
 
-		assert.True(t, f.keepsLabel(t, f.cluster(false), f.byoMachine(nil), machine, md, oldMS, remaining))
+		f.expect(t, keepHost(reasonOldMachineSetRevision), f.cluster(false), f.byoMachine(nil), machine, md, oldMS, remaining)
 	})
 
 	t.Run("MachineHealthCheck remediation", func(t *testing.T) {
@@ -438,7 +454,7 @@ func TestByoMachineReconciler_markHostForCleanup_keepsHostOnReplacement(t *testi
 		// Without the MHC signal, one live sibling at replicas=1 would read as a scale-down.
 		other := f.machine("m-other", f.at(time.Minute), ms, metav1.ConditionTrue)
 
-		assert.True(t, f.keepsLabel(t, f.cluster(false), f.byoMachine(nil), machine, md, ms, other))
+		f.expect(t, keepHost(reasonRemediation), f.cluster(false), f.byoMachine(nil), machine, md, ms, other)
 	})
 
 	t.Run("manual worker machine delete before the replacement exists", func(t *testing.T) {
@@ -446,7 +462,7 @@ func TestByoMachineReconciler_markHostForCleanup_keepsHostOnReplacement(t *testi
 		machine := f.deletingMachine(ms, metav1.ConditionTrue)
 		other := f.machine("m-other", f.at(-time.Minute), ms, metav1.ConditionTrue)
 
-		assert.True(t, f.keepsLabel(t, f.cluster(false), f.byoMachine(nil), machine, md, ms, other))
+		f.expect(t, keepHost(reasonBelowDesiredReplicas), f.cluster(false), f.byoMachine(nil), machine, md, ms, other)
 	})
 
 	t.Run("manual worker machine delete after the replacement exists", func(t *testing.T) {
@@ -455,7 +471,7 @@ func TestByoMachineReconciler_markHostForCleanup_keepsHostOnReplacement(t *testi
 		other := f.machine("m-other", f.at(time.Minute), ms, metav1.ConditionTrue)
 		replacement := f.machine("m-replacement", f.deletedAt.Add(time.Second), ms, metav1.ConditionTrue)
 
-		assert.True(t, f.keepsLabel(t, f.cluster(false), f.byoMachine(nil), machine, md, ms, other, replacement))
+		f.expect(t, keepHost(reasonReplacementCreated), f.cluster(false), f.byoMachine(nil), machine, md, ms, other, replacement)
 	})
 
 	t.Run("manual control-plane machine delete", func(t *testing.T) {
@@ -464,15 +480,6 @@ func TestByoMachineReconciler_markHostForCleanup_keepsHostOnReplacement(t *testi
 		other1 := f.machine("m-other-1", f.at(-2*time.Minute), kcp, metav1.ConditionTrue)
 		other2 := f.machine("m-other-2", f.at(-time.Minute), kcp, metav1.ConditionTrue)
 
-		assert.True(t, f.keepsLabel(t, f.cluster(false), f.byoMachine(nil), machine, kcp, other1, other2))
-	})
-
-	t.Run("upgrade-in-progress annotation", func(t *testing.T) {
-		kcp := f.kcp(1)
-		machine := f.deletingMachine(kcp, metav1.ConditionTrue)
-		// Without the annotation, one live sibling at replicas=1 would read as a scale-down.
-		other := f.machine("m-other", f.at(time.Minute), kcp, metav1.ConditionTrue)
-
-		assert.True(t, f.keepsLabel(t, f.cluster(false), f.byoMachine(f.upgradeInProgress()), machine, kcp, other))
+		f.expect(t, keepHost(reasonBelowDesiredReplicas), f.cluster(false), f.byoMachine(nil), machine, kcp, other1, other2)
 	})
 }

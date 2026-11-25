@@ -655,15 +655,36 @@ func ByoHostToByoMachineMapFunc(gvk schema.GroupVersionKind) handler.MapFunc {
 	}
 }
 
-// upgradeInProgressAnnotation is set on a ByoMachine by barista's upgrade flow
-// to mark its delete as a planned replacement.
-const upgradeInProgressAnnotation = "barista.platform9.io/upgrade-in-progress"
+// hostDecision says whether a deleted Machine's ByoHost keeps its cluster
+// reservation label, so the Machine replacing it can reuse the host, or is
+// released from the cluster. reason is logged to show which signal decided.
+type hostDecision struct {
+	keep   bool
+	reason string
+}
+
+func keepHost(reason string) hostDecision    { return hostDecision{keep: true, reason: reason} }
+func releaseHost(reason string) hostDecision { return hostDecision{reason: reason} }
+
+const (
+	reasonClusterDeleting          = "ClusterDeleting"
+	reasonMachineDeploymentDeleted = "MachineDeploymentDeleted"
+	reasonNoControllingOwner       = "NoControllingOwner"
+	reasonOwnerDeleted             = "OwnerDeleted"
+	reasonOwnerScaledDown          = "OwnerScaledDown"
+	reasonRemediation              = "Remediation"
+	reasonNotUpToDate              = "NotUpToDate"
+	reasonOldMachineSetRevision    = "OldMachineSetRevision"
+	reasonOwnerReplicasUnset       = "OwnerReplicasUnset"
+	reasonReplacementCreated       = "ReplacementCreated"
+	reasonBelowDesiredReplicas     = "BelowDesiredReplicas"
+)
 
 func (r *ByoMachineReconciler) markHostForCleanup(ctx context.Context, machineScope *byoMachineScope) error {
 	logger := log.FromContext(ctx).WithValues("cluster", machineScope.Cluster.Name)
 	helper, _ := patch.NewHelper(machineScope.ByoHost, r.Client)
 
-	replacement, err := r.isMachineReplacement(ctx, machineScope)
+	decision, err := r.decideHost(ctx, machineScope)
 	if err != nil {
 		return fmt.Errorf("failed to determine whether the machine is being replaced or released: %w", err)
 	}
@@ -673,10 +694,10 @@ func (r *ByoMachineReconciler) markHostForCleanup(ctx context.Context, machineSc
 	}
 	machineScope.ByoHost.Annotations[infrav1.HostCleanupAnnotation] = ""
 
-	if replacement {
-		logger.Info("Machine is being replaced, keeping cluster reservation label on ByoHost", "byohost", machineScope.ByoHost.Name)
+	if decision.keep {
+		logger.Info("Machine is being replaced, keeping cluster reservation label on ByoHost", "byohost", machineScope.ByoHost.Name, "reason", decision.reason)
 	} else {
-		logger.Info("Releasing ByoHost from cluster", "byohost", machineScope.ByoHost.Name)
+		logger.Info("Releasing ByoHost from cluster", "byohost", machineScope.ByoHost.Name, "reason", decision.reason)
 		delete(machineScope.ByoHost.Labels, infrav1.ClusterLabel)
 		delete(machineScope.ByoHost.Labels, infrav1.ClusterLabelCP)
 	}
@@ -684,68 +705,65 @@ func (r *ByoMachineReconciler) markHostForCleanup(ctx context.Context, machineSc
 	return helper.Patch(ctx, machineScope.ByoHost)
 }
 
-// isMachineReplacement reports whether the Machine is being deleted so that its
-// owner can replace it (rollout, remediation, manual delete), in which case the
-// ByoHost keeps its cluster reservation label. It returns false for a real
-// release: cluster or node pool deleted, owner scaled down, or no owner to
-// recreate it. It never looks at maxSurge. See KAAP-2639.
-func (r *ByoMachineReconciler) isMachineReplacement(ctx context.Context, machineScope *byoMachineScope) (bool, error) {
+// decideHost keeps the ByoHost's cluster reservation label when the Machine is
+// being deleted so that its owner can replace it (rollout, upgrade,
+// remediation, manual delete), and releases the host for a real release:
+// cluster or node pool deleted, owner scaled down, or no owner to recreate it.
+// It uses only CAPI state, never maxSurge or upgrade annotations. See KAAP-2639.
+func (r *ByoMachineReconciler) decideHost(ctx context.Context, machineScope *byoMachineScope) (hostDecision, error) {
 	machine := machineScope.Machine
 
 	if !machineScope.Cluster.DeletionTimestamp.IsZero() {
-		return false, nil
+		return releaseHost(reasonClusterDeleting), nil
 	}
 	var md *unstructured.Unstructured
 	if mdName, ok := machine.Labels[clusterv1.MachineDeploymentNameLabel]; ok {
 		var err error
 		md, err = r.getUnstructured(ctx, clusterv1.GroupVersion.WithKind("MachineDeployment"), machine.Namespace, mdName)
 		if apierrors.IsNotFound(err) {
-			return false, nil
+			return releaseHost(reasonMachineDeploymentDeleted), nil
 		}
 		if err != nil {
-			return false, err
+			return hostDecision{}, err
 		}
 		if md.GetDeletionTimestamp() != nil {
-			return false, nil
+			return releaseHost(reasonMachineDeploymentDeleted), nil
 		}
 	}
 
-	if hasReplacementSignal(machineScope) {
-		return true, nil
+	if collections.IsUnhealthyAndOwnerRemediated(machine) {
+		return keepHost(reasonRemediation), nil
 	}
-	return r.ownerReplacesMachine(ctx, machineScope, md)
+	// Set by KCP and, for MachineDeployment workers, by the Machine controller
+	// on every Machine a rollout will replace, whatever the maxSurge.
+	if v1beta2conditions.IsFalse(machine, clusterv1.MachineUpToDateCondition) {
+		return keepHost(reasonNotUpToDate), nil
+	}
+	return r.decideFromOwner(ctx, machineScope, md)
 }
 
-func hasReplacementSignal(machineScope *byoMachineScope) bool {
-	return machineScope.ByoMachine.Annotations[upgradeInProgressAnnotation] == "true" ||
-		collections.IsUnhealthyAndOwnerRemediated(machineScope.Machine) ||
-		// Set by KCP and, for MachineDeployment workers, by the Machine
-		// controller on every Machine a rollout will replace, whatever the maxSurge.
-		v1beta2conditions.IsFalse(machineScope.Machine, clusterv1.MachineUpToDateCondition)
-}
-
-// ownerReplacesMachine reports whether the Machine's controlling owner
-// (MachineSet or control plane) will recreate it. md is the Machine's
-// MachineDeployment, or nil if it has none.
-func (r *ByoMachineReconciler) ownerReplacesMachine(ctx context.Context, machineScope *byoMachineScope, md *unstructured.Unstructured) (bool, error) {
+// decideFromOwner checks whether the Machine's controlling owner (MachineSet
+// or control plane) will recreate it. md is the Machine's MachineDeployment,
+// or nil if it has none.
+func (r *ByoMachineReconciler) decideFromOwner(ctx context.Context, machineScope *byoMachineScope, md *unstructured.Unstructured) (hostDecision, error) {
 	machine := machineScope.Machine
 	ownerRef := metav1.GetControllerOf(machine)
 	if ownerRef == nil {
-		return false, nil
+		return releaseHost(reasonNoControllingOwner), nil
 	}
 	gv, err := schema.ParseGroupVersion(ownerRef.APIVersion)
 	if err != nil {
-		return false, err
+		return hostDecision{}, err
 	}
 	owner, err := r.getUnstructured(ctx, gv.WithKind(ownerRef.Kind), machine.Namespace, ownerRef.Name)
 	if apierrors.IsNotFound(err) {
-		return false, nil
+		return releaseHost(reasonOwnerDeleted), nil
 	}
 	if err != nil {
-		return false, err
+		return hostDecision{}, err
 	}
 	if owner.GetDeletionTimestamp() != nil {
-		return false, nil
+		return releaseHost(reasonOwnerDeleted), nil
 	}
 
 	// Backs up a stale UpToDate condition: a MachineSet whose revision is not
@@ -754,29 +772,29 @@ func (r *ByoMachineReconciler) ownerReplacesMachine(ctx context.Context, machine
 		msRevision := owner.GetAnnotations()[clusterv1.RevisionAnnotation]
 		mdRevision := md.GetAnnotations()[clusterv1.RevisionAnnotation]
 		if msRevision != "" && mdRevision != "" && msRevision != mdRevision {
-			return true, nil
+			return keepHost(reasonOldMachineSetRevision), nil
 		}
 	}
 
 	replicas, found, err := unstructured.NestedInt64(owner.Object, "spec", "replicas")
 	if err != nil {
-		return false, err
+		return hostDecision{}, err
 	}
 	if !found {
-		return true, nil
+		return keepHost(reasonOwnerReplicasUnset), nil
 	}
-	return r.replacementPending(ctx, machineScope, ownerRef.UID, replicas)
+	return r.decideFromSiblings(ctx, machineScope, ownerRef.UID, replicas)
 }
 
-// replacementPending tells an owner replacing the Machine apart from one that
+// decideFromSiblings tells an owner replacing the Machine apart from one that
 // scaled down. A scale-down lowers replicas before deleting and never creates
 // a Machine, so a sibling created after this delete started, or fewer live
 // Machines than desired, means a replacement.
-func (r *ByoMachineReconciler) replacementPending(ctx context.Context, machineScope *byoMachineScope, ownerUID types.UID, replicas int64) (bool, error) {
+func (r *ByoMachineReconciler) decideFromSiblings(ctx context.Context, machineScope *byoMachineScope, ownerUID types.UID, replicas int64) (hostDecision, error) {
 	machine := machineScope.Machine
 	machines := &clusterv1.MachineList{}
 	if err := r.List(ctx, machines, client.InNamespace(machine.Namespace), client.MatchingLabels{clusterv1.ClusterNameLabel: machineScope.Cluster.Name}); err != nil {
-		return false, err
+		return hostDecision{}, err
 	}
 	var alive int64
 	for i := range machines.Items {
@@ -788,11 +806,14 @@ func (r *ByoMachineReconciler) replacementPending(ctx context.Context, machineSc
 			continue
 		}
 		if machine.DeletionTimestamp != nil && m.CreationTimestamp.After(machine.DeletionTimestamp.Time) {
-			return true, nil
+			return keepHost(reasonReplacementCreated), nil
 		}
 		alive++
 	}
-	return alive < replicas, nil
+	if alive < replicas {
+		return keepHost(reasonBelowDesiredReplicas), nil
+	}
+	return releaseHost(reasonOwnerScaledDown), nil
 }
 
 func (r *ByoMachineReconciler) getUnstructured(ctx context.Context, gvk schema.GroupVersionKind, namespace, name string) (*unstructured.Unstructured, error) {
