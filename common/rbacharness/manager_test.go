@@ -370,3 +370,84 @@ func TestRBAC_ManagerGrantsHostSecrets(t *testing.T) {
 		})
 	}
 }
+
+// managerAccessCase is one access review of the manager ServiceAccount.
+type managerAccessCase struct {
+	name      string
+	attrs     authv1.ResourceAttributes
+	wantAllow bool
+}
+
+// assertManagerAccess runs every case as the manager ServiceAccount against
+// the shipped manager RBAC of each source. The authorizer reads informer
+// caches, so the first allowed case is polled until the shipped rules are
+// visible. Denied cases are checked once afterwards.
+func assertManagerAccess(t *testing.T, cases []managerAccessCase) {
+	t.Helper()
+
+	for _, source := range rbacharness.Sources() {
+		t.Run(string(source), func(t *testing.T) {
+			h, err := rbacharness.Start(t.Context(), source)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, h.Stop()) })
+
+			admin, err := kubernetes.NewForConfig(h.AdminConfig())
+			require.NoError(t, err)
+			_, manager := managerIdentity(t, admin)
+
+			for i := range cases {
+				tc := &cases[i]
+				t.Run(tc.name, func(t *testing.T) {
+					if tc.wantAllow {
+						require.Eventually(t, func() bool {
+							got, reviewErr := h.Allowed(t.Context(), manager, &tc.attrs)
+							return reviewErr == nil && got
+						}, 10*time.Second, 100*time.Millisecond)
+
+						return
+					}
+
+					got, reviewErr := h.Allowed(t.Context(), manager, &tc.attrs)
+					require.NoError(t, reviewErr)
+					assert.False(t, got)
+				})
+			}
+		})
+	}
+}
+
+// TestRBAC_ManagerNamespaces checks that the manager can read a Namespace and
+// nothing more. Denied cases run after the allowed one in each source, so a
+// denial is not an artifact of a cache that has not synced.
+func TestRBAC_ManagerNamespaces(t *testing.T) {
+	namespaces := func(verb string) authv1.ResourceAttributes {
+		return authv1.ResourceAttributes{Verb: verb, Resource: "namespaces"}
+	}
+
+	assertManagerAccess(t, []managerAccessCase{
+		{name: "get namespaces", attrs: namespaces("get"), wantAllow: true},
+		{name: "list namespaces", attrs: namespaces("list"), wantAllow: false},
+		{name: "watch namespaces", attrs: namespaces("watch"), wantAllow: false},
+		{name: "update namespaces", attrs: namespaces("update"), wantAllow: false},
+		{name: "delete namespaces", attrs: namespaces("delete"), wantAllow: false},
+	})
+}
+
+// TestRBAC_ManagerApproveSigner checks that the manager may approve only the
+// kube-apiserver-client signer. Approving a CSR of another signer is refused
+// by the API server with Forbidden, so the approver must not touch those.
+func TestRBAC_ManagerApproveSigner(t *testing.T) {
+	approve := func(signer string) authv1.ResourceAttributes {
+		return authv1.ResourceAttributes{
+			Verb:     "approve",
+			Group:    "certificates.k8s.io",
+			Resource: "signers",
+			Name:     signer,
+		}
+	}
+
+	assertManagerAccess(t, []managerAccessCase{
+		{name: "approve kube-apiserver-client", attrs: approve("kubernetes.io/kube-apiserver-client"), wantAllow: true},
+		{name: "approve kube-apiserver-client-kubelet", attrs: approve("kubernetes.io/kube-apiserver-client-kubelet"), wantAllow: false},
+	})
+}
