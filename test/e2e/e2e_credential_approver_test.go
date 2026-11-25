@@ -51,6 +51,13 @@ var _ = Describe("When a BootstrapKubeconfig issues a credential [Credential]", 
 		issued        *infrastructurev1beta1.BootstrapKubeconfig
 		kubeconfig    string
 		csrNames      []string
+
+		// The credential only allows creating requests. Decisions are read with the admin client.
+		credentialClient *kubernetes.Clientset
+		newCSR           func(identityOf identity.HostIdentity, organization []string, expirationSeconds *int32) *certv1.CertificateSigningRequest
+		createCSR        func(identityOf identity.HostIdentity, organization []string, expirationSeconds *int32) string
+		getCSR           func(csrName string) *certv1.CertificateSigningRequest
+		conditionTypeOf  func(csrName string) func() []certv1.RequestConditionType
 	)
 
 	BeforeEach(func() {
@@ -64,6 +71,48 @@ var _ = Describe("When a BootstrapKubeconfig issues a credential [Credential]", 
 		hostName = fmt.Sprintf("credential-host-%s", util.RandomString(6))
 		issued, kubeconfig = createBootstrapKubeconfig(ctx, bootstrapClusterProxy, clusterConName, namespace.Name, hostName)
 		csrNames = nil
+
+		restConfig, err := clientcmd.RESTConfigFromKubeConfig([]byte(kubeconfig))
+		Expect(err).NotTo(HaveOccurred())
+		credentialClient, err = kubernetes.NewForConfig(restConfig)
+		Expect(err).NotTo(HaveOccurred())
+
+		newCSR = func(identityOf identity.HostIdentity, organization []string, expirationSeconds *int32) *certv1.CertificateSigningRequest {
+			csrName := fmt.Sprintf("byoh-csr-%s-%s", identityOf.TenantNamespace, util.RandomString(8))
+			csr, buildErr := builder.CertificateSigningRequest(csrName, identityOf.String(), identity.HostsGroup, credentialCSRKeySize).WithOrganization(organization...).Build()
+			Expect(buildErr).NotTo(HaveOccurred())
+			csr.Spec.ExpirationSeconds = expirationSeconds
+			return csr
+		}
+
+		createCSR = func(identityOf identity.HostIdentity, organization []string, expirationSeconds *int32) string {
+			csr := newCSR(identityOf, organization, expirationSeconds)
+			_, createErr := credentialClient.CertificatesV1().CertificateSigningRequests().Create(ctx, csr, metav1.CreateOptions{})
+			Expect(createErr).NotTo(HaveOccurred())
+			csrNames = append(csrNames, csr.Name)
+			return csr.Name
+		}
+
+		getCSR = func(csrName string) *certv1.CertificateSigningRequest {
+			csr := &certv1.CertificateSigningRequest{}
+			getErr := bootstrapClusterProxy.GetClient().Get(ctx, client.ObjectKey{Name: csrName}, csr)
+			Expect(getErr).NotTo(HaveOccurred())
+			return csr
+		}
+
+		conditionTypeOf = func(csrName string) func() []certv1.RequestConditionType {
+			return func() []certv1.RequestConditionType {
+				csr := &certv1.CertificateSigningRequest{}
+				if getErr := bootstrapClusterProxy.GetClient().Get(ctx, client.ObjectKey{Name: csrName}, csr); getErr != nil {
+					return nil
+				}
+				var conditionTypes []certv1.RequestConditionType
+				for _, condition := range csr.Status.Conditions {
+					conditionTypes = append(conditionTypes, condition.Type)
+				}
+				return conditionTypes
+			}
+		}
 	})
 
 	AfterEach(func() {
@@ -112,23 +161,6 @@ var _ = Describe("When a BootstrapKubeconfig issues a credential [Credential]", 
 	})
 
 	It("Should approve a request for its own host and deny a request for another host or tenant", func() {
-		restConfig, err := clientcmd.RESTConfigFromKubeConfig([]byte(kubeconfig))
-		Expect(err).NotTo(HaveOccurred())
-		credentialClient, err := kubernetes.NewForConfig(restConfig)
-		Expect(err).NotTo(HaveOccurred())
-
-		// The credential only allows creating requests. Decisions are read with the admin client.
-		createCSR := func(identityOf identity.HostIdentity, organization []string, expirationSeconds *int32) string {
-			csrName := fmt.Sprintf("byoh-csr-%s-%s", identityOf.TenantNamespace, util.RandomString(8))
-			csr, buildErr := builder.CertificateSigningRequest(csrName, identityOf.String(), identity.HostsGroup, credentialCSRKeySize).WithOrganization(organization...).Build()
-			Expect(buildErr).NotTo(HaveOccurred())
-			csr.Spec.ExpirationSeconds = expirationSeconds
-			_, createErr := credentialClient.CertificatesV1().CertificateSigningRequests().Create(ctx, csr, metav1.CreateOptions{})
-			Expect(createErr).NotTo(HaveOccurred())
-			csrNames = append(csrNames, csrName)
-			return csrName
-		}
-
 		own := identity.HostIdentity{
 			TenantNamespace:    namespace.Name,
 			NormalizedHostName: issued.Spec.HostName,
@@ -160,19 +192,6 @@ var _ = Describe("When a BootstrapKubeconfig issues a credential [Credential]", 
 		noLifetime.Suffix = util.RandomString(identity.SuffixLength)
 		noLifetimeCSR := createCSR(noLifetime, ownOrganization, nil)
 
-		conditionTypeOf := func(csrName string) func() []certv1.RequestConditionType {
-			return func() []certv1.RequestConditionType {
-				csr := &certv1.CertificateSigningRequest{}
-				if err := bootstrapClusterProxy.GetClient().Get(ctx, client.ObjectKey{Name: csrName}, csr); err != nil {
-					return nil
-				}
-				var conditionTypes []certv1.RequestConditionType
-				for _, condition := range csr.Status.Conditions {
-					conditionTypes = append(conditionTypes, condition.Type)
-				}
-				return conditionTypes
-			}
-		}
 		intervals := e2eConfig.GetIntervals("", "wait-controllers")
 
 		Eventually(conditionTypeOf(ownCSR), intervals...).Should(ContainElement(certv1.CertificateApproved))
@@ -182,11 +201,113 @@ var _ = Describe("When a BootstrapKubeconfig issues a credential [Credential]", 
 		Eventually(conditionTypeOf(hostsGroupOnlyCSR), intervals...).Should(ContainElement(certv1.CertificateDenied))
 
 		for _, csrName := range []string{otherHostCSR, otherTenantCSR, noLifetimeCSR, hostsGroupOnlyCSR} {
-			csr := &certv1.CertificateSigningRequest{}
-			err := bootstrapClusterProxy.GetClient().Get(ctx, client.ObjectKey{Name: csrName}, csr)
-			Expect(err).NotTo(HaveOccurred())
+			csr := getCSR(csrName)
 			Expect(csr.Status.Conditions).To(ContainElement(HaveField("Reason", credentialDeniedReason)))
 		}
+	})
+
+	// The token has not claimed anything until a request is approved, so each spec below uses
+	// the BootstrapKubeconfig of its own BeforeEach and starts with an unclaimed token.
+	Context("with a token that has not approved a request yet", func() {
+		var (
+			own       identity.HostIdentity
+			intervals []interface{}
+		)
+
+		// newOwnIdentity returns an identity for the host of the BootstrapKubeconfig with a new suffix.
+		newOwnIdentity := func() identity.HostIdentity {
+			return identity.HostIdentity{
+				TenantNamespace:    namespace.Name,
+				NormalizedHostName: issued.Spec.HostName,
+				Suffix:             util.RandomString(identity.SuffixLength),
+			}
+		}
+
+		BeforeEach(func() {
+			own = newOwnIdentity()
+			intervals = e2eConfig.GetIntervals("", "wait-controllers")
+		})
+
+		It("Should deny a request above the lifetime cap", func() {
+			csrName := createCSR(own, identity.Organization(namespace.Name), ptr.To(int32(31536001)))
+
+			Eventually(conditionTypeOf(csrName), intervals...).Should(ContainElement(certv1.CertificateDenied))
+			Expect(getCSR(csrName).Status.Conditions).To(ContainElement(SatisfyAll(
+				HaveField("Reason", credentialDeniedReason),
+				HaveField("Message", ContainSubstring("lifetime")),
+			)))
+		})
+
+		It("Should deny a request whose Organizations are not exactly the hosts group and the own tenant group", func() {
+			otherTenantGroup := []string{identity.HostsGroup, identity.TenantGroupPrefix + "other-" + namespace.Name}
+			extraGroup := []string{identity.HostsGroup, identity.TenantGroupPrefix + namespace.Name, "byoh:extra-probe"}
+			lifetime := ptr.To(int32(certificate.DefaultLifetimeSeconds))
+
+			otherTenantGroupCSR := createCSR(own, otherTenantGroup, lifetime)
+			extraGroupCSR := createCSR(newOwnIdentity(), extraGroup, lifetime)
+
+			for _, csrName := range []string{otherTenantGroupCSR, extraGroupCSR} {
+				Eventually(conditionTypeOf(csrName), intervals...).Should(ContainElement(certv1.CertificateDenied))
+				Expect(getCSR(csrName).Status.Conditions).To(ContainElement(SatisfyAll(
+					HaveField("Reason", credentialDeniedReason),
+					HaveField("Message", ContainSubstring("organization")),
+				)))
+			}
+		})
+
+		It("Should approve one request per token", func() {
+			lifetime := ptr.To(int32(certificate.DefaultLifetimeSeconds))
+			organization := identity.Organization(namespace.Name)
+
+			firstCSR := createCSR(own, organization, lifetime)
+			Eventually(conditionTypeOf(firstCSR), intervals...).Should(ContainElement(certv1.CertificateApproved))
+
+			secondCSR := createCSR(newOwnIdentity(), organization, lifetime)
+			Eventually(conditionTypeOf(secondCSR), intervals...).Should(ContainElement(certv1.CertificateDenied))
+			Expect(getCSR(secondCSR).Status.Conditions).To(ContainElement(HaveField("Reason", credentialDeniedReason)))
+		})
+
+		It("Should keep the credential Secret after a denied request and delete it after the approval", func() {
+			credentialSecretKey := types.NamespacedName{Namespace: namespace.Name, Name: issued.Name + "-cred"}
+			lifetime := ptr.To(int32(certificate.DefaultLifetimeSeconds))
+			otherHost := own
+			otherHost.NormalizedHostName = "other-" + issued.Spec.HostName
+
+			deniedCSR := createCSR(otherHost, identity.Organization(namespace.Name), lifetime)
+			Eventually(conditionTypeOf(deniedCSR), intervals...).Should(ContainElement(certv1.CertificateDenied))
+			Consistently(func() error {
+				return bootstrapClusterProxy.GetClient().Get(ctx, credentialSecretKey, &corev1.Secret{})
+			}, "10s", "1s").Should(Succeed(), "a denied request must not delete the credential Secret")
+
+			approvedCSR := createCSR(own, identity.Organization(namespace.Name), lifetime)
+			Eventually(conditionTypeOf(approvedCSR), intervals...).Should(ContainElement(certv1.CertificateApproved))
+			Eventually(func() bool {
+				getErr := bootstrapClusterProxy.GetClient().Get(ctx, credentialSecretKey, &corev1.Secret{})
+				return apierrors.IsNotFound(getErr)
+			}, intervals...).Should(BeTrue(), "the approval must delete the credential Secret")
+		})
+
+		It("Should ignore a request for a signer the approver does not handle", func() {
+			specStart := metav1.Now()
+			lifetime := ptr.To(int32(certificate.DefaultLifetimeSeconds))
+
+			foreignCSR := newCSR(own, identity.Organization(namespace.Name), lifetime)
+			foreignCSR.Spec.SignerName = certv1.KubeAPIServerClientKubeletSignerName
+			_, err := credentialClient.CertificatesV1().CertificateSigningRequests().Create(ctx, foreignCSR, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			csrNames = append(csrNames, foreignCSR.Name)
+
+			// The approval of a request that follows shows the manager is running and has reconciled.
+			ownCSR := createCSR(newOwnIdentity(), identity.Organization(namespace.Name), lifetime)
+			Eventually(conditionTypeOf(ownCSR), intervals...).Should(ContainElement(certv1.CertificateApproved))
+
+			Consistently(conditionTypeOf(foreignCSR.Name), "20s", "2s").Should(BeEmpty())
+
+			logs, err := managerLogsSince(ctx, bootstrapClusterProxy.GetClientSet(), specStart)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(logs).NotTo(BeEmpty(), "no manager log lines were read, so the check below proves nothing")
+			Expect(logLinesContaining(logs, "Denying CSR", foreignCSR.Name)).To(BeEmpty())
+		})
 	})
 
 	It("Should record the requester as createdBy and issue a token with the configured lifetime", func() {
