@@ -1808,6 +1808,7 @@ rules:
       - ""
     resources:
       - configmaps
+      - namespaces
     verbs:
       - get
   - apiGroups:
