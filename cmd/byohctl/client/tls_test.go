@@ -101,6 +101,7 @@ func TestConstructorsHonourInsecure(t *testing.T) {
 	fqdn := strings.TrimPrefix(server.URL, "https://")
 
 	t.Run("NewAuthClient rejects self-signed by default", func(t *testing.T) {
+		recordSleeps(t) // a certificate error is a transport error, so it is retried
 		_, err := NewAuthClient(fqdn, "client-token", false).GetToken("user", "pass")
 		if err == nil || !strings.Contains(err.Error(), "certificate") {
 			t.Errorf("expected a certificate error, got %v", err)
