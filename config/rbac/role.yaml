@@ -58,6 +58,19 @@ rules:
   - list
   - watch
 - apiGroups:
+  - cluster.x-k8s.io
+  resources:
+  - machinedeployments
+  - machinesets
+  verbs:
+  - get
+- apiGroups:
+  - controlplane.cluster.x-k8s.io
+  resources:
+  - kubeadmcontrolplanes
+  verbs:
+  - get
+- apiGroups:
   - infrastructure.cluster.x-k8s.io
   resources:
   - '*'

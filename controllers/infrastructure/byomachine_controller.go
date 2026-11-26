@@ -20,10 +20,13 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/selection"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/cluster-api/controllers/clustercache"
 	"sigs.k8s.io/cluster-api/controllers/external"
 	"sigs.k8s.io/cluster-api/util"
+	"sigs.k8s.io/cluster-api/util/collections"
+	v1beta2conditions "sigs.k8s.io/cluster-api/util/conditions"
 	conditions "sigs.k8s.io/cluster-api/util/conditions/deprecated/v1beta1"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/cluster-api/util/predicates"
@@ -72,6 +75,8 @@ type ByoMachineReconciler struct {
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=*,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters;machines,verbs=get;list;watch
 // +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines;machines/status,verbs=get;list;watch
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machinesets;machinedeployments,verbs=get
+// +kubebuilder:rbac:groups=controlplane.cluster.x-k8s.io,resources=kubeadmcontrolplanes,verbs=get
 // +kubebuilder:rbac:groups="",resources=events,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
@@ -650,29 +655,174 @@ func ByoHostToByoMachineMapFunc(gvk schema.GroupVersionKind) handler.MapFunc {
 	}
 }
 
+// hostDecision says whether a deleted Machine's ByoHost keeps its cluster
+// reservation label, so the Machine replacing it can reuse the host, or is
+// released from the cluster. reason is logged to show which signal decided.
+type hostDecision struct {
+	keep   bool
+	reason string
+}
+
+func keepHost(reason string) hostDecision    { return hostDecision{keep: true, reason: reason} }
+func releaseHost(reason string) hostDecision { return hostDecision{reason: reason} }
+
+const (
+	reasonClusterDeleting          = "ClusterDeleting"
+	reasonMachineDeploymentDeleted = "MachineDeploymentDeleted"
+	reasonNoControllingOwner       = "NoControllingOwner"
+	reasonOwnerDeleted             = "OwnerDeleted"
+	reasonOwnerScaledDown          = "OwnerScaledDown"
+	reasonRemediation              = "Remediation"
+	reasonNotUpToDate              = "NotUpToDate"
+	reasonOldMachineSetRevision    = "OldMachineSetRevision"
+	reasonOwnerReplicasUnset       = "OwnerReplicasUnset"
+	reasonReplacementCreated       = "ReplacementCreated"
+	reasonBelowDesiredReplicas     = "BelowDesiredReplicas"
+)
+
 func (r *ByoMachineReconciler) markHostForCleanup(ctx context.Context, machineScope *byoMachineScope) error {
 	logger := log.FromContext(ctx).WithValues("cluster", machineScope.Cluster.Name)
 	helper, _ := patch.NewHelper(machineScope.ByoHost, r.Client)
+
+	decision, err := r.decideHost(ctx, machineScope)
+	if err != nil {
+		return fmt.Errorf("failed to determine whether the machine is being replaced or released: %w", err)
+	}
 
 	if machineScope.ByoHost.Annotations == nil {
 		machineScope.ByoHost.Annotations = map[string]string{}
 	}
 	machineScope.ByoHost.Annotations[infrav1.HostCleanupAnnotation] = ""
 
-	// Debug: Log the value and presence of the upgrade-in-progress annotation
-	upgradeInProgress, ok := machineScope.ByoMachine.Annotations["barista.platform9.io/upgrade-in-progress"]
-	logger.Info("DEBUG: upgrade-in-progress annotation check", "value", upgradeInProgress, "present", ok)
-	// Improved logic: skip label removal only if annotation exists and is set to "true"
-	if ok && upgradeInProgress == "true" {
-		logger.Info("Upgrade in progress: skipping removal of pf9 cluster label from ByoHost %s", machineScope.ByoHost.Name)
+	if decision.keep {
+		logger.Info("Machine is being replaced, keeping cluster reservation label on ByoHost", "byohost", machineScope.ByoHost.Name, "reason", decision.reason)
 	} else {
-		logger.Info("Removing pf9 cluster label %s from ByoHost %s", infrav1.ClusterLabel, machineScope.ByoHost.Name)
+		logger.Info("Releasing ByoHost from cluster", "byohost", machineScope.ByoHost.Name, "reason", decision.reason)
 		delete(machineScope.ByoHost.Labels, infrav1.ClusterLabel)
 		delete(machineScope.ByoHost.Labels, infrav1.ClusterLabelCP)
 	}
 
-	// Issue the patch for byohost
 	return helper.Patch(ctx, machineScope.ByoHost)
+}
+
+// decideHost keeps the ByoHost's cluster reservation label when the Machine is
+// being deleted so that its owner can replace it (rollout, upgrade,
+// remediation, manual delete), and releases the host for a real release:
+// cluster or node pool deleted, owner scaled down, or no owner to recreate it.
+// It uses only CAPI state, never maxSurge or upgrade annotations. See KAAP-2639.
+func (r *ByoMachineReconciler) decideHost(ctx context.Context, machineScope *byoMachineScope) (hostDecision, error) {
+	machine := machineScope.Machine
+
+	if !machineScope.Cluster.DeletionTimestamp.IsZero() {
+		return releaseHost(reasonClusterDeleting), nil
+	}
+	var md *unstructured.Unstructured
+	if mdName, ok := machine.Labels[clusterv1.MachineDeploymentNameLabel]; ok {
+		var err error
+		md, err = r.getUnstructured(ctx, clusterv1.GroupVersion.WithKind("MachineDeployment"), machine.Namespace, mdName)
+		if apierrors.IsNotFound(err) {
+			return releaseHost(reasonMachineDeploymentDeleted), nil
+		}
+		if err != nil {
+			return hostDecision{}, err
+		}
+		if md.GetDeletionTimestamp() != nil {
+			return releaseHost(reasonMachineDeploymentDeleted), nil
+		}
+	}
+
+	if collections.IsUnhealthyAndOwnerRemediated(machine) {
+		return keepHost(reasonRemediation), nil
+	}
+	// Set by KCP and, for MachineDeployment workers, by the Machine controller
+	// on every Machine a rollout will replace, whatever the maxSurge.
+	if v1beta2conditions.IsFalse(machine, clusterv1.MachineUpToDateCondition) {
+		return keepHost(reasonNotUpToDate), nil
+	}
+	return r.decideFromOwner(ctx, machineScope, md)
+}
+
+// decideFromOwner checks whether the Machine's controlling owner (MachineSet
+// or control plane) will recreate it. md is the Machine's MachineDeployment,
+// or nil if it has none.
+func (r *ByoMachineReconciler) decideFromOwner(ctx context.Context, machineScope *byoMachineScope, md *unstructured.Unstructured) (hostDecision, error) {
+	machine := machineScope.Machine
+	ownerRef := metav1.GetControllerOf(machine)
+	if ownerRef == nil {
+		return releaseHost(reasonNoControllingOwner), nil
+	}
+	gv, err := schema.ParseGroupVersion(ownerRef.APIVersion)
+	if err != nil {
+		return hostDecision{}, err
+	}
+	owner, err := r.getUnstructured(ctx, gv.WithKind(ownerRef.Kind), machine.Namespace, ownerRef.Name)
+	if apierrors.IsNotFound(err) {
+		return releaseHost(reasonOwnerDeleted), nil
+	}
+	if err != nil {
+		return hostDecision{}, err
+	}
+	if owner.GetDeletionTimestamp() != nil {
+		return releaseHost(reasonOwnerDeleted), nil
+	}
+
+	// Backs up a stale UpToDate condition: a MachineSet whose revision is not
+	// the MachineDeployment's current one is being rolled out.
+	if md != nil && ownerRef.Kind == "MachineSet" {
+		msRevision := owner.GetAnnotations()[clusterv1.RevisionAnnotation]
+		mdRevision := md.GetAnnotations()[clusterv1.RevisionAnnotation]
+		if msRevision != "" && mdRevision != "" && msRevision != mdRevision {
+			return keepHost(reasonOldMachineSetRevision), nil
+		}
+	}
+
+	replicas, found, err := unstructured.NestedInt64(owner.Object, "spec", "replicas")
+	if err != nil {
+		return hostDecision{}, err
+	}
+	if !found {
+		return keepHost(reasonOwnerReplicasUnset), nil
+	}
+	return r.decideFromSiblings(ctx, machineScope, ownerRef.UID, replicas)
+}
+
+// decideFromSiblings tells an owner replacing the Machine apart from one that
+// scaled down. A scale-down lowers replicas before deleting and never creates
+// a Machine, so a sibling created after this delete started, or fewer live
+// Machines than desired, means a replacement.
+func (r *ByoMachineReconciler) decideFromSiblings(ctx context.Context, machineScope *byoMachineScope, ownerUID types.UID, replicas int64) (hostDecision, error) {
+	machine := machineScope.Machine
+	machines := &clusterv1.MachineList{}
+	if err := r.List(ctx, machines, client.InNamespace(machine.Namespace), client.MatchingLabels{clusterv1.ClusterNameLabel: machineScope.Cluster.Name}); err != nil {
+		return hostDecision{}, err
+	}
+	var alive int64
+	for i := range machines.Items {
+		m := &machines.Items[i]
+		if controller := metav1.GetControllerOf(m); controller == nil || controller.UID != ownerUID {
+			continue
+		}
+		if !m.DeletionTimestamp.IsZero() {
+			continue
+		}
+		if machine.DeletionTimestamp != nil && m.CreationTimestamp.After(machine.DeletionTimestamp.Time) {
+			return keepHost(reasonReplacementCreated), nil
+		}
+		alive++
+	}
+	if alive < replicas {
+		return keepHost(reasonBelowDesiredReplicas), nil
+	}
+	return releaseHost(reasonOwnerScaledDown), nil
+}
+
+func (r *ByoMachineReconciler) getUnstructured(ctx context.Context, gvk schema.GroupVersionKind, namespace, name string) (*unstructured.Unstructured, error) {
+	obj := &unstructured.Unstructured{}
+	obj.SetGroupVersionKind(gvk)
+	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, obj); err != nil {
+		return nil, err
+	}
+	return obj, nil
 }
 
 func (r *ByoMachineReconciler) getInstallerConfig(ctx context.Context, byoMachine *infrav1.ByoMachine) (*unstructured.Unstructured, error) {
