@@ -58,7 +58,7 @@ GINKGO := go tool ginkgo
 
 BYOH_TEMPLATES := $(REPO_ROOT)/test/e2e/data/infrastructure-provider-byoh
 
-LDFLAGS := -w -s $(shell hack/version.sh)
+LDFLAGS := -w -s $(shell GIT_VERSION=$(GIT_VERSION) hack/version.sh)
 STATIC=-extldflags '-static'
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
