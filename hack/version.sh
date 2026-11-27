@@ -14,10 +14,18 @@ version::get_version_vars() {
         GIT_TREE_STATE="dirty"
     fi
 
+    # A GIT_VERSION from the caller (the Makefile passes `make tag`, which is
+    # also the agent bundle's tag) is used as is, so the agent reports the
+    # same version its bundle is tagged with.
+    if [[ -n ${GIT_VERSION-} ]]; then
+        if [[ "${GIT_VERSION}" =~ ^v([0-9]+)\.([0-9]+) ]]; then
+            GIT_MAJOR=${BASH_REMATCH[1]}
+            GIT_MINOR=${BASH_REMATCH[2]}
+        fi
     # stolen from sigs.k8s.io/cluster-api/hack/version.sh
     # Use git describe to find the version based on annotated tags.
     # TODO: is '--tags' flag required?
-    if [[ -n ${GIT_VERSION-} ]] || GIT_VERSION=$(git describe --tags --abbrev=14 --match "v[0-9]*" 2>/dev/null); then
+    elif GIT_VERSION=$(git describe --tags --abbrev=14 --match "v[0-9]*" 2>/dev/null); then
         # This translates the "git describe" to an actual semver.org
         # compatible semantic version that looks something like this:
         #   v1.1.0-alpha.0.6+84c76d1142ea4d
@@ -50,13 +58,13 @@ version::get_version_vars() {
             GIT_MAJOR=${BASH_REMATCH[1]}
             GIT_MINOR=${BASH_REMATCH[2]}
         fi
+    fi
 
-        # If GIT_VERSION is not a valid Semantic Version, then refuse to build.
-        if ! [[ "${GIT_VERSION}" =~ ^v([0-9]+)\.([0-9]+)(\.[0-9]+)?(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
-            echo "GIT_VERSION should be a valid Semantic Version. Current value: ${GIT_VERSION}"
-            echo "Please see more details here: https://semver.org"
-            exit 1
-        fi
+    # If GIT_VERSION is not a valid Semantic Version, then refuse to build.
+    if [[ -n ${GIT_VERSION-} ]] && ! [[ "${GIT_VERSION}" =~ ^v([0-9]+)\.([0-9]+)(\.[0-9]+)?(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+        echo "GIT_VERSION should be a valid Semantic Version. Current value: ${GIT_VERSION}"
+        echo "Please see more details here: https://semver.org"
+        exit 1
     fi
 
     GIT_RELEASE_TAG=$(git describe --abbrev=0 --tags)
