@@ -32,6 +32,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+        with:
+          # hack/version.sh needs the tags to set the agent version.
+          fetch-depth: 0
       - name: build host agent binary
         run: make host-agent-binaries
       - name: Upload agent binary artifact

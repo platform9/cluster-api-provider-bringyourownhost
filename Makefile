@@ -397,16 +397,23 @@ host-agent-binaries: ## Builds the binaries for the host-agent
 	RELEASE_BINARY=./byoh-hostagent GOOS=linux GOARCH=amd64 GOLDFLAGS="$(LDFLAGS) $(STATIC)" \
 	HOST_AGENT_DIR=./$(HOST_AGENT_DIR) $(MAKE) host-agent-binary
 
+# Fails the build when hack/version.sh printed nothing (e.g. a shallow clone
+# with no tags): $(shell) hides its exit status, and an agent without a version
+# can never converge on a ByoHostAgentUpgrade.
+CHECK_AGENT_VERSION = $(if $(findstring GitVersion=v,$(GOLDFLAGS)),,$(error agent version is empty: hack/version.sh failed, check that git tags are fetched))
+
 host-agent-binary: $(RELEASE_DIR)
 ifdef SKIP_BUILD
 	@echo "SKIP_BUILD set; skipping host-agent binary build"
 else ifdef LINUX_VM
+	$(CHECK_AGENT_VERSION)
 	# Already running inside the *-linux-vm wrapper container.
 	# Nested call would need a bind-mount source
 	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) \
 	go build -buildvcs=false -a -ldflags "$(GOLDFLAGS)" \
 	-o ./bin/$(notdir $(RELEASE_BINARY))-$(GOOS)-$(GOARCH) $(HOST_AGENT_DIR)
 else
+	$(CHECK_AGENT_VERSION)
 	docker run \
 		--rm \
 		--user "$$(id -u):$$(id -g)" \
