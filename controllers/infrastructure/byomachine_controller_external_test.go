@@ -361,6 +361,25 @@ var _ = Describe("Controllers/ByomachineController", func() {
 
 				})
 
+				It("should restore the machine reference when status was dropped (clusterctl move)", func() {
+					ph, err := patch.NewHelper(byoHost, k8sClientUncached)
+					Expect(err).ShouldNot(HaveOccurred())
+					byoHost.Status.MachineRef = nil
+					Expect(ph.Patch(ctx, byoHost, patch.WithStatusObservedGeneration{})).Should(Succeed())
+					WaitForObjectToBeUpdatedInCache(ctx, byoHost, func(object client.Object) bool {
+						return object.(*infrastructurev1beta1.ByoHost).Status.MachineRef == nil
+					})
+
+					_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: byoMachineLookupKey})
+					Expect(err).ToNot(HaveOccurred())
+
+					createdByoHost := &infrastructurev1beta1.ByoHost{}
+					Expect(k8sClientUncached.Get(ctx, byoHostLookupKey, createdByoHost)).To(Succeed())
+					Expect(createdByoHost.Status.MachineRef).NotTo(BeNil())
+					Expect(createdByoHost.Status.MachineRef.Name).To(Equal(byoMachine.Name))
+					Expect(createdByoHost.Status.MachineRef.UID).To(Equal(byoMachine.UID))
+				})
+
 				It("should set host platform info from byohost to byomachine", func() {
 					ph, err := patch.NewHelper(byoHost, k8sClientUncached)
 					Expect(err).ShouldNot(HaveOccurred())
@@ -468,6 +487,11 @@ var _ = Describe("Controllers/ByomachineController", func() {
 						res, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: byoMachineLookupKey})
 						Expect(err).NotTo(HaveOccurred())
 						Expect(res.RequeueAfter).To(Equal(controllers.RequeueInstallerConfigTime))
+
+						createdByoMachine := &infrastructurev1beta1.ByoMachine{}
+						Expect(k8sClientUncached.Get(ctx, byoMachineLookupKey, createdByoMachine)).To(Succeed())
+						Expect(conditions.GetReason(createdByoMachine, infrastructurev1beta1.BYOHostReady)).
+							To(Equal(infrastructurev1beta1.InstallationSecretNotAvailableReason))
 					})
 
 					It("should patch byohost if installer config is ready", func() {

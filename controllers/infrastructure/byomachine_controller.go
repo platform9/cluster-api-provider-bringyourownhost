@@ -247,8 +247,8 @@ func (r *ByoMachineReconciler) reconcileNormal(ctx context.Context, machineScope
 
 	if machineScope.ByoHost != nil {
 		// if there is already byohost associated with it, make sure the paused status of byohost is false
-		if err := r.setPausedConditionForByoHost(ctx, machineScope, false); err != nil {
-			logger.Error(err, "Set resume flag for byohost failed")
+		if err := r.resumeByoHost(ctx, machineScope); err != nil {
+			logger.Error(err, "Resume byohost failed")
 			return ctrl.Result{}, err
 		}
 	}
@@ -470,6 +470,33 @@ func (r *ByoMachineReconciler) setPausedConditionForByoHost(ctx context.Context,
 	return helper.Patch(ctx, machineScope.ByoHost)
 }
 
+func (r *ByoMachineReconciler) resumeByoHost(ctx context.Context, machineScope *byoMachineScope) error {
+	if err := r.setPausedConditionForByoHost(ctx, machineScope, false); err != nil {
+		return err
+	}
+	return r.restoreMachineRef(ctx, machineScope)
+}
+
+// restoreMachineRef sets status.machineRef again after clusterctl move dropped it
+func (r *ByoMachineReconciler) restoreMachineRef(ctx context.Context, machineScope *byoMachineScope) error {
+	if machineScope.ByoHost.Status.MachineRef != nil {
+		return nil
+	}
+	helper, err := patch.NewHelper(machineScope.ByoHost, r.Client)
+	if err != nil {
+		return err
+	}
+	machineScope.ByoHost.Status.MachineRef = &corev1.ObjectReference{
+		APIVersion: machineScope.ByoMachine.APIVersion,
+		Kind:       machineScope.ByoMachine.Kind,
+		Namespace:  machineScope.ByoMachine.Namespace,
+		Name:       machineScope.ByoMachine.Name,
+		UID:        machineScope.ByoMachine.UID,
+	}
+	log.FromContext(ctx).Info("Restored machine reference on byohost", "byohost", machineScope.ByoHost.Name)
+	return helper.Patch(ctx, machineScope.ByoHost)
+}
+
 func (r *ByoMachineReconciler) getInstallerConfigAndHelper(ctx context.Context, machineScope *byoMachineScope) (*unstructured.Unstructured, *patch.Helper, ctrl.Result, error) {
 	logger := log.FromContext(ctx).WithValues("cluster", machineScope.Cluster.Name)
 	installerConfig, ready, err := r.getInstallerConfigAndStatus(ctx, machineScope)
@@ -478,6 +505,8 @@ func (r *ByoMachineReconciler) getInstallerConfigAndHelper(ctx context.Context, 
 	}
 	if !ready {
 		logger.Info("Installer config is not ready, requeuing")
+		// installer config controller waits for this reason, after a move nothing else sets it
+		conditions.MarkFalse(machineScope.ByoMachine, infrav1.BYOHostReady, infrav1.InstallationSecretNotAvailableReason, clusterv1.ConditionSeverityInfo, "")
 		return installerConfig, nil, ctrl.Result{RequeueAfter: RequeueInstallerConfigTime}, nil
 	}
 

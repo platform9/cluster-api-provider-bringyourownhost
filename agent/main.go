@@ -237,6 +237,22 @@ func setupHostReconciler(ctx context.Context, mgr ctrl.Manager, k8sClient client
 	return nil
 }
 
+// bootstrapHost runs the bootstrap flow, reusing the identity left by `byohctl rehome` if any.
+func bootstrapHost(ctx context.Context, logger logr.Logger, tenantNamespace, normalizedHostName string) error {
+	stateDir := filepath.Dir(registration.GetBYOHConfigPath())
+	rehomeIdentity, err := registration.ReadRehomeIdentity(stateDir, tenantNamespace, normalizedHostName)
+	if err != nil {
+		return err
+	}
+	if rehomeIdentity != "" {
+		logger.Info("rehoming with the existing identity", "identity", rehomeIdentity)
+	}
+	if err := handleBootstrapFlow(ctx, logger, tenantNamespace, normalizedHostName, rehomeIdentity); err != nil {
+		return err
+	}
+	return registration.RemoveRehomeIdentity(stateDir)
+}
+
 // handleBootstrapFlow requests a client certificate for the host in
 // tenantNamespace. A non-empty existingIdentity keeps the identity of a host
 // that renews its certificate.
@@ -405,7 +421,7 @@ func main() {
 	// Enable bootstrap flow if --bootstrap-kubeconfig is provided
 	// and config doesn't already exists in ~/.byoh/
 	if bootstrapKubeConfig != "" && errors.Is(err, os.ErrNotExist) {
-		if err = handleBootstrapFlow(ctx, logger, namespace, normalizedHostName, ""); err != nil {
+		if err = bootstrapHost(ctx, logger, namespace, normalizedHostName); err != nil {
 			logger.Error(err, "bootstrap flow failed")
 			os.Exit(1)
 		}

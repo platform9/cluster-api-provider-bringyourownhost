@@ -917,3 +917,60 @@ func TestByoHostValidator_Handle_storedIdentity(t *testing.T) {
 		})
 	}
 }
+
+func TestByoHostWebhooks_clusterAdmin(t *testing.T) {
+	const adminUser = "kubernetes-admin"
+	adminGroups := []string{clusterAdminGroup, "system:authenticated"}
+
+	scheme := runtime.NewScheme()
+	require.NoError(t, AddToScheme(scheme))
+	decoder := admission.NewDecoder(scheme)
+
+	request := func(op admissionv1.Operation, groups []string) admission.Request {
+		host := &ByoHost{
+			TypeMeta:   metav1.TypeMeta{Kind: testByoHostKind, APIVersion: testAPIVersion},
+			ObjectMeta: metav1.ObjectMeta{Name: defaultHostName, Namespace: testNamespace},
+			Spec:       ByoHostSpec{Identity: byohHostOneUser},
+		}
+		raw, err := json.Marshal(host)
+		require.NoError(t, err)
+		req := admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: op,
+			Namespace: testNamespace,
+			UserInfo:  v1.UserInfo{Username: adminUser, Groups: groups},
+			Object:    runtime.RawExtension{Raw: raw, Object: host},
+		}}
+		if op == admissionv1.Update {
+			req.OldObject = runtime.RawExtension{Raw: raw}
+		}
+		return req
+	}
+
+	t.Run("validator allows create and update from system:masters", func(t *testing.T) {
+		v := newFakeByoHostValidator(t, nil)
+		for _, op := range []admissionv1.Operation{admissionv1.Create, admissionv1.Update} {
+			assert.True(t, v.Handle(t.Context(), request(op, adminGroups)).Allowed, op)
+		}
+	})
+
+	t.Run("validator still denies the same user without system:masters", func(t *testing.T) {
+		v := newFakeByoHostValidator(t, nil)
+		resp := v.Handle(t.Context(), request(admissionv1.Create, []string{"system:authenticated"}))
+		assert.False(t, resp.Allowed)
+	})
+
+	t.Run("stamper keeps the identity a cluster admin sends", func(t *testing.T) {
+		s := &ByoHostIdentityStamper{Decoder: decoder}
+		resp := s.Handle(t.Context(), request(admissionv1.Create, adminGroups))
+		assert.True(t, resp.Allowed)
+		assert.Empty(t, resp.Patches)
+	})
+
+	t.Run("stamper still clears the identity from other non-host users", func(t *testing.T) {
+		s := &ByoHostIdentityStamper{Decoder: decoder}
+		resp := s.Handle(t.Context(), request(admissionv1.Create, []string{"system:authenticated"}))
+		assert.True(t, resp.Allowed)
+		require.Len(t, resp.Patches, 1)
+		assert.Equal(t, "/spec/identity", resp.Patches[0].Path)
+	})
+}

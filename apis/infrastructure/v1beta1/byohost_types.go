@@ -19,6 +19,10 @@ const (
 	K8sVersionAnnotation = "byoh.infrastructure.cluster.x-k8s.io/k8sversion"
 	// AttachedByoMachineLabel label used to mark a node name attached to a byo host
 	AttachedByoMachineLabel = "byoh.infrastructure.cluster.x-k8s.io/byomachine-name"
+	// K8sInstalledForAnnotation names the machine k8s was installed for, it survives clusterctl move
+	K8sInstalledForAnnotation = "byoh.infrastructure.cluster.x-k8s.io/k8s-installed-for"
+	// K8sBootstrappedForAnnotation names the machine the node was bootstrapped for
+	K8sBootstrappedForAnnotation = "byoh.infrastructure.cluster.x-k8s.io/k8s-bootstrapped-for"
 	// HostArchitectureLabel mirrors Status.HostDetails.Architecture onto
 	// Labels so it is selectable — label selectors cannot match on status
 	// fields.
@@ -184,6 +188,7 @@ type ByoHostStatus struct {
 //+kubebuilder:object:root=true
 //+kubebuilder:resource:path=byohosts,scope=Namespaced,shortName=byoh
 //+kubebuilder:subresource:status
+//+kubebuilder:metadata:labels="clusterctl.cluster.x-k8s.io/move="
 //+kubebuilder:printcolumn:name="OSName",type="string",JSONPath=`.status.hostinfo.osname`
 //+kubebuilder:printcolumn:name="OSImage",type="string",JSONPath=`.status.hostinfo.osimage`
 //+kubebuilder:printcolumn:name="Arch",type="string",JSONPath=`.status.hostinfo.architecture`

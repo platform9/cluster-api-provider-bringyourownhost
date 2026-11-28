@@ -123,6 +123,10 @@ func (r *HostReconciler) reconcileNormal(ctx context.Context, byoHost *infrastru
 	logger = logger.WithValues("ByoHost", byoHost.Name)
 	logger.Info("reconcile normal")
 
+	// clusterctl move drops status, so restore the install conditions first
+	syncInstallAnnotations(byoHost)
+	defer syncInstallAnnotations(byoHost)
+
 	// NOTE: written using the agent's own (host) clock. The management
 	// controller no longer compares this directly against its own clock for
 	// liveness -- unsafe under host/management clock skew, see ADR 0001
@@ -449,6 +453,9 @@ func (r *HostReconciler) hostCleanUp(ctx context.Context, byoHost *infrastructur
 	logger := ctrl.LoggerFrom(ctx)
 	logger.Info("cleaning up host")
 
+	// restore conditions after a move, otherwise kubeadm reset is skipped
+	syncInstallAnnotations(byoHost)
+
 	// Guard kubeadm reset behind the installation condition — only run if k8s was installed.
 	// MarkFalse immediately after reset so retries skip reset and only retry the uninstall script.
 	k8sComponentsInstallationSucceeded := conditions.Get(byoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded)
@@ -458,6 +465,8 @@ func (r *HostReconciler) hostCleanUp(ctx context.Context, byoHost *infrastructur
 			return err
 		}
 		conditions.MarkFalse(byoHost, infrastructurev1beta1.K8sComponentsInstallationSucceeded, infrastructurev1beta1.K8sNodeAbsentReason, clusterv1.ConditionSeverityInfo, "")
+		// so a retry doesn't restore the condition and reset again
+		delete(byoHost.Annotations, infrastructurev1beta1.K8sInstalledForAnnotation)
 	} else {
 		logger.Info("Skipping k8s node reset")
 	}
@@ -585,6 +594,10 @@ func (r *HostReconciler) removeAnnotations(ctx context.Context, byoHost *infrast
 	// Remove the EndPointIP annotation
 	delete(byoHost.Annotations, infrastructurev1beta1.EndPointIPAnnotation)
 
+	// Remove the install annotations
+	delete(byoHost.Annotations, infrastructurev1beta1.K8sInstalledForAnnotation)
+	delete(byoHost.Annotations, infrastructurev1beta1.K8sBootstrappedForAnnotation)
+
 	// Remove the cleanup annotation
 	delete(byoHost.Annotations, infrastructurev1beta1.HostCleanupAnnotation)
 
@@ -593,4 +606,33 @@ func (r *HostReconciler) removeAnnotations(ctx context.Context, byoHost *infrast
 
 	// Remove the bundle registry annotation
 	delete(byoHost.Annotations, infrastructurev1beta1.BundleLookupBaseRegistryAnnotation)
+}
+
+var installAnnotations = []struct {
+	condition  clusterv1.ConditionType
+	annotation string
+}{
+	{infrastructurev1beta1.K8sComponentsInstallationSucceeded, infrastructurev1beta1.K8sInstalledForAnnotation},
+	{infrastructurev1beta1.K8sNodeBootstrapSucceeded, infrastructurev1beta1.K8sBootstrappedForAnnotation},
+}
+
+// syncInstallAnnotations copies true install conditions to annotations, and sets
+// them true again when the annotation matches the attached machine. Not only when
+// missing: right after a move the agent marks bootstrap false while machineRef is unset.
+func syncInstallAnnotations(byoHost *infrastructurev1beta1.ByoHost) {
+	machine := byoHost.Labels[infrastructurev1beta1.AttachedByoMachineLabel]
+	if machine == "" {
+		return
+	}
+	for _, a := range installAnnotations {
+		switch {
+		case conditions.IsTrue(byoHost, a.condition):
+			if byoHost.Annotations == nil {
+				byoHost.Annotations = map[string]string{}
+			}
+			byoHost.Annotations[a.annotation] = machine
+		case byoHost.Annotations[a.annotation] == machine:
+			conditions.MarkTrue(byoHost, a.condition)
+		}
+	}
 }

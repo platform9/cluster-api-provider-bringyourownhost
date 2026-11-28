@@ -8,6 +8,7 @@ metadata:
   labels:
     cluster.x-k8s.io/provider: infrastructure-byoh
     cluster.x-k8s.io/v1beta1: v1beta1
+    clusterctl.cluster.x-k8s.io/move: ""
   name: byohosts.infrastructure.cluster.x-k8s.io
 spec:
   conversion:
@@ -1641,6 +1642,7 @@ metadata:
   labels:
     cluster.x-k8s.io/provider: infrastructure-byoh
     cluster.x-k8s.io/v1beta1: v1beta1
+    clusterctl.cluster.x-k8s.io/move: ""
   name: k8sinstallerconfigtemplates.infrastructure.cluster.x-k8s.io
 spec:
   group: infrastructure.cluster.x-k8s.io
