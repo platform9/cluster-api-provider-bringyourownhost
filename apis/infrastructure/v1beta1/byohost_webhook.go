@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 
 	v1 "k8s.io/api/admission/v1"
@@ -42,6 +43,9 @@ var managerServiceAccounts = map[string]struct{}{
 	byohSystemManagerServiceAccount: struct{}{},
 }
 
+// clusterctl move runs as cluster admin, which can approve any CSR anyway
+const clusterAdminGroup = "system:masters"
+
 // Precompile email-like regex for efficiency. It matches "user@example.com" and
 // the "<du>:user@example.com" format given to PCD-K users by oidc-proxy
 var emailLikeUserRegex = regexp.MustCompile(`^([a-zA-Z0-9.-]+:)?[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
@@ -71,6 +75,10 @@ func (v *ByoHostValidator) handleCreateUpdate(req *admission.Request) admission.
 	userName := req.UserInfo.Username
 	// allow manager service account to patch ByoHost
 	if _, ok := managerServiceAccounts[userName]; ok {
+		return admission.Allowed("")
+	}
+	// clusterctl move runs as cluster admin
+	if slices.Contains(req.UserInfo.Groups, clusterAdminGroup) {
 		return admission.Allowed("")
 	}
 
@@ -214,6 +222,10 @@ func (s *ByoHostIdentityStamper) Handle(_ context.Context, req admission.Request
 	// plant an identity of its own, because renewal is authorized against it.
 	if _, err := identity.Parse(req.UserInfo.Username); err != nil {
 		if byoHost.Spec.Identity == "" {
+			return admission.Allowed("")
+		}
+		// keep the identity on clusterctl move, the agent needs it
+		if slices.Contains(req.UserInfo.Groups, clusterAdminGroup) {
 			return admission.Allowed("")
 		}
 

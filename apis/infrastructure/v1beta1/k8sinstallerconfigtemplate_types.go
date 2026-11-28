@@ -18,6 +18,7 @@ type K8sInstallerConfigTemplateStatus struct {
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+//+kubebuilder:metadata:labels="clusterctl.cluster.x-k8s.io/move="
 
 // K8sInstallerConfigTemplate is the Schema for the k8sinstallerconfigtemplates API
 type K8sInstallerConfigTemplate struct {
